@@ -60,6 +60,23 @@ export const Fetch_AI_Models = (cb) => {
 
 function _BuildServerPackages(_cb){
 
+function _BuildServerPackages(_cb){
+  const packages = [
+    { name: 'node-server', globs: ['node/**', 'package.json', 'package-lock.json'] },
+    { name: 'web-ui', globs: ['index.html', 'assets/**', 'src/**', 'styles/**', 'webassets/**'] },
+    { name: 'php-server', globs: ['php/**', 'aspx/**'] }
+  ];
+
+  // ensure dist exists
+  if (!existsSync('dist')) mkdirSync('dist');
+
+  const streams = packages.map(p => {
+    return gulp.src(p.globs, { base: '.', dot: true, allowEmpty: true })
+      .pipe(zip(`${p.name}.zip`))
+      .pipe(gulp.dest('dist'));
+  });
+
+  return merge2(streams);
 }
 
 export const Build_Server_Packages2 = gulp.series(

@@ -4,7 +4,8 @@
     "packages/*"
   ],
   "scripts": {
-    "gulp": "gulp"
+    "gulp": "gulp",
+    "build-server-packages": "gulp Build_Server_Packages2"
   },
   "dependencies": {
     "body-parser": "^2.2.1",
