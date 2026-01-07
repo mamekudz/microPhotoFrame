@@ -63,3 +63,4 @@ testimgs
 .pio
 .editorconfig
 .vscode
+firmware/backups
