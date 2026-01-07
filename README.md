@@ -1,13 +1,11 @@
-<center>
-  <img src="assets/imgs/Logo.png" alt="microPhotoFrameLogo" width="200">
-  <br>
-  <img src="assets/imgs/LogoText.png" alt="microPhotoFrameLogoText" width="300">
-</center>
-<br><br>
 
-# µPhotoFrame - WiFi-based E-Ink Photo Frame for reTerminal
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Repo Size](https://img.shields.io/github/repo-size/mamekudz/microPhotoFrame)](https://github.com/mamekudz/microPhotoFrame)
 
-**An intelligent, remote-controlled photo frame firmware for reTerminal E1001 (Grayscale) & E1002 (Full Color)**
+# µPhotoFrame — WiFi E-Ink Photo Frame for reTerminal
+
+![microPhotoFrame](assets/imgs/LogoText.png)
+
+An intelligent, remote-controlled photo frame firmware and server app for reTerminal E1001 (Grayscale) and E1002 (Full Color). This repo contains firmware, server scripts, web UI and tooling to prepare optimized `.ink` images for low-power E-Ink displays.
 
 ---
 
