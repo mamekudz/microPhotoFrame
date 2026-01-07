@@ -1,0 +1,32 @@
+{
+	"servers": [
+		{
+			"server1": {
+				"system": "iis",
+				"host": "https://192.168.0.100:999",
+				"path": "/server1_1234",
+				"lat": 49.35,
+				"lon": 8.65,
+				"gmt": 3600,
+				"HOUR24": true,
+				"OPENWEATHERURL": "",
+				"NTP_URL": "pool.ntp.org"
+			}
+		},
+		{
+			"server2": {
+				"system": "php",
+				"host": "https://192.168.0.100:998",
+				"path": "/server2_1234",
+				"lat": 49.35,
+				"lon": 8.65,
+				"gmt": 3600,
+				"HOUR24": true,
+				"OPENWEATHERURL": "",
+				"NTP_URL": "pool.ntp.org"
+			}
+		}
+	]
+
+
+}

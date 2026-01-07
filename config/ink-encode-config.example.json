@@ -1,0 +1,11 @@
+{
+  "displayId": "9",
+  "dither": "floyd",
+  "orientation": 0,
+  "colorAdjust": {
+    "saturation": 1.8,
+    "contrast": 1.4,
+    "blackPoint": 1.0,
+    "whitePoint": 1.1
+  }
+}

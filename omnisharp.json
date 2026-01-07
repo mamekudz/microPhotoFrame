@@ -1,0 +1,23 @@
+{
+  "FormattingOptions": {
+    "NewLinesForBracesInControlFlowStatements": false,
+    "NewLinesForBracesInMethods": false,
+    "NewLinesForBracesInProperties": false,
+    "NewLinesForBracesInAccessors": false,
+    "NewLinesForBracesInAnonymousMethods": false,
+    "NewLinesForBracesInLambdaExpressionBody": false,
+    "NewLinesForBracesInObjectCollectionArrayInitializers": false,
+    "NewLinesForBracesInTypes": false,
+    "NewLinesForBracesInAnonymousTypes": false,
+    "NewLinesForBracesInObjectInitializers": false,
+    "NewLineBeforeElse": false,
+    "NewLineBeforeCatch": false,
+    "NewLineBeforeFinally": false,
+    "NewLineBeforeOpenBrace": false,
+    "NewLineBeforeMembersInObjectInit": false,
+    "NewLineBeforeMembersInAnonymousTypes": false,
+    "NewLineBeforeClosingBraceInObjectInit": false,
+    "NewLineBeforeClosingBraceInAnonymousTypes": false
+  }
+}
+

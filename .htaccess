@@ -1,0 +1,102 @@
+# =========================================
+# .htaccess for microPhotoFrame PHP Server
+# Apache configuration - mirrors IIS web.config logic exactly
+# =========================================
+
+# Increase upload limits
+php_value upload_max_filesize 500M
+php_value post_max_size 500M
+php_value max_execution_time 3600
+php_value memory_limit 512M
+
+# Disable caching for dynamic content
+<IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+    Header set X-UA-Compatible "IE=edge"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-Content-Type-Options "nosniff"
+    Header unset X-Powered-By
+</IfModule>
+
+# Enable rewrite engine (only if mod_rewrite is loaded)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    
+    # =========================================
+    # Rule 1: Static files - serve directly (like IIS Rule 1a, 1b, 1c)
+    # These rules MUST come first and stop processing (L flag)
+    # =========================================
+    
+    # Rule 1a: favicon.ico - serve directly
+    RewriteCond %{REQUEST_URI} favicon\.ico$ [NC]
+    RewriteRule ^(.*)$ - [L]
+    
+    # Rule 1b: Files in models directory - serve directly
+    RewriteCond %{REQUEST_URI} /models/ [NC]
+    RewriteRule ^(.*)$ - [L]
+    
+    # Rule 1c: Static file extensions - serve directly
+    RewriteCond %{REQUEST_URI} \.(ink|json|png|jpg|jpeg|gif|svg|css|js|mjs|woff|woff2|ttf|eot|ico|webp|cur)$ [NC]
+    RewriteRule ^(.*)$ - [L]
+    
+    # =========================================
+    # Rule 2: URLs with query string (?) - rewrite to PHP handler
+    # This mirrors IIS Rule 2: "AppAction"
+    # CRITICAL: These rules must execute BEFORE Apache serves index.html
+    # We explicitly check for query strings and route to PHP, even if index.html exists
+    # =========================================
+    
+    # Rule 2a: Root URL (/) with query string - route to PHP handler
+    # This catches requests like "/?action=getShows" BEFORE Apache serves index.html
+    RewriteCond %{QUERY_STRING} .+ [NC]
+    RewriteCond %{REQUEST_URI} ^/?$ [NC]
+    RewriteRule ^(.*)$ php/microPhotoFrame.php [L,QSA]
+    
+    # Rule 2b: index.html with query string - route to PHP handler
+    # This catches requests like "/index.html?action=getShows" BEFORE Apache serves index.html
+    RewriteCond %{QUERY_STRING} .+ [NC]
+    RewriteCond %{REQUEST_URI} ^/?index\.html$ [NC]
+    RewriteRule ^(.*)$ php/microPhotoFrame.php [L,QSA]
+    
+    # Rule 2c: Other URLs with query string - route to PHP handler
+    # This catches all other requests with query strings that aren't static files
+    RewriteCond %{QUERY_STRING} .+ [NC]
+    RewriteCond %{REQUEST_URI} !^/?$ [NC]
+    RewriteCond %{REQUEST_URI} !^/?index\.html$ [NC]
+    RewriteCond %{REQUEST_URI} !\.(ink|json|png|jpg|jpeg|gif|svg|css|js|woff|woff2|ttf|eot|ico|webp|cur|mjs)$ [NC]
+    RewriteCond %{REQUEST_URI} !^/php/microPhotoFrame\.php [NC]
+    RewriteCond %{REQUEST_URI} !^/models/ [NC]
+    RewriteCond %{REQUEST_URI} !favicon\.ico$ [NC]
+    RewriteRule ^(.*)$ php/microPhotoFrame.php [L,QSA]
+    
+    # =========================================
+    # Rule 3: All other URLs - rewrite to index.html
+    # This mirrors IIS Rule 3: "AppHTML"
+    # Conditions:
+    # - Must NOT be a file (IsFile negate)
+    # - Must NOT be a directory (IsDirectory negate)
+    # =========================================
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.html [L]
+</IfModule>
+
+# MIME types
+AddType application/json .json
+AddType application/javascript .mjs .js
+AddType text/javascript .mjs .js
+AddType application/octet-stream .ink
+AddType audio/ogg .ogg
+AddType image/jp2 .jp2
+AddType text/cache-manifest .appcache
+
+# Security: Prevent directory listing
+Options -Indexes
+
+# Security: Prevent access to sensitive files (Apache 2.4 syntax)
+<FilesMatch "\.(htaccess|htpasswd|ini|log|sh|sql|bak)$">
+    Require all denied
+</FilesMatch>

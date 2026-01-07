@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>µPhotoFrame</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./styles/app.css">
+
+    <!-- TensorFlow.js Version 3.11.0 -->
+    <script src="./src/libs/tf.min.js"></script>
+    <script src="./src/libs/tf-backend-cpu.min.js"></script>
+    <script src="./src/libs/tf-backend-webgl.min.js"></script>
+    <script src="./src/libs/cocossd.min.js"></script>
+
+
+</head>
+
+<body>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Initializing µPhotoFrame...</div>
+        <div class="loading-text" style="font-size: 0.9rem; margin-top: 10px; opacity: 0.8;">Please wait while the application starts</div>
+    </div>
+
+    <header class="global-header">
+        <div class="header-top">
+            <div class="header-logo">
+                <img src="./webassets/Logo.png" alt="Logo" />
+                <img src="./webassets/LogoText.png" alt="microPhotoFrame" />
+            </div>
+            <div class="header-select">
+                <label for="globalShowSelect">Available Shows:</label>
+                <select id="globalShowSelect" onchange="window.UpdatePageTitleIfNeeded(); if(window.UpdatePhotoActionButtons) window.UpdatePhotoActionButtons(); if(window.UpdateButtonStates) window.UpdateButtonStates(); if(window.UpdateActivateShowButton) window.UpdateActivateShowButton(); if(window.saveLastSelectedShow) window.saveLastSelectedShow(this.value); window.PreserveActiveShowStyles(this); window.ReloadCurrentPageIfNeeded();">
+                    <option value="">-- Loading shows... --</option>
+                </select>
+            </div>
+        </div>
+        <span class="copyright">© 1986-2026 Meinolf Amekudzi</span>
+    </header>
+
+    <div id="TopMenu" class="page">
+        <div class="page-header">
+            <h2 class="page-title">Main Menu</h2>
+        </div>
+        <div class="menu-grid">
+            <button id="btnAddNewShow"></button><button id="btnDeleteShow"></button>
+            <button id="btnShowSettings"></button><button id="btnActivateShow"></button>
+            <button id="btnAddShowPhotos"></button><button id="btnManageShowPhotos"></button>
+            <button id="btnPhotoSettings"></button><button id="btnExportShow"></button>
+            <button id="btnImportShow"></button><button id="btnDevices"></button>
+        </div>
+    </div>
+
+    <div id="PhotoSettings" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title">Photo Settings</h2>
+        </div>
+
+        <div class="controls">
+            <button class="btn-action save-btn" id="photoSettingsFileBtn" onclick="document.getElementById('inputimg').click(); return false;">📄 Datei auswählen</button>
+            <input type="file" id="inputimg" accept="image/*" onchange="window.InputImageChange(event)" class="file-input-hidden" />
+            <div class="control-row"><label>Display:</label><select id="displayID" onchange="window.UpdateDisplay(); if(window.UpdatePhotoActionButtons) window.UpdatePhotoActionButtons();" style="flex:1"></select></div>
+            <div class="control-row"><label>Background:</label><input type="color" id="bgrdColor" value="#ffffff" oninput="window.UpdatePreview()" /></div>
+            <hr>
+            <div class="control-row"><label>Saturation:</label><input type="range" id="saturation" min="0" max="5" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-saturation">1.8</span></div>
+            <div class="control-row"><label>Contrast:</label><input type="range" id="contrast" min="0" max="5" step="0.1" value="1.4" oninput="window.UpdatePreview()" /><span id="val-contrast">1.4</span></div>
+            <div class="control-row"><label>Black Pt:</label><input type="range" id="blackpoint" min="0" max="5" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-blackpoint">1.8</span></div>
+            <div class="control-row"><label>White Pt:</label><input type="range" id="whitepoint" min="0" max="5" step="0.1" value="1.2" oninput="window.UpdatePreview()" /><span id="val-whitepoint">1.2</span></div>
+            <hr>
+            <div class="control-row"><label>Zoom:</label><input type="range" id="zoom" min="0.1" max="5" step="0.1" value="1.0" oninput="window.UpdatePreview()" /><span id="val-zoom">1.0</span></div>
+            <div class="control-row"><label>Spot X:</label><input type="range" id="cutSpotX" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotX">0.5</span></div>
+            <div class="control-row"><label>Spot Y:</label><input type="range" id="cutSpotY" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotY">0.5</span></div>
+
+            <button id="AutoSpotBtn" class="btn-action ai-btn" onclick="window.AutoDetectCenter()">AI Auto-Center</button>
+            <button class="btn-action reset-btn" onclick="window.ResetToDefault()">🔄 Reset to Default</button>
+
+            <hr>
+            <div class="control-row"><label>Dithering:</label>
+                <select id="dither" onchange="window.UpdatePreview()" style="flex:1">
+                    <option value="floyd">Floyd-Steinberg</option>
+                    <option value="bayer">Bayer Matrix</option>
+                    <option value="none">None</option>
+                </select>
+            </div>
+            <div class="control-row"><label>Orientation:</label>
+                <select id="orientation" onchange="window.UpdatePreview()" style="flex:1">
+                    <option value="0">Landscape</option>
+                    <option value="-1">Portrait</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="preview-container">
+            <div id="preview-placeholder" style="display: none; color: #999; padding: 40px; text-align: center; font-size: 1.2rem;">Preview</div>
+            <img id="testimg" alt="Preview" onload="updateFocusMarker()" style="display: none;" />
+            <div id="focus-marker" class="focus-marker"></div>
+        </div>
+
+        <div class="controls">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <label style="flex: 0 0 auto;">Base64 String:</label>
+                <button class="btn-action" onclick="window.LoadImageFromBase64()" title="Decode Base64 and show image" style="padding: 5px 10px; font-size: 0.9rem; color: black; background: #f0f0f0;">🖼️ Decode</button>
+                <button class="btn-action" onclick="window.CopyBase64ToClipboard()" title="Copy Base64 to Clipboard" style="padding: 5px 10px; font-size: 0.9rem; color: black; background: #f0f0f0;">📋 Copy</button>
+            </div>
+            <textarea id="encoded_string" placeholder="Paste data:image/ink;base64,... string here or it will be generated from image..." style="width:100%; min-height: 80px;"></textarea>
+            <div style="font-size: 10px; margin-bottom: 10px;">Binary Bytes: <span id="encoded_length">0</span>&nbsp;|&nbsp;Base64 Chars: <span id="encoded_64_length">0</span></div>
+            <button class="btn-action save-btn" onclick="window.SaveCurImage()">💾 SAVE TO SHOW</button>
+            <div id="saveImageMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="AddNewShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title">Add New Show</h2>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <label>Show Name:</label>
+                <input type="text" id="newShowName" placeholder="Enter show name..." style="flex:1; padding:8px; font-size:1rem;" />
+            </div>
+            <div class="control-row">
+                <label>Display Type:</label>
+                <select id="newShowDisplayId" style="flex:1; padding:8px; font-size:1rem;"></select>
+            </div>
+            <button class="btn-action save-btn" onclick="window.CreateNewShow()">Create Show</button>
+            <div id="newShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="DeleteShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" id="deleteShowBackBtn" onclick="window._currentPageId='TopMenu'; window.ShowPage('TopMenu'); return false;">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <p style="margin-bottom: 20px;">This will delete the currently selected show: <strong id="deleteShowNameDisplay">(no show selected)</strong></p>
+            <button class="btn-action reset-btn" onclick="window.DeleteSelectedShow()">🗑️ Delete Show</button>
+            <div id="deleteShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="ActivateShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <p style="margin-bottom: 20px;">This will activate the currently selected show: <strong id="activateShowNameDisplay">(no show selected)</strong></p>
+            <button id="activateShowBtn" class="btn-action save-btn" onclick="window.ActivateSelectedShow()">✅ Activate Show</button>
+            <div id="activateShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="ShowSettings" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <div class="control-row">
+                <label>Mode:</label>
+                <select id="showMode" style="flex:1; padding:8px; font-size:1rem;">
+                    <option value="random">Random</option>
+                    <option value="forwardsequence">Forward Sequence</option>
+                    <option value="reversesequence">Reverse Sequence</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Timer (minutes):</label>
+                <input type="number" id="showTimer" min="1" max="1440" value="1" style="flex:1; padding:8px; font-size:1rem;" />
+            </div>
+            <button class="btn-action save-btn" onclick="window.SaveShowSettings()">💾 Save Settings</button>
+            <div id="showSettingsMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="AddShowPhotos" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <button class="btn-action ai-btn" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 Dateien auswählen</button>
+            <input type="file" id="addPhotosInput" accept="image/*" multiple class="file-input-hidden" />
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
+                Select multiple images. Each image will be processed with AI spot detection and converted to both landscape and portrait versions using current Photo Settings.
+            </p>
+            <button id="btnProcessAndAddPhotos" class="btn-action save-btn" onclick="window.ProcessAndAddPhotos()">📸 Process and Add Photos</button>
+            <div id="addPhotosMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+            <div id="addPhotosProgress" style="margin-top:15px; display:none;">
+                <div style="background:#f0f0f0; border-radius:4px; height:20px; position:relative; overflow:hidden;">
+                    <div id="addPhotosProgressBar" style="background:#3498db; height:100%; width:0%; transition:width 0.3s;"></div>
+                </div>
+                <div id="addPhotosProgressText" style="margin-top:5px; font-size:0.9rem; color:#666;"></div>
+                <button id="addPhotosStopBtn" class="btn-action" onclick="window.StopAddPhotos()" style="margin-top:10px; background:#e74c3c; color:white; width:100%; display:none;">⏹ Stop Processing</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ManageShowPhotos" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <div id="managePhotosMessage" style="margin-bottom:15px; padding:10px; border-radius:4px; display:none;"></div>
+            <div id="managePhotosGrid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:15px; margin-top:20px;">
+                <!-- Thumbnails will be inserted here -->
+            </div>
+            <p id="managePhotosEmpty" style="text-align:center; color:#999; margin-top:20px; display:none;">No photos in this show.</p>
+        </div>
+    </div>
+
+    <div id="ExportShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title"></h2>
+        </div>
+
+        <div class="controls">
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
+                Export the currently selected show as a ZIP file. The ZIP file contains all show settings and images.
+            </p>
+            <button class="btn-action save-btn" onclick="window.ExportSelectedShow()">📦 Export Show</button>
+            <div id="exportShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="ImportShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title">Import Show</h2>
+        </div>
+
+        <div class="controls">
+            <button class="btn-action save-btn" id="importShowFileBtn" onclick="document.getElementById('importShowInput').click()">📄 Datei auswählen</button>
+            <input type="file" id="importShowInput" accept=".zip,.show" class="file-input-hidden" />
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
+                Select a ZIP file (.zip or .show) containing a show export. The show will be imported with all its settings and images.
+            </p>
+            <button class="btn-action save-btn" onclick="window.ImportShow()">📥 Import Show</button>
+            <div id="importShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="PlaceholderPage" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title" id="placeholder-title">Page</h2>
+        </div>
+        <p>This module is currently under development...</p>
+    </div>
+
+</body>
+
+
+    <!-- Application module -->
+    <script type="module" src="./src/app.mjs"></script>
+
+</html>

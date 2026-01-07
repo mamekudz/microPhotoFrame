@@ -1,0 +1,38 @@
+# Build artifacts and dependencies
+node_modules/
+.pio/
+obj/
+*.exe
+*.pdb
+
+# Shows and media files (large binary files)
+shows/
+readyToGoShows/
+testimgs/
+rawmedia/
+assets/imgs/
+firmware/imgs/
+
+# Documentation that might not be relevant for code search
+docs/PDF.js*
+
+# IDE and editor configs
+.vscode/
+.editorconfig
+omnisharp.json
+
+# PlatformIO build files
+platformio.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.cache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Package files
+package-lock.json
+

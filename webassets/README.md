@@ -1,0 +1,1 @@
+Hier liegen Icons, Logos und Web-Grafiken.

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>µPhotoFrame Firmware Flasher</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #7f8c8d;
+            font-size: 1rem;
+        }
+        
+        .logo {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+        
+        .device-info {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .device-info h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+        
+        .device-info ul {
+            list-style: none;
+            color: #555;
+        }
+        
+        .device-info li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .device-info li:last-child {
+            border-bottom: none;
+        }
+        
+        .device-info li strong {
+            color: #2c3e50;
+            display: inline-block;
+            min-width: 120px;
+        }
+        
+        .flash-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        esp-web-install-button {
+            --esp-tools-button-color: #667eea;
+            --esp-tools-button-text-color: white;
+        }
+        
+        .instructions {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 30px;
+        }
+        
+        .instructions h3 {
+            color: #856404;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .instructions ol {
+            color: #856404;
+            padding-left: 20px;
+        }
+        
+        .instructions li {
+            margin: 8px 0;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }
+        
+        .feature {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+        
+        .feature-text {
+            color: #2c3e50;
+            font-size: 0.9rem;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .features {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🖼️</div>
+            <h1>microPhotoFrame Firmware</h1>
+            <p>Flashen Sie die neueste Firmware auf Ihr reTerminal</p>
+        </div>
+        
+        <div class="device-info">
+            <h3>📱 Unterstützte Geräte</h3>
+            <ul>
+                <li><strong>reTerminal E1001:</strong> 7.5" Grayscale (4-Level)</li>
+                <li><strong>reTerminal E1002:</strong> 7.3" Spectra 6 (Full Color)</li>
+                <li><strong>Hardware:</strong> Seeed XIAO ESP32-S3</li>
+            </ul>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🌐</div>
+                <div class="feature-text">WiFi-basierter Bilderrahmen</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🎨</div>
+                <div class="feature-text">Full Color oder Grayscale</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔄</div>
+                <div class="feature-text">Auto-Rotation</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-text">Low Power</div>
+            </div>
+        </div>
+        
+        <div class="flash-section">
+            <esp-web-install-button manifest="./manifest.json">
+                <button slot="activate" style="
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 15px 40px;
+                    font-size: 1.1rem;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+                    transition: all 0.3s;
+                ">
+                    ⚡ Firmware Installieren
+                </button>
+            </esp-web-install-button>
+        </div>
+        
+        <div class="instructions">
+            <h3>📋 Anleitung:</h3>
+            <ol>
+                <li>Verbinden Sie Ihr reTerminal via USB mit dem Computer</li>
+                <li>Klicken Sie auf "Firmware Installieren"</li>
+                <li>Wählen Sie im Dialog den COM-Port Ihres Geräts</li>
+                <li>Warten Sie bis der Flash-Vorgang abgeschlossen ist</li>
+                <li>Nach dem Neustart erscheint ein WiFi-Access-Point "microPhotoFrame"</li>
+                <li>Verbinden Sie sich damit und konfigurieren Sie Ihr WLAN</li>
+            </ol>
+        </div>
+        
+        <div class="footer">
+            <p>
+                © 2026 Meinolf Amekudzi · 
+                <a href="https://github.com/mamekudz/microPhotoFrame" target="_blank">GitHub</a> · 
+                <a href="https://github.com/mamekudz/microPhotoFrame/releases" target="_blank">Releases</a>
+            </p>
+            <p style="margin-top: 10px; font-size: 0.8rem;">
+                Dieser Flasher funktioniert nur in Chrome, Edge oder Opera
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

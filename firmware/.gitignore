@@ -1,0 +1,24 @@
+# PlatformIO
+.pio/
+.vscode/
+*.pyc
+
+# Build artifacts
+*.bin
+*.elf
+*.map
+
+# IDE
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Backups
+*.bak
+*.old
+*.scheisse
+
+# Logs
+*.log
+

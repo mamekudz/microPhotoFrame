@@ -1,0 +1,86 @@
+{
+  "name": "Colorful Animals",
+  "description": "A vibrant collection of colorful animal artwork - perfect for showcasing the full color capabilities of your E-Ink display",
+  "version": "1.0.0",
+  "displayId": "I",
+  "timer": 5,
+  "mode": "random",
+  "dither": "floyd",
+  "images": [
+    {
+      "name": "chameleon_rainbow",
+      "url": "https://images.unsplash.com/photo-1567098260939-5d9cee759f91?w=800&q=80",
+      "description": "Colorful chameleon",
+      "photographer": "Pierre Bamin",
+      "source": "Unsplash"
+    },
+    {
+      "name": "macaw_parrot",
+      "url": "https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=800&q=80",
+      "description": "Blue and yellow macaw",
+      "photographer": "Photo Boards",
+      "source": "Unsplash"
+    },
+    {
+      "name": "morpho_butterfly",
+      "url": "https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?w=800&q=80",
+      "description": "Blue morpho butterfly",
+      "photographer": "Boris Smokrovic",
+      "source": "Unsplash"
+    },
+    {
+      "name": "betta_fish",
+      "url": "https://images.unsplash.com/photo-1520990756529-7e3c28e9e2b5?w=800&q=80",
+      "description": "Colorful betta fish",
+      "photographer": "zibik",
+      "source": "Unsplash"
+    },
+    {
+      "name": "peacock_display",
+      "url": "https://images.unsplash.com/photo-1568448855704-8c8b002f80e8?w=800&q=80",
+      "description": "Peacock with colorful feathers",
+      "photographer": "Hussain Badshah",
+      "source": "Unsplash"
+    },
+    {
+      "name": "toucan_tropical",
+      "url": "https://images.unsplash.com/photo-1614027164847-1b28cfe1df60?w=800&q=80",
+      "description": "Toucan with colorful beak",
+      "photographer": "Zdeněk Macháček",
+      "source": "Unsplash"
+    },
+    {
+      "name": "poison_dart_frog",
+      "url": "https://images.unsplash.com/photo-1564349683136-77e08dba1ef7?w=800&q=80",
+      "description": "Colorful poison dart frog",
+      "photographer": "Ondrej Machart",
+      "source": "Unsplash"
+    },
+    {
+      "name": "kingfisher_blue",
+      "url": "https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=800&q=80",
+      "description": "Brilliant blue kingfisher",
+      "photographer": "William Krause",
+      "source": "Unsplash"
+    },
+    {
+      "name": "mandrill_colorful",
+      "url": "https://images.unsplash.com/photo-1540573133985-87b6da6d54a9?w=800&q=80",
+      "description": "Colorful mandrill face",
+      "photographer": "Grianghraf",
+      "source": "Unsplash"
+    },
+    {
+      "name": "tropical_reef_fish",
+      "url": "https://images.unsplash.com/photo-1535591273668-578e31182c4f?w=800&q=80",
+      "description": "Vibrant tropical fish",
+      "photographer": "Ranurte",
+      "source": "Unsplash"
+    }
+  ],
+  "credits": {
+    "source": "Unsplash",
+    "license": "Unsplash License - Free to use for commercial and non-commercial purposes. No permission needed.",
+    "url": "https://unsplash.com/license"
+  }
+}

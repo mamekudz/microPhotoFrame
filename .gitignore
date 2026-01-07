@@ -1,0 +1,65 @@
+.pio/
+.pioenvs/
+.pio/build/
+build/
+libdeps/
+lib/
+*.elf
+*.bin
+*.hex
+*.pio
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.env
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Shows folder should exist but be empty (use shows/.gitkeep)
+shows/*
+!shows/.gitkeep
+!shows/shows.json
+
+# Ready-to-go shows: only include JSON, README and exported .zip/.show files
+readyToGoShows/**/*_orgimgs/
+readyToGoShows/**/*.jpg
+readyToGoShows/**/*.jpeg
+readyToGoShows/**/*.png
+readyToGoShows/**/*.gif
+readyToGoShows/**/*.webp
+
+# Keep structure files
+!readyToGoShows/**/*.json
+!readyToGoShows/**/*.md
+!readyToGoShows/**/*.zip
+!readyToGoShows/**/*.show
+
+node_modules
+ClassicalPaintings
+testimgs
+.pio
+.editorconfig
+.vscode

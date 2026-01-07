@@ -1,0 +1,2 @@
+# This file ensures the shows/ directory is tracked by git
+# The directory will be created on pull, but show content is ignored

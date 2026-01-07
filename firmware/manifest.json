@@ -1,0 +1,26 @@
+{
+  "name": "microPhotoFrame Firmware",
+  "version": "1.0.0",
+  "home_assistant_domain": "esphome",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { 
+          "path": "https://github.com/mamekudz/microPhotoFrame/releases/latest/download/bootloader.bin", 
+          "offset": 0 
+        },
+        { 
+          "path": "https://github.com/mamekudz/microPhotoFrame/releases/latest/download/partitions.bin", 
+          "offset": 32768 
+        },
+        { 
+          "path": "https://github.com/mamekudz/microPhotoFrame/releases/latest/download/microPhotoFrame-firmware.bin", 
+          "offset": 65536 
+        }
+      ]
+    }
+  ]
+}
+
