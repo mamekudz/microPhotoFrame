@@ -1,0 +1,75 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-server-packages",
+      "type": "shell",
+      "command": "npm run build-server-packages",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlatformIO: Build",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "PlatformIO: Upload",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run", "--target", "upload"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "PlatformIO: Clean",
+      "type": "shell",
+      "command": "pio",
+      "args": ["run", "--target", "clean"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "PlatformIO: Monitor",
+      "type": "shell",
+      "command": "pio",
+      "args": ["device", "monitor"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}
