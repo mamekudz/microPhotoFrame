@@ -1,12 +1,4 @@
 {
-  "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
-  "scripts": {
-    "gulp": "gulp",
-    "build-server-packages": "gulp Build_Server_Packages2"
-  },
   "dependencies": {
     "body-parser": "^2.2.1",
     "child_process": "^1.0.2",

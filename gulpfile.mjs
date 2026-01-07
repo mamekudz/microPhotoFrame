@@ -30,6 +30,8 @@ import cp from 'child_process';
 import wait from "gulp-wait";
 import prompt from 'gulp-prompt';
 
+
+/*
 export const Fetch_AI_Models = (cb) => {
     const modelDir = 'src/models';
     // Die Basis-URL muss zum Modell passen (hier V2)
@@ -93,11 +95,10 @@ export const Build_Server_Packages2 = gulp.series(
 
 import { encodeInk, encodeInkFromConfig, loadConfigFromJSON } from 'ink-encoder';
 
-/**
- * Convert PNG images to .ink format using JSON configuration
- * Usage: gulp encode-ink --config=./config/display-config.json --input=./firmware/imgs/startup.png --output=./firmware/imgs/startup.ink
- * Or: gulp encode-ink --config=./config/display-config.json --input=./firmware/imgs/*.png
- */
+// Convert PNG images to .ink format using JSON configuration
+//Usage: gulp encode-ink --config=./config/display-config.json --input=./firmware/imgs/startup.png --output=./firmware/imgs/startup.ink
+ // Or: gulp encode-ink --config=./config/display-config.json --input=./firmware/imgs/*.png
+ //
 export const encode_ink = async function(cb) {
   const configPath = process.env.config || './config/ink-encode-config.json';
   const inputPath = process.env.input;
@@ -172,10 +173,9 @@ export const encode_ink = async function(cb) {
   }
 };
 
-/**
- * Batch convert multiple PNG images using a JSON config file
- * Usage: gulp encode-ink-batch --config=./config/display-config.json --inputDir=./firmware/imgs --outputDir=./firmware/imgs/ink
- */
+//Batch convert multiple PNG images using a JSON config file
+// Usage: gulp encode-ink-batch --config=./config/display-config.json --inputDir=./firmware/imgs --outputDir=./firmware/imgs/ink
+//
 export const encode_ink_batch = async function(cb) {
   const configPath = process.env.config || './config/ink-encode-config.json';
   const inputDir = process.env.inputDir || './firmware/imgs';
@@ -188,7 +188,7 @@ export const encode_ink_batch = async function(cb) {
   }
   
   try {
-    const pngFiles = await glob(path.join(inputDir, '**/*.png'));
+    const pngFiles = await glob(path.join(inputDir, '** / *.png'));
     
     if (pngFiles.length === 0) {
       console.log(`No PNG files found in ${inputDir}`);
@@ -227,13 +227,15 @@ export const encode_ink_batch = async function(cb) {
   }
 };
 
+
+
 // ===========================================
 // PlatformIO Tasks
 // ===========================================
 
-/**
- * Kill all running PlatformIO monitor processes
- */
+//
+//Kill all running PlatformIO monitor processes
+ //
 function killMonitorProcesses() {
   return new Promise((resolve) => {
     const isWindows = process.platform === 'win32';
@@ -256,11 +258,9 @@ function killMonitorProcesses() {
     setTimeout(resolve, 500);
   });
 }
-
-/**
- * Upload firmware and start monitor
- * Usage: gulp firmware_upload_monitor
- */
+// Upload firmware and start monitor
+// Usage: gulp firmware_upload_monitor
+//
 export const firmware_upload_monitor = async function(cb) {
   console.log('🔌 Closing any open serial monitors...');
   await killMonitorProcesses();
@@ -298,10 +298,9 @@ export const firmware_upload_monitor = async function(cb) {
   });
 };
 
-/**
- * Just upload firmware (no monitor)
- * Usage: gulp firmware_upload
- */
+//Just upload firmware (no monitor)
+// Usage: gulp firmware_upload
+//
 export const firmware_upload = async function(cb) {
   console.log('🔌 Closing any open serial monitors...');
   await killMonitorProcesses();
@@ -330,10 +329,6 @@ export const firmware_upload = async function(cb) {
   });
 };
 
-/**
- * Build firmware
- * Usage: gulp firmware-build
- */
 export const firmware_build = function(cb) {
   console.log('🔨 Building firmware...');
   
@@ -354,3 +349,17 @@ export const firmware_build = function(cb) {
   });
 };
 
+*/
+
+
+function _BuildServerPackages(_cb){
+  _cb();
+}
+
+export const Build_Server_Packages = gulp.series(
+	_BuildServerPackages,
+	function(cb) {
+			console.log('Packages build ready.');
+			cb();
+	}
+);
