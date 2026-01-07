@@ -3,6 +3,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "scripts": {
+    "gulp": "gulp"
+  },
   "dependencies": {
     "body-parser": "^2.2.1",
     "child_process": "^1.0.2",
@@ -10,7 +13,6 @@
     "express": "^5.2.1",
     "fast-glob": "^3.3.3",
     "fs": "^0.0.1-security",
-    "gulp": "^5.0.1",
     "gulp-clean": "^0.4.0",
     "gulp-concat": "^2.6.1",
     "gulp-download2": "^1.1.0",
@@ -31,5 +33,9 @@
     "request": "^2.88.2",
     "sharp": "^0.33.5",
     "zip-a-folder": "^4.0.4"
+  },
+  "devDependencies": {
+    "gulp": "^5.0.1",
+    "gulp-cli": "^3.1.0"
   }
 }
