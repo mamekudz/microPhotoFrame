@@ -137,6 +137,12 @@ MIT License - see [LICENSE](LICENSE) for details
 <a name="deutsch"></a>
 ## 📖 Deutsch
 
+# µPhotoFrame - WiFi-basierter E-Ink-Fotorahmen für reTerminal
+
+**Intelligente, ferngesteuerte Bilderrahmen-Firmware für reTerminal E1001 (Graustufen) und E1002 (Vollfarbe)**
+
+---
+
 ### ⚠️ Projektstatus
 **Aktuell noch in aktiver Entwicklung...**
 

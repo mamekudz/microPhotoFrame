@@ -479,7 +479,7 @@ void startConfigMode() {
   display.setCursor(10, 30);
   display.print("Config Mode");
   display.setCursor(10, 60);
-  display.print("WiFi: erPhotoFrame");
+  display.print("WiFi: microPhotoFrame");
   display.setCursor(10, 90);
   display.print("(Open - no password)");
   IPAddress IP = WiFi.softAPIP();
@@ -1884,12 +1884,12 @@ void setup() {
   // Open AP (no password) for easier captive portal access
   Serial1.println("Starting configuration access point...");
   WiFi.mode(WIFI_AP_STA);
-  if (!WiFi.softAP("erPhotoFrame")) {
+  if (!WiFi.softAP("microPhotoFrame")) {
     Serial1.println("Failed to start AP!");
   } else {
     delay(500); // Give AP time to start
     IPAddress AP_IP = WiFi.softAPIP();
-    Serial1.print("AP started. SSID: erPhotoFrame (open), IP: ");
+    Serial1.print("AP started. SSID: microPhotoFrame (open), IP: ");
     Serial1.println(AP_IP);
   }
   
@@ -2114,7 +2114,7 @@ void setup() {
     display.setCursor(10, 90);
     display.print("Config Mode Active");
     display.setCursor(10, 120);
-    display.print("WiFi: erPhotoFrame");
+    display.print("WiFi: microPhotoFrame");
     display.setCursor(10, 150);
     display.print("(Open - no password)");
     IPAddress IP = WiFi.softAPIP();
