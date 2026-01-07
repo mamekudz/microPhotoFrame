@@ -1,0 +1,14 @@
+{
+  "taskExplorer.gulpfileGlob": "**/gulpfile.{js,cjs,mjs}",
+  "taskExplorer.gulpEnabled": true
+}
+{
+  "platformio-ide.useBuiltinPIOCore": false,
+  "platformio-ide.useDevelopmentPIOCore": false,
+  "platformio-ide.autoDetectPort": true,
+  "platformio-ide.autoDetectBaudRate": true,
+  "files.associations": {
+    "*.ino": "cpp",
+    "platformio.ini": "ini"
+  }
+}
