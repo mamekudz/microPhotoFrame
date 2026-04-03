@@ -67,6 +67,29 @@ Thus, each channel can serve multiple different terminals with different screens
 
 The images are stored in a special format (image/ink, or extension .ink) and are only usable for a specific e-ink screen or specifically prepared for it. The header of these .ink files indicates for which e-ink screen the photo was prepared, which orientation it has (landscape or portrait), and which dithering mode was used during image conversion.
 
+### .ink File Format Versions
+
+The .ink format uses a 4-byte header followed by compressed pixel index data:
+
+| Byte | Content |
+|------|---------|
+| 0 | Version (0, 1, 2, or 3) |
+| 1 | Display ID (ASCII character, see table above) |
+| 2 | Dither type (0=none, 1=bayer, 2=floyd-steinberg) |
+| 3 | Orientation (0=landscape, 1=portrait) |
+| 4+ | Compressed pixel data |
+
+**Version history:**
+
+| Version | Compression | Description |
+|---------|-------------|-------------|
+| 0 | LZW (legacy) | Original format, minCodeSize in byte 3 |
+| 1 | LZW | Standardized header with version byte |
+| 2 | Deflate (raw) | ~25-35% smaller than LZW |
+| 3 | Paeth prediction + Deflate | ~45-60% smaller than LZW, inspired by PNG/WebP VP8L |
+
+Version 3 applies a Paeth spatial predictor (predicting each pixel from its left, above, and above-left neighbors) before Deflate compression. This produces many zero-deltas in smooth image regions, which Deflate compresses very efficiently. All versions are backward-compatible: the firmware and web UI detect the version byte and select the appropriate decoder automatically.
+
 [Back to main page](../README.md).
 
 ---
@@ -138,5 +161,28 @@ Terminalbesitzer können Kanäle nur sehen, wenn sie die korrekte Host-Channel-U
 Somit kann jeder Kanal mehrere unterschiedliche Terminals mit unterschiedlichen Bildschirmen bedienen. Je Bildschirmtyp kann immer nur eine Show zur gleichen Zeit aktiv sein. "Aktiv" bedeutet, dass erPhotoFrame Terminals diese Show anzeigen.
 
 Die Bilder werden in einem speziellen Format gespeichert (image/ink, bzw. Endung .ink) und sind jeweils nur für einen bestimmten e-Ink-Bildschirm nutzbar bzw. speziell dafür aufbereitet. Im Header dieser .ink-Dateien ist vermerkt, für welchen e-Ink-Bildschirm das Foto aufbereitet wurde, welche Orientierung es besitzt (Quer- oder Hochformat) und welcher Rasterungsmodus beim der Konvertierung des Bildes verwendet wurde.
+
+### .ink Dateiformat-Versionen
+
+Das .ink-Format verwendet einen 4-Byte-Header gefolgt von komprimierten Pixel-Indexdaten:
+
+| Byte | Inhalt |
+|------|--------|
+| 0 | Version (0, 1, 2 oder 3) |
+| 1 | Display-ID (ASCII-Zeichen, siehe Tabelle oben) |
+| 2 | Dither-Typ (0=keiner, 1=Bayer, 2=Floyd-Steinberg) |
+| 3 | Orientierung (0=Querformat, 1=Hochformat) |
+| 4+ | Komprimierte Pixeldaten |
+
+**Versionshistorie:**
+
+| Version | Kompression | Beschreibung |
+|---------|-------------|--------------|
+| 0 | LZW (Legacy) | Originalformat, minCodeSize in Byte 3 |
+| 1 | LZW | Standardisierter Header mit Versionsbyte |
+| 2 | Deflate (raw) | ~25-35% kleiner als LZW |
+| 3 | Paeth-Prädiktion + Deflate | ~45-60% kleiner als LZW, inspiriert von PNG/WebP VP8L |
+
+Version 3 wendet einen Paeth-Spatial-Predictor an (Vorhersage jedes Pixels aus den Nachbarn links, oben und oben-links) bevor Deflate komprimiert. Dies erzeugt viele Null-Deltas in gleichmäßigen Bildbereichen, die Deflate sehr effizient komprimiert. Alle Versionen sind abwärtskompatibel: Firmware und Web-UI erkennen das Versionsbyte und wählen automatisch den passenden Decoder.
 
 [Zurück zur Hauptseite](../README.md).

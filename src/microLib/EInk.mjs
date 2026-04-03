@@ -87,8 +87,8 @@ export default class EInk {
         this.#imgOrg.src = this.#imgRef;
       } else if (this.#imgRef instanceof Uint8Array) {
         this.#PrepareCanvas(this.#display.width, this.#display.height);
-        this.Decode(this.#imgRef);
-        _resolve();
+        this.Decode(this.#imgRef).then(_resolve).catch(_reject);
+        return;
       } else {
         _reject("Invalid image reference");
       }
@@ -284,35 +284,125 @@ export default class EInk {
     return { r: (tmp >> 16) & 255, g: (tmp >> 8) & 255, b: tmp & 255 };
   }
 
-  Encode() {
+  async Encode() {
     const display = EInkDef.DISPLAYS[this.displayID];
     const w = this.#imgCnvCnv.width, h = this.#imgCnvCnv.height;
     const imgData = this.#imgCnvCtx.getImageData(0, 0, w, h).data;
     const allPixels = this.#GetPixelIndices(imgData, w, h);
     const mask = this.#CreateGeometryMask(w, h);
-    
-    // Filter pixels based on geometry mask (only encode valid pixels for round displays)
-    const pixelsToEncode = [];
+
+    let pixelsToEncode;
+    let encodeWidth = w;
     if (mask) {
+      pixelsToEncode = [];
       for (let i = 0; i < allPixels.length; i++) {
-        if (mask[i] === 1) {
-          pixelsToEncode.push(allPixels[i]);
-        }
+        if (mask[i] === 1) pixelsToEncode.push(allPixels[i]);
       }
+      pixelsToEncode = new Uint8Array(pixelsToEncode);
+      encodeWidth = 0;
     } else {
-      // Square geometry: encode all pixels
-      for (let i = 0; i < allPixels.length; i++) {
-        pixelsToEncode.push(allPixels[i]);
-      }
+      pixelsToEncode = allPixels;
     }
-    
+
+    const numColors = display.colors.length;
+    const predicted = EInk.#applyPaethPrediction(pixelsToEncode, encodeWidth, numColors);
+    const compressed = await EInk.#deflateRaw(predicted);
+
+    // Version 3: Paeth prediction + Deflate
+    const VERSION = 3;
+    let out = new Uint8Array(4 + compressed.length);
+    out[0] = VERSION;
+    out[1] = display.id.charCodeAt(0);
+    out[2] = (this.#ditherType === 'bayer' ? 1 : (this.#ditherType === 'floyd' ? 2 : 0));
+    out[3] = (this.#aspect === EInkDef.PORTRAIT ? 1 : 0);
+    out.set(compressed, 4);
+    return out;
+  }
+
+  static #paethPredictor(a, b, c) {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
+  }
+
+  static #applyPaethPrediction(pixels, width, numColors) {
+    const len = pixels.length;
+    const out = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      const a = (width > 0 && (i % width) > 0) ? pixels[i - 1] : 0;       // left
+      const b = (width > 0 && i >= width)       ? pixels[i - width] : 0;   // above
+      const c = (width > 0 && (i % width) > 0 && i >= width) ? pixels[i - width - 1] : 0; // above-left
+      const pred = (width > 0) ? EInk.#paethPredictor(a, b, c) : (i > 0 ? pixels[i - 1] : 0);
+      out[i] = (pixels[i] - pred + numColors) % numColors;
+    }
+    return out;
+  }
+
+  static #inversePaethPrediction(deltas, width, numColors) {
+    const len = deltas.length;
+    const out = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      const a = (width > 0 && (i % width) > 0) ? out[i - 1] : 0;
+      const b = (width > 0 && i >= width)       ? out[i - width] : 0;
+      const c = (width > 0 && (i % width) > 0 && i >= width) ? out[i - width - 1] : 0;
+      const pred = (width > 0) ? EInk.#paethPredictor(a, b, c) : (i > 0 ? out[i - 1] : 0);
+      out[i] = (deltas[i] + pred) % numColors;
+    }
+    return out;
+  }
+
+  static async #deflateRaw(data) {
+    const cs = new CompressionStream('deflate-raw');
+    const writer = cs.writable.getWriter();
+    writer.write(data);
+    writer.close();
+    const chunks = [];
+    const reader = cs.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    let totalLen = 0;
+    for (const c of chunks) totalLen += c.length;
+    const result = new Uint8Array(totalLen);
+    let off = 0;
+    for (const c of chunks) { result.set(c, off); off += c.length; }
+    return result;
+  }
+
+  static async #inflateRaw(data) {
+    const ds = new DecompressionStream('deflate-raw');
+    const writer = ds.writable.getWriter();
+    writer.write(data);
+    writer.close();
+    const chunks = [];
+    const reader = ds.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    let totalLen = 0;
+    for (const c of chunks) totalLen += c.length;
+    const result = new Uint8Array(totalLen);
+    let off = 0;
+    for (const c of chunks) { result.set(c, off); off += c.length; }
+    return result;
+  }
+
+  #EncodeLZW(pixelsToEncode, display) {
     const numColors = display.colors.length;
     let minCodeSize = Math.max(2, Math.ceil(Math.log2(numColors)));
     let clearCode = 1 << minCodeSize, eoiCode = clearCode + 1;
     let dict = new Map();
     const resetDict = () => {
       dict.clear();
-      for (let i = 0; i < (1 << minCodeSize); i++) dict.Set(String.fromCharCode(i), i);
+      for (let i = 0; i < (1 << minCodeSize); i++) dict.set(String.fromCharCode(i), i);
     };
     resetDict();
     let nextCode = eoiCode + 1, codeSize = minCodeSize + 1, byteData = [], bitBuf = 0, bitCount = 0;
@@ -323,67 +413,112 @@ export default class EInk {
     writeCode(clearCode, codeSize);
     let phrase = "";
     for (let i = 0; i < pixelsToEncode.length; i++) {
-      let char = String.fromCharCode(pixelsToEncode[i]);
-      if (dict.has(phrase + char)) { phrase += char; }
+      let ch = String.fromCharCode(pixelsToEncode[i]);
+      if (dict.has(phrase + ch)) { phrase += ch; }
       else {
-        writeCode(dict.Get(phrase), codeSize);
-        dict.Set(phrase + char, nextCode++);
+        writeCode(dict.get(phrase), codeSize);
+        dict.set(phrase + ch, nextCode++);
         if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
         else if (nextCode === 4096) { writeCode(clearCode, codeSize); resetDict(); nextCode = eoiCode + 1; codeSize = minCodeSize + 1; }
-        phrase = char;
+        phrase = ch;
       }
     }
-    writeCode(dict.Get(phrase), codeSize);
+    writeCode(dict.get(phrase), codeSize);
     writeCode(eoiCode, codeSize);
     if (bitCount > 0) byteData.push(bitBuf & 0xFF);
-    
-    // New format: [version, displayId, dither, orient, ...data]
-    const VERSION = 1;
-    let out = new Uint8Array(4 + byteData.length);
-    out[0] = VERSION;
-    out[1] = display.id.charCodeAt(0);
-    out[2] = (this.#ditherType === 'bayer' ? 1 : (this.#ditherType === 'floyd' ? 2 : 0));
-    out[3] = (this.#aspect === EInkDef.PORTRAIT ? 1 : 0);
-    out.Set(byteData, 4);
-    return out;
+    return new Uint8Array(byteData);
   }
 
-  Decode(_data) {
+  async Decode(_data) {
     const data = _data || this.#imgRef;
     if (!(data instanceof Uint8Array)) return;
-    
+
     // Detect format version
     let version, displayIdChar, storedDither, storedOrient, dataPtr;
-    if (data.length >= 4 && data[0] === 1) {
-      // New format (Version 1): [version, displayId, dither, orient, ...data]
+    if (data.length >= 4 && data[0] === 3) {
+      // Version 3: Paeth prediction + Deflate
+      version = 3;
+      displayIdChar = String.fromCharCode(data[1]);
+      storedDither = data[2];
+      storedOrient = data[3];
+      dataPtr = 4;
+    } else if (data.length >= 4 && data[0] === 2) {
+      // Version 2: Deflate compressed
+      version = 2;
+      displayIdChar = String.fromCharCode(data[1]);
+      storedDither = data[2];
+      storedOrient = data[3];
+      dataPtr = 4;
+    } else if (data.length >= 4 && data[0] === 1) {
+      // Version 1: LZW compressed
       version = 1;
       displayIdChar = String.fromCharCode(data[1]);
       storedDither = data[2];
       storedOrient = data[3];
       dataPtr = 4;
     } else {
-      // Old format (Version 0): [displayId, dither, orient, minCodeSize, ...data]
+      // Version 0 (legacy): LZW compressed
       version = 0;
       displayIdChar = String.fromCharCode(data[0]);
       storedDither = data[1];
       storedOrient = data[2];
       dataPtr = 4;
     }
-    
+
     const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([k, v]) => v.id === displayIdChar);
     if (!displayEntry) return;
     this.displayID = displayEntry[0]; this.#display = displayEntry[1];
     const w = this.#display.width, h = this.#display.height;
-    
-    // Calculate minCodeSize from number of colors
+
+    const mask = this.#CreateGeometryMask(w, h);
+    const totalPixels = w * h;
+    const validPixelCount = mask ? mask.reduce((sum, val) => sum + val, 0) : totalPixels;
+
+    let decodedPixels;
+    if (version === 3) {
+      const compressed = data.slice(dataPtr);
+      const deltas = await EInk.#inflateRaw(compressed);
+      const numColors = this.#display.colors.length;
+      const decodeWidth = mask ? 0 : w;
+      decodedPixels = EInk.#inversePaethPrediction(deltas, decodeWidth, numColors);
+    } else if (version === 2) {
+      const compressed = data.slice(dataPtr);
+      decodedPixels = await EInk.#inflateRaw(compressed);
+    } else {
+      decodedPixels = this.#DecodeLZW(data, dataPtr, version, validPixelCount);
+    }
+
+    // Fill result array with decoded pixels and default color for masked pixels
+    this.#PrepareCanvas(w, h);
+    const imgData = this.#imgCnvCtx.createImageData(w, h);
+    const palette = this.#display.colors.map(c => this.#Hex2RGB(c));
+    const defaultColor = palette[0];
+
+    let decodedIdx = 0;
+    for (let i = 0; i < totalPixels; i++) {
+      let color;
+      if (mask && mask[i] === 0) {
+        color = defaultColor;
+      } else {
+        const idx = decodedPixels[decodedIdx++];
+        color = (idx !== undefined && palette[idx]) ? palette[idx] : defaultColor;
+      }
+      const pos = i * 4;
+      imgData.data[pos] = color.r;
+      imgData.data[pos + 1] = color.g;
+      imgData.data[pos + 2] = color.b;
+      imgData.data[pos + 3] = 255;
+    }
+    this.#imgCnvCtx.putImageData(imgData, 0, 0);
+  }
+
+  #DecodeLZW(data, dataPtr, version, validPixelCount) {
     const numColors = this.#display.colors.length;
     let minCodeSize = Math.max(2, Math.ceil(Math.log2(numColors)));
-    
-    // For old format, read minCodeSize from header
     if (version === 0) {
       minCodeSize = data[3];
     }
-    
+
     let clearCode = 1 << minCodeSize, eoiCode = clearCode + 1, bitBuf = 0, bitCount = 0, ptr = dataPtr, codeSize = minCodeSize + 1;
     const readCode = () => {
       while (bitCount < codeSize) { if (ptr >= data.length) return eoiCode; bitBuf |= (data[ptr++] << bitCount); bitCount += 8; }
@@ -392,13 +527,7 @@ export default class EInk {
     let dict = [];
     const initDict = () => { dict = []; for (let i = 0; i < (1 << minCodeSize); i++) dict[i] = [i]; dict[clearCode] = []; dict[eoiCode] = []; };
     initDict();
-    
-    // Create geometry mask
-    const mask = this.#CreateGeometryMask(w, h);
-    const totalPixels = w * h;
-    const validPixelCount = mask ? mask.reduce((sum, val) => sum + val, 0) : totalPixels;
-    
-    // Decode only valid pixels
+
     let decodedPixels = [];
     let oldCode = -1;
     while (decodedPixels.length < validPixelCount) {
@@ -407,36 +536,13 @@ export default class EInk {
       if (code === clearCode) { initDict(); codeSize = minCodeSize + 1; oldCode = -1; continue; }
       let entry = dict[code] ? dict[code] : (code === dict.length ? [...dict[oldCode], dict[oldCode][0]] : null);
       if (!entry) break;
-      for (let j = 0; j < entry.length; j++) { 
+      for (let j = 0; j < entry.length; j++) {
         if (decodedPixels.length < validPixelCount) decodedPixels.push(entry[j]);
       }
       if (oldCode !== -1) { dict.push([...dict[oldCode], entry[0]]); if (dict.length === (1 << codeSize) && codeSize < 12) codeSize++; }
       oldCode = code;
     }
-    
-    // Fill result array with decoded pixels and default color for masked pixels
-    this.#PrepareCanvas(w, h);
-    const imgData = this.#imgCnvCtx.createImageData(w, h);
-    const palette = this.#display.colors.map(c => this.#Hex2RGB(c));
-    const defaultColor = palette[0]; // Use first color (usually white) for masked pixels
-    
-    let decodedIdx = 0;
-    for (let i = 0; i < totalPixels; i++) {
-      let color;
-      if (mask && mask[i] === 0) {
-        // Masked pixel (corner): use default color
-        color = defaultColor;
-      } else {
-        // Valid pixel: use decoded color
-        color = palette[decodedPixels[decodedIdx++]] || defaultColor;
-      }
-      const pos = i * 4;
-      imgData.data[pos] = color.r; 
-      imgData.data[pos + 1] = color.g; 
-      imgData.data[pos + 2] = color.b; 
-      imgData.data[pos + 3] = 255;
-    }
-    this.#imgCnvCtx.putImageData(imgData, 0, 0);
+    return decodedPixels;
   }
 
   #CreateGeometryMask(w, h) {

@@ -22,6 +22,7 @@
 #include <vector>
 #include <cstdlib>
 #include <Wire.h>
+#include <esp32s3/rom/miniz.h>
 
 // MPU6050 I2C Address
 #define MPU6050_ADDR 0x68
@@ -232,108 +233,197 @@ void clearConfig() {
 }
 
 // === Configuration Web Server ===
+static String jsonEscapeSsid(const String& s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"':  out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if ((uint8_t)c < 0x20) { /* skip other control chars in SSID */ }
+        else { out += c; }
+        break;
+    }
+  }
+  return out;
+}
+
 void handleScan() {
   Serial1.println("Scanning WiFi networks...");
-  int n = WiFi.scanNetworks();
-  
+  WiFi.scanDelete();
+  delay(100);
+  // show_hidden=true, etwas länger pro Kanal (hilft oft bei gleichzeitigem SoftAP)
+  int n = WiFi.scanNetworks(false, true, false, 450);
+  if (n <= 0) {
+    Serial1.println("Sync scan empty, trying async...");
+    WiFi.scanNetworks(true, true, false, 450);
+    unsigned long t0 = millis();
+    while (WiFi.scanComplete() == WIFI_SCAN_RUNNING && millis() - t0 < 12000) {
+      delay(100);
+    }
+    int16_t ac = WiFi.scanComplete();
+    if (ac == WIFI_SCAN_FAILED || ac < 0) {
+      n = 0;
+    } else {
+      n = ac;
+    }
+  }
+
   String json = "[";
   for (int i = 0; i < n; i++) {
     if (i > 0) json += ",";
-    json += "{\"ssid\":\"" + WiFi.SSID(i) + "\",";
+    json += "{\"ssid\":\"" + jsonEscapeSsid(WiFi.SSID(i)) + "\",";
     json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
     json += "\"encryption\":" + String((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "false" : "true") + "}";
   }
   json += "]";
-  
+
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", json);
   Serial1.print("Found ");
   Serial1.print(n);
   Serial1.println(" networks");
 }
 
+static String htmlEscapeSsid(const String& s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '&':  out += "&amp;"; break;
+      case '<':  out += "&lt;"; break;
+      case '>':  out += "&gt;"; break;
+      case '"':  out += "&quot;"; break;
+      case '\'': out += "&#39;"; break;
+      default:   out += c; break;
+    }
+  }
+  return out;
+}
+
+static int doWiFiScan() {
+  Serial1.println("Server-side WiFi scan...");
+  WiFi.scanDelete();
+  delay(100);
+  int n = WiFi.scanNetworks(false, true, false, 500);
+  if (n <= 0) {
+    Serial1.println("First scan 0 results, retrying...");
+    delay(500);
+    n = WiFi.scanNetworks(false, true, false, 500);
+  }
+  Serial1.print("Scan result: ");
+  Serial1.print(n);
+  Serial1.println(" networks");
+  return (n < 0) ? 0 : n;
+}
+
 void handleRoot() {
+  // Scan direkt beim Seitenaufbau - kein JavaScript fetch nötig
+  int numNetworks = doWiFiScan();
+
   String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>microPhotoFrame Konfiguration</title>";
   html += "<style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;text-align:center;}";
   html += "input,button,select{width:100%;padding:10px;margin:10px 0;box-sizing:border-box;}";
   html += "button{background:#4CAF50;color:white;border:none;cursor:pointer;}";
   html += "#scanBtn{background:#2196F3;margin-bottom:10px;}";
-  html += ".network-list{max-height:200px;overflow-y:auto;border:1px solid #ddd;padding:5px;}";
   html += "img.logo{max-width:100%;height:auto;margin-bottom:20px;}";
   html += ".password-wrapper{position:relative;width:100%;}";
   html += ".password-wrapper input{width:100%;padding-right:45px;}";
   html += ".password-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:20px;padding:5px;width:auto;color:#666;}";
-  html += ".password-toggle:hover{color:#333;}</style></head><body>";
+  html += ".password-toggle:hover{color:#333;}";
+  html += ".status{padding:8px;margin:10px 0;border-radius:4px;font-size:14px;}";
+  html += ".status.ok{background:#e8f5e9;color:#2e7d32;}";
+  html += ".status.warn{background:#fff3e0;color:#e65100;}</style></head><body>";
   html += "<img src='/logo' alt='microPhotoFrame Logo' class='logo' onerror='this.style.display=\"none\"'>";
   html += "<h1>microPhotoFrame Konfiguration</h1>";
-  html += "<button id='scanBtn' onclick='scanNetworks()'>WLANs scannen</button>";
-  html += "<form method='POST' action='/save'>";
+
+  if (numNetworks > 0) {
+    html += "<div class='status ok'>" + String(numNetworks) + " WLAN-Netzwerk(e) gefunden</div>";
+  } else {
+    html += "<div class='status warn'>Kein WLAN gefunden. Neu laden zum erneuten Scannen.</div>";
+  }
+
+  html += "<form method='POST' action='/save' id='cfgform'>";
   html += "<label>WiFi SSID:</label>";
-  html += "<select name='ssid' id='ssid' required>";
-  html += "<option value='" + wifiSSID + "'>" + (wifiSSID.length() > 0 ? wifiSSID : "Bitte wählen...") + "</option>";
+  html += "<select name='ssid' id='ssid'>";
+  html += "<option value=''>-- WLAN wählen --</option>";
+  if (wifiSSID.length() > 0) {
+    html += "<option value='" + htmlEscapeSsid(wifiSSID) + "' selected>" + htmlEscapeSsid(wifiSSID) + " (gespeichert)</option>";
+  }
+  for (int i = 0; i < numNetworks; i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;
+    // Duplikate mit gespeicherter SSID vermeiden
+    if (ssid == wifiSSID) continue;
+    int rssi = WiFi.RSSI(i);
+    bool locked = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+    String label = htmlEscapeSsid(ssid);
+    label += locked ? " &#128274;" : " (offen)";
+    label += " (" + String(rssi) + " dBm)";
+    html += "<option value='" + htmlEscapeSsid(ssid) + "'>" + label + "</option>";
+  }
   html += "</select>";
-  html += "<input type='text' name='ssid_manual' id='ssid_manual' placeholder='oder manuell eingeben' style='margin-top:5px;'>";
+  html += "<a href='/' style='font-size:12px;'>Erneut scannen</a>";
+  html += "<input type='text' name='ssid_manual' id='ssid_manual' placeholder='oder SSID manuell eingeben' style='margin-top:5px;' autocomplete='off'>";
   html += "<label>WiFi Passwort:</label>";
   html += "<div class='password-wrapper'>";
-  html += "<input type='password' name='password' id='password' value='" + wifiPassword + "'>";
-  html += "<button type='button' class='password-toggle' onclick='togglePassword()' title='Passwort anzeigen/verbergen'>👁️</button>";
+  html += "<input type='password' name='password' id='password' value='" + htmlEscapeSsid(wifiPassword) + "'>";
+  html += "<button type='button' class='password-toggle' onclick='togglePassword()' title='Passwort anzeigen/verbergen'>&#128065;</button>";
   html += "</div>";
-  html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + hostChannelUrl + "' placeholder='http://server.com:888' required><br>";
-  html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888). Die Rewrite-Logik leitet automatisch weiter.</small><br>";
+  html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://server.com:888'><br>";
+  html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888).</small><br>";
   html += "<button type='submit'>Speichern</button>";
   html += "</form>";
   html += "<script>";
-  html += "function scanNetworks(){";
-  html += "document.getElementById('scanBtn').disabled=true;";
-  html += "document.getElementById('scanBtn').textContent='Scanne...';";
-  html += "fetch('/scan').then(r=>r.json()).then(networks=>{";
-  html += "var select=document.getElementById('ssid');";
-  html += "select.innerHTML='<option value=\"\">Bitte wählen...</option>';";
-  html += "networks.forEach(n=>{";
-  html += "var opt=document.createElement('option');";
-  html += "opt.value=n.ssid;";
-  html += "opt.textContent=n.ssid+(n.encryption?' (🔒)':' (offen)')+' ('+n.rssi+' dBm)';";
-  html += "select.appendChild(opt);";
-  html += "});";
-  html += "document.getElementById('scanBtn').disabled=false;";
-  html += "document.getElementById('scanBtn').textContent='WLANs scannen';";
-  html += "}).catch(e=>{alert('Fehler: '+e);document.getElementById('scanBtn').disabled=false;document.getElementById('scanBtn').textContent='WLANs scannen';});";
-  html += "}";
   html += "document.getElementById('ssid').addEventListener('change',function(e){";
   html += "if(e.target.value){document.getElementById('ssid_manual').value='';}";
   html += "});";
   html += "document.getElementById('ssid_manual').addEventListener('input',function(e){";
-  html += "if(e.target.value){document.getElementById('ssid').value='';}";
+  html += "if(e.target.value.trim()){document.getElementById('ssid').selectedIndex=0;}";
   html += "});";
-  html += "document.querySelector('form').addEventListener('submit',function(e){";
-  html += "var manual=document.getElementById('ssid_manual').value;";
-  html += "if(manual){";
-  html += "var hidden=document.createElement('input');";
-  html += "hidden.type='hidden';hidden.name='ssid';hidden.value=manual;";
-  html += "this.appendChild(hidden);";
-  html += "}";
+  html += "document.getElementById('cfgform').addEventListener('submit',function(e){";
+  html += "var manual=document.getElementById('ssid_manual').value.trim();";
+  html += "var sel=document.getElementById('ssid');";
+  html += "var url=document.querySelector('input[name=url]').value.trim();";
+  html += "if(!manual && !sel.value){";
+  html += "e.preventDefault();alert('Bitte ein WLAN wählen oder die SSID manuell eingeben.');return;}";
+  html += "if(!url){e.preventDefault();alert('Bitte die Host-Channel-URL eingeben.');return;}";
+  html += "if(manual){sel.disabled=true;";
+  html += "var h=document.createElement('input');h.type='hidden';h.name='ssid';h.value=manual;this.appendChild(h);}";
   html += "});";
   html += "function togglePassword(){";
   html += "var pwd=document.getElementById('password');";
-  html += "var btn=event.target;";
-  html += "if(pwd.type==='password'){";
-  html += "pwd.type='text';";
-  html += "btn.textContent='🙈';";
-  html += "btn.title='Passwort verbergen';";
-  html += "}else{";
-  html += "pwd.type='password';";
-  html += "btn.textContent='👁️';";
-  html += "btn.title='Passwort anzeigen';";
-  html += "}";
+  html += "if(pwd.type==='password'){pwd.type='text';}else{pwd.type='password';}";
   html += "}";
   html += "</script></body></html>";
+
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "text/html", html);
 }
 
 void handleSave() {
-  if (server.hasArg("ssid") && server.hasArg("url")) {
-    wifiSSID = server.arg("ssid");
+  // Manuelle SSID hat Vorrang; vermeidet leeres ssid aus dem Select bei doppeltem Formularfeld
+  String ssidIn;
+  if (server.hasArg("ssid_manual")) {
+    ssidIn = server.arg("ssid_manual");
+    ssidIn.trim();
+  }
+  if (ssidIn.isEmpty() && server.hasArg("ssid")) {
+    ssidIn = server.arg("ssid");
+    ssidIn.trim();
+  }
+  String urlIn = server.hasArg("url") ? server.arg("url") : "";
+  urlIn.trim();
+  if (ssidIn.length() > 0 && urlIn.length() > 0) {
+    wifiSSID = ssidIn;
     wifiPassword = server.hasArg("password") ? server.arg("password") : "";
-    hostChannelUrl = server.arg("url");
+    hostChannelUrl = urlIn;
     saveConfig();
     
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Gespeichert</title></head><body>";
@@ -345,7 +435,7 @@ void handleSave() {
     delay(2000);
     ESP.restart();
   } else {
-    server.send(400, "text/plain", "Fehlende Parameter");
+    server.send(400, "text/plain", "Fehlende Parameter: SSID und Host-URL sind erforderlich.");
   }
 }
 
@@ -939,108 +1029,55 @@ struct LZWDictEntry {
   std::vector<uint8_t> data;
 };
 
-// Color palette for Display ID "9" (Spectra 6 7,3" 800x480)
-// Colors: Black, White, Red, Yellow, Blue, Green
-const uint16_t displayPalette[6] = {
-  GxEPD_BLACK,   // 0: #000000
-  GxEPD_WHITE,   // 1: #FFFFFF
-  GxEPD_RED,     // 2: #FF0000
-  GxEPD_YELLOW,  // 3: #FFFF00
-  GxEPD_BLUE,    // 4: #0000FF
-  GxEPD_GREEN    // 5: #00FF00
+// Color palette for Spectra 6: Black, White, Red, Yellow, Blue, Green
+static const uint16_t displayPalette[6] = {
+  GxEPD_BLACK, GxEPD_WHITE, GxEPD_RED, GxEPD_YELLOW, GxEPD_BLUE, GxEPD_GREEN
 };
 
-// Helper function to check if SD card is available
-bool isSDCardAvailable() {
-  if (digitalRead(SD_DET_PIN) == HIGH) {
-    return false;
+// Decode raw deflate data using ESP32 ROM miniz (tinfl)
+static size_t decodeDeflate(const uint8_t* compData, size_t compLen,
+                            uint8_t* outBuf, size_t outBufLen) {
+  size_t result = tinfl_decompress_mem_to_mem(
+    outBuf, outBufLen, compData, compLen, 0);
+  if (result == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+    Serial1.println("Deflate decompression failed");
+    return 0;
   }
-  return SD.begin(SD_CS_PIN, hspi);
+  return result;
 }
 
-bool decodeAndDisplayInk(String filename) {
-  // Try to open from SD card
-  if (!isSDCardAvailable()) {
-    Serial1.println("SD card not available for decodeAndDisplayInk");
-    return false;
+// Paeth predictor (same algorithm as PNG/WebP VP8L)
+static inline uint8_t paethPredictor(int a, int b, int c) {
+  int p = a + b - c;
+  int pa = abs(p - a);
+  int pb = abs(p - b);
+  int pc = abs(p - c);
+  if (pa <= pb && pa <= pc) return (uint8_t)a;
+  if (pb <= pc) return (uint8_t)b;
+  return (uint8_t)c;
+}
+
+// Reverse Paeth prediction in-place: deltas → original pixel indices
+static void inversePaethPrediction(uint8_t* data, int count, int width, int numColors) {
+  for (int i = 0; i < count; i++) {
+    int a = (width > 0 && (i % width) > 0) ? data[i - 1] : 0;
+    int b = (width > 0 && i >= width)       ? data[i - width] : 0;
+    int c = (width > 0 && (i % width) > 0 && i >= width) ? data[i - width - 1] : 0;
+    int pred = (width > 0) ? paethPredictor(a, b, c) : (i > 0 ? data[i - 1] : 0);
+    data[i] = (data[i] + pred) % numColors;
   }
-  
-  // Extract orientation from filename (first character: '0', '1', '2', or '3')
-  int fileOrientation = 0; // Default to landscape
-  if (filename.length() > 0) {
-    char firstChar = filename.charAt(0);
-    if (firstChar >= '0' && firstChar <= '3') {
-      fileOrientation = firstChar - '0';
-    }
-  }
-  
-  File inkFile = SD.open("/" + filename, FILE_READ);
-  if (!inkFile) {
-    Serial1.print("Failed to open .ink file: ");
-    Serial1.println(filename);
-    return false;
-  }
-  
-  // Get file size
-  size_t fileSize = inkFile.size();
-  if (fileSize < 4) {
-    Serial1.println("File too small");
-    inkFile.close();
-    return false;
-  }
-  
-  // Read header (Version 1 format): [version, displayId, dither, orient, ...data]
-  uint8_t version = inkFile.read();
-  uint8_t displayId = inkFile.read();
-  uint8_t dither = inkFile.read();
-  uint8_t orient = inkFile.read();
-  uint8_t minCodeSize = 3; // Fixed for 6 colors (Spectra 6)
-  
-  Serial1.print("Version: ");
-  Serial1.println(version);
-  Serial1.print("Display ID: ");
-  Serial1.println((char)displayId);
-  Serial1.print("Dither: ");
-  Serial1.println(dither);
-  Serial1.print("Orientation: ");
-  Serial1.println(orient == 0 ? "Landscape" : "Portrait");
-  Serial1.print("MinCodeSize: ");
-  Serial1.println(minCodeSize);
-  
-  // Check if display ID matches
-  if (displayId != DEVICE_DISPLAY_ID[0]) {
-    Serial1.println("Display ID mismatch!");
-    inkFile.close();
-    return false;
-  }
-  
-  // Display dimensions for Display ID "9" (Spectra 6 7,3" 800x480)
-  // For portrait images, dimensions are swapped (480x800)
-  const int displayWidth = (orient == 0) ? 800 : 480;
-  const int displayHeight = (orient == 0) ? 480 : 800;
-  const int totalPixels = displayWidth * displayHeight;
-  
-  // Read entire file into buffer
-  uint8_t* fileData = (uint8_t*)malloc(fileSize);
-  if (!fileData) {
-    Serial1.println("Failed to allocate memory");
-    inkFile.close();
-    return false;
-  }
-  
-  inkFile.seek(0);
-  inkFile.read(fileData, fileSize);
-  inkFile.close();
-  
-  // LZW Decoding
+}
+
+// Decode LZW data (Version 0/1 .ink files)
+static int decodeLZW(const uint8_t* fileData, int fileSize, int dataPtr,
+                     uint8_t minCodeSize, uint8_t* result, int totalPixels) {
   int clearCode = 1 << minCodeSize;
   int eoiCode = clearCode + 1;
   uint32_t bitBuf = 0;
   int bitCount = 0;
-  int ptr = 4; // Start after header
+  int ptr = dataPtr;
   int codeSize = minCodeSize + 1;
-  
-  // Read code function
+
   auto readCode = [&]() -> int {
     while (bitCount < codeSize) {
       if (ptr >= fileSize) return eoiCode;
@@ -1052,8 +1089,7 @@ bool decodeAndDisplayInk(String filename) {
     bitCount -= codeSize;
     return code;
   };
-  
-  // Initialize dictionary
+
   std::vector<LZWDictEntry> dict;
   auto initDict = [&]() {
     dict.clear();
@@ -1062,27 +1098,17 @@ bool decodeAndDisplayInk(String filename) {
       entry.data.push_back(i);
       dict.push_back(entry);
     }
-    // Add clear and EOI codes
     dict.push_back(LZWDictEntry()); // clearCode
     dict.push_back(LZWDictEntry()); // eoiCode
   };
-  
+
   initDict();
-  
-  // Decode pixel data
-  uint8_t* result = (uint8_t*)malloc(totalPixels);
-  if (!result) {
-    Serial1.println("Failed to allocate result buffer");
-    free(fileData);
-    return false;
-  }
-  
+
   int resIdx = 0;
   int oldCode = -1;
-  
+
   while (resIdx < totalPixels) {
     int code = readCode();
-    
     if (code == eoiCode) break;
     if (code == clearCode) {
       initDict();
@@ -1090,59 +1116,42 @@ bool decodeAndDisplayInk(String filename) {
       oldCode = -1;
       continue;
     }
-    
-    // Get dictionary entry
+
     std::vector<uint8_t> entry;
     if (code < (int)dict.size() && dict[code].data.size() > 0) {
       entry = dict[code].data;
     } else if (code == (int)dict.size() && oldCode != -1 && oldCode < (int)dict.size()) {
-      // Special case: code equals dict length
       entry = dict[oldCode].data;
-      if (entry.size() > 0) {
-        entry.push_back(entry[0]);
-      }
+      if (entry.size() > 0) entry.push_back(entry[0]);
     } else {
-      Serial1.print("Invalid code: ");
+      Serial1.print("Invalid LZW code: ");
       Serial1.println(code);
       break;
     }
-    
-    // Output entry data
+
     for (size_t j = 0; j < entry.size() && resIdx < totalPixels; j++) {
       result[resIdx++] = entry[j];
     }
-    
-    // Update dictionary
+
     if (oldCode != -1 && oldCode < (int)dict.size() && dict[oldCode].data.size() > 0) {
       LZWDictEntry newEntry;
       newEntry.data = dict[oldCode].data;
-      if (entry.size() > 0) {
-        newEntry.data.push_back(entry[0]);
-      }
+      if (entry.size() > 0) newEntry.data.push_back(entry[0]);
       dict.push_back(newEntry);
-      
-      // Increase code size if needed
-      if (dict.size() == (size_t)(1 << codeSize) && codeSize < 12) {
-        codeSize++;
-      }
+      if (dict.size() == (size_t)(1 << codeSize) && codeSize < 12) codeSize++;
     }
-    
+
     oldCode = code;
   }
-  
-  free(fileData);
-  
-  Serial1.print("Decoded ");
-  Serial1.print(resIdx);
-  Serial1.println(" pixels");
-  
-  // Initialize display
+  return resIdx;
+}
+
+// Display decoded pixel data on the E-Ink display
+static void displayPixels(uint8_t* result, int resIdx,
+                          int displayWidth, int displayHeight, int fileOrientation) {
   display.init(115200);
-  // Set rotation based on file orientation (0=0°, 1=90°, 2=180°, 3=270°)
   display.setRotation(fileOrientation);
   display.fillScreen(GxEPD_WHITE);
-  
-  // Draw pixels to display
   display.setFullWindow();
   display.firstPage();
   do {
@@ -1154,19 +1163,92 @@ bool decodeAndDisplayInk(String filename) {
           if (colorIdx < 6) {
             display.drawPixel(x, y, displayPalette[colorIdx]);
           } else {
-            // Fallback to black if color index out of range
             display.drawPixel(x, y, GxEPD_BLACK);
           }
         }
       }
     }
   } while (display.nextPage());
-  
   display.hibernate();
-  
-  free(result);
+}
+
+// Helper function to check if SD card is available
+bool isSDCardAvailable() {
+  if (digitalRead(SD_DET_PIN) == HIGH) {
+    return false;
+  }
+  return SD.begin(SD_CS_PIN, hspi);
+}
+
+bool decodeAndDisplayInk(String filename) {
+  if (!isSDCardAvailable()) {
+    Serial1.println("SD card not available for decodeAndDisplayInk");
+    return false;
+  }
+
+  int fileOrientation = 0;
+  if (filename.length() > 0) {
+    char firstChar = filename.charAt(0);
+    if (firstChar >= '0' && firstChar <= '3') fileOrientation = firstChar - '0';
+  }
+
+  File inkFile = SD.open("/" + filename, FILE_READ);
+  if (!inkFile) {
+    Serial1.print("Failed to open .ink file: ");
+    Serial1.println(filename);
+    return false;
+  }
+
+  size_t fileSize = inkFile.size();
+  if (fileSize < 4) { Serial1.println("File too small"); inkFile.close(); return false; }
+
+  uint8_t* fileData = (uint8_t*)malloc(fileSize);
+  if (!fileData) { Serial1.println("Failed to allocate memory"); inkFile.close(); return false; }
+
+  inkFile.read(fileData, fileSize);
+  inkFile.close();
+
+  uint8_t version = fileData[0];
+  uint8_t displayId = fileData[1];
+  uint8_t orient = fileData[3];
+
+  Serial1.print("INK v"); Serial1.print(version);
+  Serial1.print(" display="); Serial1.print((char)displayId);
+  Serial1.print(" orient="); Serial1.println(orient == 0 ? "L" : "P");
+
+  if (displayId != DEVICE_DISPLAY_ID[0]) {
+    Serial1.println("Display ID mismatch!");
+    free(fileData);
+    return false;
+  }
+
+  const int displayWidth = (orient == 0) ? 800 : 480;
+  const int displayHeight = (orient == 0) ? 480 : 800;
+  const int totalPixels = displayWidth * displayHeight;
+
+  uint8_t* result = (uint8_t*)malloc(totalPixels);
+  if (!result) { Serial1.println("Failed to allocate result buffer"); free(fileData); return false; }
+
+  int resIdx = 0;
+  if (version == 3) {
+    resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
+    if (resIdx > 0) {
+      inversePaethPrediction(result, resIdx, displayWidth, 6);
+    }
+  } else if (version == 2) {
+    resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
+  } else {
+    uint8_t minCodeSize = 3;
+    resIdx = decodeLZW(fileData, fileSize, 4, minCodeSize, result, totalPixels);
+  }
+
   free(fileData);
-  
+
+  Serial1.print("Decoded "); Serial1.print(resIdx); Serial1.println(" pixels");
+
+  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation);
+  free(result);
+
   Serial1.println("Image displayed successfully");
   return true;
 }
@@ -1351,185 +1433,52 @@ bool decodeAndDisplayInkFromHTTP(String imageUrl) {
     return false;
   }
   
-  // Read header (Version 1 format): [version, displayId, dither, orient, ...data]
   uint8_t version = fileData[0];
   uint8_t displayId = fileData[1];
-  uint8_t dither = fileData[2];
   uint8_t orient = fileData[3];
-  uint8_t minCodeSize = 3; // Fixed for 6 colors (Spectra 6)
-  int dataPtr = 4;
-  
-  Serial1.print("Version: ");
-  Serial1.println(version);
-  Serial1.print("Display ID: ");
-  Serial1.println((char)displayId);
-  Serial1.print("Dither: ");
-  Serial1.println(dither);
-  Serial1.print("Orientation: ");
-  Serial1.println(orient == 0 ? "Landscape" : "Portrait");
-  Serial1.print("MinCodeSize: ");
-  Serial1.println(minCodeSize);
-  
-  // Check if display ID matches
+
+  Serial1.print("INK v"); Serial1.print(version);
+  Serial1.print(" display="); Serial1.print((char)displayId);
+  Serial1.print(" orient="); Serial1.println(orient == 0 ? "L" : "P");
+
   if (displayId != DEVICE_DISPLAY_ID[0]) {
     Serial1.println("Display ID mismatch!");
     free(fileData);
     return false;
   }
-  
-  // Display dimensions for Display ID "9" (Spectra 6 7,3" 800x480)
-  // For portrait images, dimensions are swapped (480x800)
+
   const int displayWidth = (orient == 0) ? 800 : 480;
   const int displayHeight = (orient == 0) ? 480 : 800;
   const int totalPixels = displayWidth * displayHeight;
-  
-  // LZW Decoding (same as decodeAndDisplayInk)
-  int clearCode = 1 << minCodeSize;
-  int eoiCode = clearCode + 1;
-  uint32_t bitBuf = 0;
-  int bitCount = 0;
-  int ptr = dataPtr; // Start from correct position
-  int codeSize = minCodeSize + 1;
-  
-  // Read code function
-  auto readCode = [&]() -> int {
-    while (bitCount < codeSize) {
-      if (ptr >= fileSize) return eoiCode;
-      bitBuf |= ((uint32_t)fileData[ptr++] << bitCount);
-      bitCount += 8;
-    }
-    int code = bitBuf & ((1 << codeSize) - 1);
-    bitBuf >>= codeSize;
-    bitCount -= codeSize;
-    return code;
-  };
-  
-  // Initialize dictionary
-  std::vector<LZWDictEntry> dict;
-  auto initDict = [&]() {
-    dict.clear();
-    for (int i = 0; i < (1 << minCodeSize); i++) {
-      LZWDictEntry entry;
-      entry.data.push_back(i);
-      dict.push_back(entry);
-    }
-    // Add clear and EOI codes
-    dict.push_back(LZWDictEntry()); // clearCode
-    dict.push_back(LZWDictEntry()); // eoiCode
-  };
-  
-  initDict();
-  
-  // Decode pixel data
+
   uint8_t* result = (uint8_t*)malloc(totalPixels);
   if (!result) {
     Serial1.println("Failed to allocate result buffer");
     free(fileData);
     return false;
   }
-  
+
   int resIdx = 0;
-  int oldCode = -1;
-  
-  while (resIdx < totalPixels) {
-    int code = readCode();
-    
-    if (code == eoiCode) break;
-    if (code == clearCode) {
-      initDict();
-      codeSize = minCodeSize + 1;
-      oldCode = -1;
-      continue;
+  if (version == 3) {
+    resIdx = decodeDeflate(fileData + 4, bytesRead - 4, result, totalPixels);
+    if (resIdx > 0) {
+      inversePaethPrediction(result, resIdx, displayWidth, 6);
     }
-    
-    // Get dictionary entry
-    std::vector<uint8_t> entry;
-    if (code < (int)dict.size() && dict[code].data.size() > 0) {
-      entry = dict[code].data;
-    } else if (code == (int)dict.size() && oldCode != -1 && oldCode < (int)dict.size()) {
-      // Special case: code equals dict length
-      entry = dict[oldCode].data;
-      if (entry.size() > 0) {
-        entry.push_back(entry[0]);
-      }
-    } else {
-      Serial1.print("Invalid code: ");
-      Serial1.println(code);
-      break;
-    }
-    
-    // Output entry data
-    for (size_t j = 0; j < entry.size() && resIdx < totalPixels; j++) {
-      result[resIdx++] = entry[j];
-    }
-    
-    // Update dictionary
-    if (oldCode != -1 && oldCode < (int)dict.size() && dict[oldCode].data.size() > 0) {
-      LZWDictEntry newEntry;
-      newEntry.data = dict[oldCode].data;
-      if (entry.size() > 0) {
-        newEntry.data.push_back(entry[0]);
-      }
-      dict.push_back(newEntry);
-      
-      // Increase code size if needed
-      if (dict.size() == (size_t)(1 << codeSize) && codeSize < 12) {
-        codeSize++;
-      }
-    }
-    
-    oldCode = code;
+  } else if (version == 2) {
+    resIdx = decodeDeflate(fileData + 4, bytesRead - 4, result, totalPixels);
+  } else {
+    uint8_t minCodeSize = 3;
+    resIdx = decodeLZW(fileData, bytesRead, 4, minCodeSize, result, totalPixels);
   }
-  
-  Serial1.print("Decoded ");
-  Serial1.print(resIdx);
-  Serial1.print("/");
-  Serial1.print(totalPixels);
-  Serial1.println(" pixels");
-  
-  // Initialize display
-  Serial1.println("Initializing display...");
-  display.init(115200);
-  // Set rotation based on file orientation (0=0°, 1=90°, 2=180°, 3=270°)
-  Serial1.print("Setting display rotation to: ");
-  Serial1.println(fileOrientation);
-  display.setRotation(fileOrientation);
-  display.fillScreen(GxEPD_WHITE);
-  
-  // Draw pixels to display
-  Serial1.println("Drawing pixels to display...");
-  display.setFullWindow();
-  display.firstPage();
-  int pixelsDrawn = 0;
-  do {
-    for (int y = 0; y < displayHeight; y++) {
-      for (int x = 0; x < displayWidth; x++) {
-        int pixelIdx = y * displayWidth + x;
-        if (pixelIdx < resIdx) {
-          uint8_t colorIdx = result[pixelIdx];
-          if (colorIdx < 6) {
-            display.drawPixel(x, y, displayPalette[colorIdx]);
-          } else {
-            // Fallback to black if color index out of range
-            display.drawPixel(x, y, GxEPD_BLACK);
-          }
-          pixelsDrawn++;
-        }
-      }
-    }
-  } while (display.nextPage());
-  
-  Serial1.print("Drew ");
-  Serial1.print(pixelsDrawn);
-  Serial1.println(" pixels");
-  
-  Serial1.println("Hibernating display...");
-  display.hibernate();
-  
-  Serial1.println("Freeing memory...");
+
+  Serial1.print("Decoded "); Serial1.print(resIdx);
+  Serial1.print("/"); Serial1.print(totalPixels); Serial1.println(" pixels");
+
+  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation);
+
   free(result);
   free(fileData);
-  
+
   Serial1.println("Image displayed successfully from HTTP");
   return true;
 }
