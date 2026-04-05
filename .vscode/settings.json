@@ -1,0 +1,45 @@
+{
+  "gulptasks.pattern": "**/gulpfile.{js,mjs,cjs}",
+  "npm.enableScriptExplorer": true,
+  "npm.autoDetect": "on",
+  "terminal.integrated.env.windows": {
+    "PATH": "${workspaceFolder}\\node_modules\\.bin;${env:PATH}"
+  },
+  "terminal.integrated.env.osx": {
+    "PATH": "${workspaceFolder}/node_modules/.bin:${env:PATH}"
+  },
+  "terminal.integrated.env.linux": {
+    "PATH": "${workspaceFolder}/node_modules/.bin:${env:PATH}"
+  },
+  "taskexplorer.enabledTasks": {
+    "ant": false,
+    "apppublisher": false,
+    "bash": true,
+    "batch": true,
+    "composer": false,
+    "eslint": true,
+    "gradle": false,
+    "grunt": false,
+    "gulp": true,
+    "jenkins": false,
+    "laravel": false,
+    "make": false,
+    "maven": false,
+    "nodejs": false,
+    "npm": true,
+    "nsis": false,
+    "perl": false,
+    "pipenv": false,
+    "powershell": true,
+    "python": true,
+    "ruby": false,
+    "tsc": true,
+    "webpack": false,
+    "webpackwrap": false,
+    "workspace": true
+  },
+  "taskexplorer.useGulp": true,
+  "platformio-ide.useBuiltinPIOCore": false,
+  "platformio-ide.showEditorTitleShortcuts": true,
+  "platformio-ide.activateProjectOnTextEditorChange": true
+}

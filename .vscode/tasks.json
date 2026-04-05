@@ -1,0 +1,103 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "gulp BUILD_ALL_SERVER_PACKAGES",
+      "type": "shell",
+      "command": "npx gulp BUILD_ALL_SERVER_PACKAGES",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp BUILD_INSTALLER",
+      "type": "shell",
+      "command": "npx gulp BUILD_INSTALLER",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp BUILD_SERVER_PACKAGES",
+      "type": "shell",
+      "command": "npx gulp BUILD_SERVER_PACKAGES",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp ENCODE_INK",
+      "type": "shell",
+      "command": "npx gulp ENCODE_INK",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp FIRMWARE_BUILD",
+      "type": "shell",
+      "command": "npx gulp FIRMWARE_BUILD",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp FIRMWARE_UPLOAD",
+      "type": "shell",
+      "command": "npx gulp FIRMWARE_UPLOAD",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp FIRMWARE_MONITOR",
+      "type": "shell",
+      "command": "npx gulp FIRMWARE_MONITOR",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp FIRMWARE_UPLOAD_MONITOR",
+      "type": "shell",
+      "command": "npx gulp FIRMWARE_UPLOAD_MONITOR",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "problemMatcher": []
+    },
+    {
+      "label": "gulp --tasks (Liste)",
+      "type": "shell",
+      "command": "npx gulp --tasks",
+      "options": { "cwd": "${workspaceFolder}", "statusbar": { "hide": true } },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Build",
+      "type": "shell",
+      "command": "pio run",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "statusbar": { "label": "$(tools) Build", "detail": "PlatformIO: pio run" }
+      },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Upload",
+      "type": "shell",
+      "command": "pio run -t upload",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "statusbar": { "label": "$(cloud-upload) Upload", "detail": "PlatformIO: Upload" }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Monitor",
+      "type": "shell",
+      "command": "pio device monitor",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "statusbar": { "label": "$(plug) Monitor", "detail": "PlatformIO: Serial Monitor" }
+      },
+      "problemMatcher": []
+    }
+  ]
+}

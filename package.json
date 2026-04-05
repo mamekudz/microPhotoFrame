@@ -1,34 +1,38 @@
 {
+  "name": "microphotoframe",
+  "version": "1.0.0",
+  "description": "WiFi-based E-Ink Photo Frame - Build Tools & Installer",
+  "author": "Meinolf Amekudzi",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:packages": "gulp BUILD_ALL_SERVER_PACKAGES",
+    "build:installer": "gulp BUILD_INSTALLER",
+    "build:server:pick": "gulp BUILD_SERVER_PACKAGES",
+    "encode:ink": "gulp ENCODE_INK",
+    "firmware:build": "gulp FIRMWARE_BUILD",
+    "firmware:upload": "gulp FIRMWARE_UPLOAD",
+    "firmware:monitor": "gulp FIRMWARE_MONITOR",
+    "firmware:upload-monitor": "gulp FIRMWARE_UPLOAD_MONITOR",
+    "gulp:tasks": "gulp --tasks",
+    "gen:branding": "node tools/gen-embedded-branding.mjs"
+  },
   "dependencies": {
-    "body-parser": "^2.2.1",
-    "child_process": "^1.0.2",
-    "events": "^3.3.0",
-    "express": "^5.2.1",
     "fast-glob": "^3.3.3",
-    "fs": "^0.0.1-security",
-    "gulp-clean": "^0.4.0",
-    "gulp-concat": "^2.6.1",
-    "gulp-download2": "^1.1.0",
-    "gulp-if": "^3.0.0",
-    "gulp-mu-build-filter": "^1.5.2",
-    "gulp-mu-js-cleanup": "^1.1.0",
-    "gulp-prompt": "^1.2.0",
-    "gulp-rename": "^2.1.0",
-    "gulp-replace": "^1.1.4",
-    "gulp-util": "^3.0.8",
-    "gulp-wait": "^0.0.2",
-    "gulp-zip": "^6.1.0",
-    "gulp4-run-sequence": "^1.0.2",
-    "ink-encoder": "^1.1.0",
+    "ink-encoder": "file:../ink-encoder",
     "jszip": "^3.10.1",
     "merge2": "^1.4.1",
-    "path": "^0.12.7",
-    "request": "^2.88.2",
-    "sharp": "^0.33.5",
-    "zip-a-folder": "^4.0.4"
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "gulp": "^5.0.1",
-    "gulp-cli": "^3.1.0"
+    "gulp-clean": "^0.4.0",
+    "gulp-cli": "^3.1.0",
+    "gulp-concat": "^2.6.1",
+    "gulp-prompt": "^1.2.0",
+    "gulp-rename": "^2.1.0",
+    "gulp-replace": "^1.1.4",
+    "gulp-zip": "^6.1.0"
   }
 }

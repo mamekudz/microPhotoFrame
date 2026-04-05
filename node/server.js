@@ -620,6 +620,76 @@ const handleImportShowAsync = async (rest, input) => {
     }
 };
 
+// --- OTA Firmware Update: Proxy .bin to device ---
+const handleFirmwareUpdate = async (rest, input) => {
+    const deviceIp = input.deviceIp;
+    const firmwareBase64 = input.firmware; // Base64-encoded .bin
+    if (!deviceIp) throw new Error("deviceIp fehlt.");
+    if (!firmwareBase64) throw new Error("firmware (Base64) fehlt.");
+
+    const firmwareBuf = Buffer.from(firmwareBase64, 'base64');
+    console.log(`[OTA] Sending ${firmwareBuf.length} bytes to ${deviceIp}...`);
+
+    const http = require('http');
+    const boundary = '----FWUpload' + Date.now();
+    const header = `--${boundary}\r\nContent-Disposition: form-data; name="firmware"; filename="firmware.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+    const footer = `\r\n--${boundary}--\r\n`;
+    const bodyLen = Buffer.byteLength(header) + firmwareBuf.length + Buffer.byteLength(footer);
+
+    const result = await new Promise((resolve, reject) => {
+        const req = http.request({
+            hostname: deviceIp,
+            port: 80,
+            path: '/ota',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'multipart/form-data; boundary=' + boundary,
+                'Content-Length': bodyLen
+            },
+            timeout: 120000
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve({ ok: res.statusCode === 200, msg: data }); }
+            });
+        });
+        req.on('error', e => reject(e));
+        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout beim Senden an Gerät')); });
+        req.write(header);
+        req.write(firmwareBuf);
+        req.write(footer);
+        req.end();
+    });
+
+    rest.output.deviceResponse = result;
+    rest.ok = result.ok !== false;
+    if (!rest.ok) {
+        rest.error.msg = result.msg || 'Firmware-Update fehlgeschlagen';
+        rest.error.code = 10;
+    }
+};
+
+const handleGetDeviceInfo = async (rest, input) => {
+    const deviceIp = input.deviceIp;
+    if (!deviceIp) throw new Error("deviceIp fehlt.");
+
+    const http = require('http');
+    const result = await new Promise((resolve, reject) => {
+        http.get(`http://${deviceIp}/info`, { timeout: 5000 }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve({ error: data }); }
+            });
+        }).on('error', e => reject(e))
+          .on('timeout', function() { this.destroy(); reject(new Error('Gerät nicht erreichbar')); });
+    });
+
+    rest.output.deviceInfo = result;
+    rest.ok = true;
+};
+
 // --- API POST ROUTE ---
 app.post('/', async (req, res) => {
     const body = req.body || {};
@@ -671,6 +741,12 @@ app.post('/', async (req, res) => {
                 break;
             case 'importShow':
                 await handleImportShowAsync(rest, input);
+                break;
+            case 'firmwareUpdate':
+                await handleFirmwareUpdate(rest, input);
+                break;
+            case 'getDeviceInfo':
+                await handleGetDeviceInfo(rest, input);
                 break;
             default:
                 rest.error.msg = "Unbekannte Aktion: " + action;

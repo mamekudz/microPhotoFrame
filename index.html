@@ -5,6 +5,7 @@
     <title>µPhotoFrame</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="./favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="./styles/app.css">
 
     <!-- TensorFlow.js Version 3.11.0 -->
@@ -251,6 +252,45 @@
             </p>
             <button class="btn-action save-btn" onclick="window.ImportShow()">📥 Import Show</button>
             <div id="importShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="Devices" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <h2 class="page-title">Device Manager</h2>
+        </div>
+
+        <div class="controls">
+            <button class="btn-action save-btn" onclick="window.RefreshDevices()">🔄 Refresh Devices</button>
+        </div>
+
+        <div id="deviceList" style="margin-top:15px;">
+            <p style="color:#888;">Loading devices...</p>
+        </div>
+
+        <hr style="margin:25px 0;">
+
+        <h3 style="margin-bottom:12px;">Firmware Update (OTA)</h3>
+        <div class="controls">
+            <div class="control-row">
+                <label for="otaDeviceIp">Device IP:</label>
+                <input type="text" id="otaDeviceIp" placeholder="z.B. 192.168.1.42" style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div class="control-row" style="margin-top:8px;">
+                <label for="otaFileInput">Firmware .bin:</label>
+                <button class="btn-action save-btn" id="otaFileBtn" onclick="document.getElementById('otaFileInput').click(); return false;" style="flex:1;">📄 Select .bin file</button>
+                <input type="file" id="otaFileInput" accept=".bin" class="file-input-hidden" onchange="window.OtaFileSelected(event)" />
+            </div>
+            <div id="otaFileInfo" style="font-size:0.85rem; color:#666; margin-top:4px; display:none;"></div>
+            <button class="btn-action save-btn" id="otaUploadBtn" onclick="window.StartOtaUpdate()" style="margin-top:12px; background:#e67e22;" disabled>⬆ Upload Firmware</button>
+            <div id="otaProgress" style="margin-top:10px; display:none;">
+                <div style="background:#eee; border-radius:4px; overflow:hidden; height:24px;">
+                    <div id="otaProgressBar" style="background:#27ae60; height:100%; width:0%; transition:width 0.3s;"></div>
+                </div>
+                <p id="otaStatusText" style="font-size:0.85rem; color:#666; margin-top:4px;"></p>
+            </div>
+            <div id="otaMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
 

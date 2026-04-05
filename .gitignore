@@ -15,6 +15,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 dist/
+installers/
+tmp/
+packages/
 
 # Python
 __pycache__/
@@ -25,7 +28,10 @@ venv/
 .env
 
 # IDEs
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
 .idea/
 *.sublime-project
 *.sublime-workspace
@@ -62,5 +68,7 @@ ClassicalPaintings
 testimgs
 .pio
 .editorconfig
-.vscode
 firmware/backups
+
+# SQL Express-Installer > GitHub 100 MB Limit; lokal in installer/assets ablegen
+installer/assets/SQLEXPR_x64_ENU.exe

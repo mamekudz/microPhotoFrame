@@ -178,7 +178,8 @@ export default class EInk {
 
     if (rotate) {
       ctx.translate(dw / 2, dh / 2);
-      ctx.rotate(90 * Math.PI / 180);
+      // −90° (CCW), keine Spiegelung — PC-Inverse: GDI+ Rotate90 / ink-encoder, siehe docs/INK_ORIENTATION_PC.md
+      ctx.rotate(-90 * Math.PI / 180);
       ctx.drawImage(this.#imgOrg, sx, sy, sw, sh, -dh / 2, -dw / 2, dh, dw);
     } else {
       ctx.drawImage(this.#imgOrg, sx, sy, sw, sh, 0, 0, dw, dh);

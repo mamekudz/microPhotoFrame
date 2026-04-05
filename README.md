@@ -122,6 +122,7 @@ Add automatic orientation detection with 3D-printed case:
 - **[Firmware README](firmware/README.md)** - Detailed firmware documentation
 - **[ink-encoder Package](packages/ink-encoder/README.md)** - NPM package documentation
 - **[Technical Overview](docs/technical_overview.md)** - Architecture and design
+- **[.ink orientation on PC](docs/INK_ORIENTATION_PC.md)** - Portrait encode vs. Windows preview (no mirror)
 - **[Server Setup](docs/)** - IIS, Apache, NGINX, Node.js guides
 
 ### 🎁 Included Content
@@ -251,6 +252,7 @@ Fügen Sie automatische Orientierungserkennung mit 3D-gedrucktem Gehäuse hinzu:
 - **[Firmware README](firmware/README.md)** - Detaillierte Firmware-Dokumentation
 - **[ink-encoder Paket](packages/ink-encoder/README.md)** - NPM-Paket Dokumentation
 - **[Technische Übersicht](docs/technical_overview.md)** - Architektur und Design
+- **[.ink Orientierung am PC](docs/INK_ORIENTATION_PC.md)** - Hochkant in Firmware vs. Vorschau (ohne Spiegelung)
 - **[Server-Setup](docs/)** - IIS, Apache, NGINX, Node.js Anleitungen
 
 ### 🎁 Enthaltener Inhalt

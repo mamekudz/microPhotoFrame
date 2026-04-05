@@ -183,6 +183,9 @@ window.ShowPage = function (pageId) {
             }
         }, 100);
     }
+    if (pageId === 'Devices') {
+        window.RefreshDevices();
+    }
     if (pageId === 'PhotoSettings' || pageId === 'AddShowPhotos') {
         // Update button states when opening these pages
         if (window.UpdatePhotoActionButtons) {
@@ -1089,10 +1092,9 @@ window.updateFocusMarker = function () {
     // Account for rotation in portrait mode
     let x, y;
     if (rotate) {
-        // In portrait mode, the image is rotated 90 degrees
-        // X and Y are swapped
-        x = (1 - relY) * rect.width;
-        y = relX * rect.height;
+        // Hochkant: gleiche Zuordnung wie EInk.Convert (−90°)
+        x = relY * rect.width;
+        y = (1 - relX) * rect.height;
     } else {
         x = relX * rect.width;
         y = relY * rect.height;
@@ -3505,4 +3507,139 @@ window.CreateNewShow = function () {
             displaySelect.disabled = false;
         }
     });
+};
+
+// ===============================================================
+// DEVICE MANAGER & OTA FIRMWARE UPDATE
+// ===============================================================
+
+window.RefreshDevices = async function () {
+    const listEl = document.getElementById('deviceList');
+    if (!listEl) return;
+    listEl.innerHTML = '<p style="color:#888;">Loading devices...</p>';
+
+    try {
+        const res = await new RESTX().promiseCall('getDevices');
+        const devices = res.output?.devices || {};
+        const keys = Object.keys(devices);
+        if (keys.length === 0) {
+            listEl.innerHTML = '<p style="color:#888;">No devices registered yet. Devices appear here once they connect to the server.</p>';
+            return;
+        }
+
+        let html = '<table style="width:100%; border-collapse:collapse; font-size:0.9rem;">';
+        html += '<tr style="background:#f5f5f5; text-align:left;"><th style="padding:8px;">Name</th><th style="padding:8px;">IP</th><th style="padding:8px;">Display</th><th style="padding:8px;">Last Seen</th><th style="padding:8px;">Actions</th></tr>';
+        for (const key of keys) {
+            const d = devices[key];
+            const ip = d.ip || key.split('_').pop();
+            const name = d.name || key;
+            const display = d.displayId || d.display || '–';
+            const lastSeen = d.lastEcho ? new Date(d.lastEcho).toLocaleString() : '–';
+            html += `<tr style="border-bottom:1px solid #eee;">`;
+            html += `<td style="padding:8px;">${name}</td>`;
+            html += `<td style="padding:8px;"><code>${ip}</code></td>`;
+            html += `<td style="padding:8px;">${display}</td>`;
+            html += `<td style="padding:8px;">${lastSeen}</td>`;
+            html += `<td style="padding:8px;">`;
+            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="window.QueryDeviceInfo('${ip}')">ℹ Info</button> `;
+            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="document.getElementById('otaDeviceIp').value='${ip}'">🎯 Select for OTA</button>`;
+            html += `</td></tr>`;
+        }
+        html += '</table>';
+        listEl.innerHTML = html;
+    } catch (err) {
+        listEl.innerHTML = '<p style="color:#c00;">Error loading devices: ' + (err.message || err) + '</p>';
+    }
+};
+
+window.QueryDeviceInfo = async function (ip) {
+    try {
+        const res = await new RESTX().promiseCall('getDeviceInfo', { deviceIp: ip });
+        const info = res.output?.deviceInfo;
+        if (info) {
+            let msg = `Device: ${info.name || '?'}\nFirmware: ${info.version || '?'}\nMAC: ${info.mac || '?'}\nDisplay: ${info.display || '?'}\nFree Heap: ${info.freeHeap ? (info.freeHeap / 1024).toFixed(1) + ' KB' : '?'}\nSketch: ${info.sketchSize ? (info.sketchSize / 1024).toFixed(0) + ' KB' : '?'}\nFree Space: ${info.freeSketchSpace ? (info.freeSketchSpace / 1024).toFixed(0) + ' KB' : '?'}`;
+            alert(msg);
+        }
+    } catch (err) {
+        alert('Device not reachable: ' + (err.message || err));
+    }
+};
+
+let _otaSelectedFile = null;
+
+window.OtaFileSelected = function (event) {
+    const files = event.target.files;
+    const infoEl = document.getElementById('otaFileInfo');
+    const uploadBtn = document.getElementById('otaUploadBtn');
+    if (files && files.length > 0) {
+        _otaSelectedFile = files[0];
+        if (infoEl) {
+            infoEl.style.display = 'block';
+            infoEl.textContent = `${_otaSelectedFile.name} (${(_otaSelectedFile.size / 1024).toFixed(1)} KB)`;
+        }
+        if (uploadBtn) uploadBtn.disabled = false;
+    } else {
+        _otaSelectedFile = null;
+        if (infoEl) infoEl.style.display = 'none';
+        if (uploadBtn) uploadBtn.disabled = true;
+    }
+};
+
+window.StartOtaUpdate = async function () {
+    const ip = document.getElementById('otaDeviceIp')?.value?.trim();
+    if (!ip) { alert('Please enter the device IP address.'); return; }
+    if (!_otaSelectedFile) { alert('Please select a firmware .bin file.'); return; }
+
+    const msgEl = document.getElementById('otaMessage');
+    const progressEl = document.getElementById('otaProgress');
+    const barEl = document.getElementById('otaProgressBar');
+    const statusEl = document.getElementById('otaStatusText');
+    const uploadBtn = document.getElementById('otaUploadBtn');
+
+    if (uploadBtn) uploadBtn.disabled = true;
+    if (progressEl) progressEl.style.display = 'block';
+    if (msgEl) msgEl.style.display = 'none';
+    if (barEl) barEl.style.width = '10%';
+    if (statusEl) statusEl.textContent = 'Reading firmware file...';
+
+    try {
+        const arrayBuf = await _otaSelectedFile.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuf);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const base64 = btoa(binary);
+
+        if (barEl) barEl.style.width = '30%';
+        if (statusEl) statusEl.textContent = `Uploading ${(_otaSelectedFile.size / 1024).toFixed(0)} KB to ${ip}...`;
+
+        const res = await new RESTX().promiseCall('firmwareUpdate', {
+            deviceIp: ip,
+            firmware: base64
+        });
+
+        if (barEl) barEl.style.width = '100%';
+
+        if (res.ok) {
+            if (statusEl) statusEl.textContent = 'Firmware update successful! Device is rebooting...';
+            if (msgEl) {
+                msgEl.style.display = 'block';
+                msgEl.style.background = '#27ae60';
+                msgEl.style.color = '#fff';
+                msgEl.textContent = 'OTA update successful. The device will reboot with the new firmware.';
+            }
+        } else {
+            throw new Error(res.error?.msg || 'Unknown error');
+        }
+    } catch (err) {
+        if (barEl) barEl.style.width = '0%';
+        if (progressEl) progressEl.style.display = 'none';
+        if (msgEl) {
+            msgEl.style.display = 'block';
+            msgEl.style.background = '#e74c3c';
+            msgEl.style.color = '#fff';
+            msgEl.textContent = 'Firmware update failed: ' + (err.message || err);
+        }
+    } finally {
+        if (uploadBtn) uploadBtn.disabled = false;
+    }
 };

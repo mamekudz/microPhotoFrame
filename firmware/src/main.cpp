@@ -22,7 +22,11 @@
 #include <vector>
 #include <cstdlib>
 #include <Wire.h>
+#include <Update.h>
 #include <esp32s3/rom/miniz.h>
+#include <PNGdec.h>
+
+#define FIRMWARE_VERSION "1.0.0"
 
 // MPU6050 I2C Address
 #define MPU6050_ADDR 0x68
@@ -44,26 +48,28 @@
 #define SD_CS_PIN 14
 #define SD_MISO_PIN 8
 
-// Buttons (reTerminal E1002)
-#define BTN_UP 0
-#define BTN_DOWN 1
-#define BTN_LEFT 2
-#define BTN_RIGHT 3
-#define BTN_CENTER 4
+// Buttons (reTerminal E1002 – active-low, hardware pull-ups)
+// KEY0 = GPIO3 (green/red action button), KEY1 = GPIO4, KEY2 = GPIO5
+#define BTN_ACTION 3  // Red button (KEY0) – Quick-Menu / long-press = Reset
+#define BTN_NEXT   4  // Right  button (KEY1) – next image
+#define BTN_PREV   5  // Left   button (KEY2) – previous image
+
+// LED & Buzzer
+#define LED_PIN    6  // On-board LED (inverted: LOW=on)
+#define BUZZER_PIN 45 // On-board buzzer
 
 // Serial Port
 #define SERIAL_RX 44
 #define SERIAL_TX 43
 
-// MPU6050 I2C Pins (reTerminal pin header)
-// MPU6050 Breakout Board Connections:
-//   VCC -> Pin 1 (first contact at top near buttons)
-//   GND -> Pin 2
-//   SCL -> Pin 3
-//   SDA -> Pin 4
-//   XDA, XCL, AD0, INT -> internally capped
-#define MPU6050_SDA_PIN 4  // Pin 4 on reTerminal header
-#define MPU6050_SCL_PIN 3  // Pin 3 on reTerminal header
+// MPU6050 I2C via Expansion Header (J2)
+// Header wiring:
+//   Pin 1  HEADER_3V3 → VCC
+//   Pin 2  GND        → GND
+//   Pin 7  GPIO20     → SCL  (+ 4.7 kΩ pull-up to 3.3 V)
+//   Pin 8  GPIO19     → SDA  (+ 4.7 kΩ pull-up to 3.3 V)
+#define MPU6050_SDA_PIN 19 // Expansion header Pin 8
+#define MPU6050_SCL_PIN 20 // Expansion header Pin 7
 
 // === ePaper Driver Selection ===
 // 0: reTerminal E1001 (7.5'' B&W)
@@ -74,8 +80,7 @@
 #define DEVICE_DISPLAY_ID "I"
 
 // Default display rotation (0=landscape, 1=portrait, 2=landscape inverted, 3=portrait inverted)
-// Set to 1 if frame is mounted in portrait orientation
-#define DEFAULT_DISPLAY_ROTATION 1
+#define DEFAULT_DISPLAY_ROTATION 0
 
 #if (EPD_SELECT == 0)
 #define GxEPD2_DISPLAY_CLASS GxEPD2_BW
@@ -106,6 +111,8 @@ GxEPD2_DISPLAY_CLASS<GxEPD2_DRIVER_CLASS, MAX_HEIGHT(GxEPD2_DRIVER_CLASS)>
 String wifiSSID = "";
 String wifiPassword = "";
 String hostChannelUrl = "";
+/** Wenn kein MPU6050: logische Ausrichtung für Bildfilter (0–3), siehe readOrientation(). */
+uint8_t configDefaultOrientation = 0;
 bool configMode = false;
 unsigned long configModeStartTime = 0;
 const unsigned long CONFIG_MODE_TIMEOUT = 300000; // 5 minutes
@@ -123,8 +130,42 @@ bool wifiConnected = false;
 unsigned long lastServerCheck = 0;
 const unsigned long SERVER_CHECK_INTERVAL = 60000; // 1 minute
 
+// === Server / letztes Bild (Offline-Hinweis) ===
+int g_lastHttpStatusCode = -1;
+/** Zuletzt erfolgreich auf dem Panel gezeichnete .ink-Datei (nur Dateiname). */
+String lastDisplayedInkName = "";
+/** True, solange das aktuell sichtbare Bild mit Offline-Warn-Badge oben rechts gezeichnet wurde. */
+bool offlineBadgeOnScreen = false;
+/** Letzter getShows-Lauf: HTTP 200 + gültiges JSON (Show-Liste verstanden). */
+bool lastGetShowsSucceeded = true;
+/** Diagnose-String: letzte Fehlerstelle in getActiveShow (für Statusbildschirm). */
+String lastGetShowError = "";
+
+// === Quick-Menu Mode ===
+bool quickMenuMode = false;
+unsigned long quickMenuStart = 0;
+const unsigned long QUICK_MENU_TIMEOUT = 60000; // 60 seconds
+String cachedShowsJson = "";  // cached response from server for the menu
+
+/** >0 und millis() < deadline: Show nur lokal (Server-activeShows wird ignoriert). */
+unsigned long showTempOverrideUntilMs = 0;
+/** Zuletzt vom Server gelesene aktive Show (für Quick-Menü-Hinweis bei lokalem Override). */
+String serverActiveShowCached = "";
+/** Standard „Minuten bis Server wieder gilt“ im Quick-Menü (NVS qRevMin). */
+uint16_t quickMenuRevertMinutes = 60;
+
+static bool isShowTempOverrideActive() {
+  if (showTempOverrideUntilMs == 0) return false;
+  return (long)(millis() - showTempOverrideUntilMs) < 0;
+}
+
+// Captive-Portal DNS only when Soft-AP aktiv (sonst kein dnsServer.processNextRequest)
+bool dnsServerActive = false;
+
 // === SD Card Status ===
 bool sdCardMounted = false;
+/** Nach fehlgeschlagenem SD.begin (Karte meldet sich, Mount klappt nicht): kein SD.begin spam. */
+bool sdLazyMountFailed = false;
 
 // === MPU6050 Orientation Sensor ===
 bool mpu6050Available = false;
@@ -205,12 +246,28 @@ void loadConfig() {
   wifiSSID = preferences.getString("wifiSSID", "");
   wifiPassword = preferences.getString("wifiPassword", "");
   hostChannelUrl = preferences.getString("hostChannelUrl", "");
+  uint8_t o = preferences.getUChar("defOrient", 0);
+  if (o > 3) o = 0;
+  configDefaultOrientation = o;
+  lastDisplayedInkName = preferences.getString("lastInk", "");
+  currentShowName = preferences.getString("lastShow", "");
+  unsigned rm = preferences.getUShort("qRevMin", 60);
+  if (rm < 1) rm = 60;
+  if (rm > 1440) rm = 1440;
+  quickMenuRevertMinutes = (uint16_t)rm;
+  showTempOverrideUntilMs = 0;
   preferences.end();
   
   Serial1.print("Loaded config - SSID: ");
   Serial1.print(wifiSSID);
   Serial1.print(", URL: ");
-  Serial1.println(hostChannelUrl);
+  Serial1.print(hostChannelUrl);
+  Serial1.print(", defOrient: ");
+  Serial1.print((int)configDefaultOrientation);
+  Serial1.print(", lastInk len: ");
+  Serial1.print(lastDisplayedInkName.length());
+  Serial1.print(", lastShow: ");
+  Serial1.println(currentShowName);
 }
 
 void saveConfig() {
@@ -218,6 +275,7 @@ void saveConfig() {
   preferences.putString("wifiSSID", wifiSSID);
   preferences.putString("wifiPassword", wifiPassword);
   preferences.putString("hostChannelUrl", hostChannelUrl);
+  preferences.putUChar("defOrient", configDefaultOrientation);
   preferences.end();
   Serial1.println("Config saved");
 }
@@ -229,7 +287,16 @@ void clearConfig() {
   wifiSSID = "";
   wifiPassword = "";
   hostChannelUrl = "";
+  lastDisplayedInkName = "";
+  currentShowName = "";
   Serial1.println("Config cleared");
+}
+
+void rememberDisplayedInk(const String& name) {
+  lastDisplayedInkName = name;
+  preferences.begin("microPhotoFrame", false);
+  preferences.putString("lastInk", name);
+  preferences.end();
 }
 
 // === Configuration Web Server ===
@@ -323,16 +390,69 @@ static int doWiFiScan() {
   return (n < 0) ? 0 : n;
 }
 
+// --- SD-Assets für Web (gleiche Dateinamen wie Website: webassets/Logo.png + LogoText.png) ---
+static bool ensureSdForWebAsset() {
+  if (sdCardMounted) return true;
+  pinMode(SD_EN_PIN, OUTPUT);
+  digitalWrite(SD_EN_PIN, HIGH);
+  if (digitalRead(SD_DET_PIN) != LOW) return false;
+  if (sdLazyMountFailed) return false;
+  if (SD.begin(SD_CS_PIN, hspi)) {
+    sdCardMounted = true;
+    sdLazyMountFailed = false;
+    return true;
+  }
+  sdLazyMountFailed = true;
+  return false;
+}
+
+static bool sendSdFirstMatch(const char* const* paths, const char* mime) {
+  if (!ensureSdForWebAsset()) return false;
+  for (; *paths; ++paths) {
+    if (!SD.exists(*paths)) continue;
+    File f = SD.open(*paths, FILE_READ);
+    if (!f) continue;
+    size_t fileSize = f.size();
+    if (fileSize == 0) {
+      f.close();
+      continue;
+    }
+    server.sendHeader("Content-Type", mime);
+    server.sendHeader("Content-Length", String(fileSize));
+    server.sendHeader("Cache-Control", "public, max-age=3600");
+    server.send(200);
+    WiFiClient client = server.client();
+    uint8_t buffer[512];
+    while (fileSize > 0) {
+      size_t n = f.read(buffer, min((size_t)512, fileSize));
+      if (n == 0) break;
+      if (client.write(buffer, n) == 0) break;
+      fileSize -= n;
+    }
+    f.close();
+    return true;
+  }
+  return false;
+}
+
 void handleRoot() {
+  // In Quick-Menu mode, redirect "/" to the quick menu
+  if (quickMenuMode) {
+    server.sendHeader("Location", "/quickmenu");
+    server.send(302);
+    return;
+  }
+
   // Scan direkt beim Seitenaufbau - kein JavaScript fetch nötig
   int numNetworks = doWiFiScan();
 
-  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>microPhotoFrame Konfiguration</title>";
+  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><link rel='icon' href='/favicon.ico' type='image/x-icon'><title>microPhotoFrame Konfiguration</title>";
   html += "<style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;text-align:center;}";
   html += "input,button,select{width:100%;padding:10px;margin:10px 0;box-sizing:border-box;}";
   html += "button{background:#4CAF50;color:white;border:none;cursor:pointer;}";
   html += "#scanBtn{background:#2196F3;margin-bottom:10px;}";
-  html += "img.logo{max-width:100%;height:auto;margin-bottom:20px;}";
+  html += ".header-logo{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin-bottom:16px;}";
+  html += ".header-logo img{max-height:72px;width:auto;max-width:100%;}";
   html += ".password-wrapper{position:relative;width:100%;}";
   html += ".password-wrapper input{width:100%;padding-right:45px;}";
   html += ".password-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:20px;padding:5px;width:auto;color:#666;}";
@@ -340,7 +460,10 @@ void handleRoot() {
   html += ".status{padding:8px;margin:10px 0;border-radius:4px;font-size:14px;}";
   html += ".status.ok{background:#e8f5e9;color:#2e7d32;}";
   html += ".status.warn{background:#fff3e0;color:#e65100;}</style></head><body>";
-  html += "<img src='/logo' alt='microPhotoFrame Logo' class='logo' onerror='this.style.display=\"none\"'>";
+  html += "<div class='header-logo'>";
+  html += "<img src='/logo' alt='Logo' onerror=\"this.style.display='none'\">";
+  html += "<img src='/logotext' alt='&micro;PhotoFrame' onerror=\"this.style.display='none'\">";
+  html += "</div>";
   html += "<h1>microPhotoFrame Konfiguration</h1>";
 
   if (numNetworks > 0) {
@@ -378,6 +501,14 @@ void handleRoot() {
   html += "</div>";
   html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://server.com:888'><br>";
   html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888).</small><br>";
+  html += "<label>Standard-Ausrichtung (ohne Lagesensor MPU6050):</label>";
+  html += "<select name='def_orient' id='def_orient'>";
+  html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
+  html += "<option value='1'" + String(configDefaultOrientation == 1 ? " selected" : "") + ">Hochkant (90&deg;)</option>";
+  html += "<option value='2'" + String(configDefaultOrientation == 2 ? " selected" : "") + ">Querformat gedreht (180&deg;)</option>";
+  html += "<option value='3'" + String(configDefaultOrientation == 3 ? " selected" : "") + ">Hochkant gedreht (270&deg;)</option>";
+  html += "</select>";
+  html += "<small style='color:#666;'>Bei verbautem Sensor wird die Lage automatisch erkannt; dieser Wert gilt nur ohne Sensor.</small><br>";
   html += "<button type='submit'>Speichern</button>";
   html += "</form>";
   html += "<script>";
@@ -424,6 +555,10 @@ void handleSave() {
     wifiSSID = ssidIn;
     wifiPassword = server.hasArg("password") ? server.arg("password") : "";
     hostChannelUrl = urlIn;
+    if (server.hasArg("def_orient")) {
+      int o = server.arg("def_orient").toInt();
+      if (o >= 0 && o <= 3) configDefaultOrientation = (uint8_t)o;
+    }
     saveConfig();
     
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Gespeichert</title></head><body>";
@@ -440,103 +575,34 @@ void handleSave() {
 }
 
 void handleLogo() {
-  // Serve logo image from SD card (if available)
-  String logoPath = "/EINK_SPECTRA6_730_sq_800x480_logo.png";
-  
-  Serial1.println("=== Logo request ===");
-  
-  // Check if SD card is available and mounted
-  if (!sdCardMounted) {
-    Serial1.println("SD card not mounted - attempting to mount...");
-    if (digitalRead(SD_DET_PIN) == LOW) {
-      if (SD.begin(SD_CS_PIN, hspi)) {
-        sdCardMounted = true;
-        Serial1.println("SD card mounted successfully");
-      } else {
-        Serial1.println("SD card mount failed");
-        server.send(404, "text/plain", "SD card not available");
-        return;
-      }
-    } else {
-      Serial1.println("No SD card detected (pin HIGH)");
-      server.send(404, "text/plain", "SD card not available");
-      return;
-    }
-  }
-  
-  Serial1.print("Checking for logo file: ");
-  Serial1.println(logoPath);
-  
-  if (!SD.exists(logoPath)) {
-    Serial1.println("Logo file not found on SD card");
-    // List files in root for debugging
-    File root = SD.open("/");
-    if (root) {
-      Serial1.println("Files in root directory:");
-      File file = root.openNextFile();
-      int count = 0;
-      while (file && count < 10) {
-        Serial1.print("  ");
-        Serial1.println(file.name());
-        file = root.openNextFile();
-        count++;
-      }
-      root.close();
-    }
-    server.send(404, "text/plain", "Logo not found");
-    return;
-  }
-  
-  File logoFile = SD.open(logoPath, FILE_READ);
-  if (!logoFile) {
-    Serial1.println("Failed to open logo file");
-    server.send(500, "text/plain", "Failed to open logo");
-    return;
-  }
-  
-  // Get file size
-  size_t fileSize = logoFile.size();
-  Serial1.print("Logo file size: ");
-  Serial1.println(fileSize);
-  
-  if (fileSize == 0) {
-    Serial1.println("Logo file is empty");
-    logoFile.close();
-    server.send(500, "text/plain", "Logo file is empty");
-    return;
-  }
-  
-  // Set content type and headers
-  server.sendHeader("Content-Type", "image/png");
-  server.sendHeader("Content-Length", String(fileSize));
-  server.sendHeader("Cache-Control", "public, max-age=3600");
-  server.send(200);
-  
-  // Send file in chunks
-  uint8_t buffer[512];
-  size_t bytesRead;
-  WiFiClient client = server.client();
-  size_t totalSent = 0;
-  
-  while (fileSize > 0) {
-    bytesRead = logoFile.read(buffer, min((size_t)512, fileSize));
-    if (bytesRead == 0) {
-      Serial1.println("Unexpected end of file");
-      break;
-    }
-    size_t written = client.write(buffer, bytesRead);
-    if (written == 0) {
-      Serial1.println("Failed to write to client");
-      break;
-    }
-    totalSent += written;
-    fileSize -= bytesRead;
-  }
-  
-  logoFile.close();
-  Serial1.print("Logo served successfully. Sent ");
-  Serial1.print(totalSent);
-  Serial1.println(" bytes");
+  static const char* kLogoPaths[] = {
+      "/webassets/Logo.png",
+      "/Logo.png",
+      "/EINK_SPECTRA6_730_sq_800x480_logo.png",
+      nullptr,
+  };
+  if (!sendSdFirstMatch(kLogoPaths, "image/png"))
+    server.send(404, "text/plain", "Logo not found (SD: webassets/Logo.png oder /Logo.png)");
+}
+
+void handleLogoText() {
+  static const char* kTextPaths[] = {
+      "/webassets/LogoText.png",
+      "/LogoText.png",
+      nullptr,
+  };
+  if (!sendSdFirstMatch(kTextPaths, "image/png"))
+    server.send(404, "text/plain", "LogoText not found (SD: webassets/LogoText.png)");
+}
+
+void handleFavicon() {
+  static const char* kIcoPaths[] = {
+      "/favicon.ico",
+      "/webassets/favicon.ico",
+      nullptr,
+  };
+  if (!sendSdFirstMatch(kIcoPaths, "image/x-icon"))
+    server.send(404, "text/plain", "favicon not found (SD: /favicon.ico)");
 }
 
 void handleNotFound() {
@@ -580,152 +646,296 @@ void startConfigMode() {
 }
 
 // === WiFi Connection ===
+
+// Sauberer Radio-Reset: OFF → STA
+static void resetWiFiRadio() {
+  WiFi.disconnect(false);
+  delay(100);
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+}
+
+// Einen Verbindungsversuch mit Timeout (ms). Gibt true zurück bei WL_CONNECTED.
+static bool tryConnect(const char* ssid, const char* pass, int32_t channel, int timeoutMs) {
+  if (pass && strlen(pass) > 0) {
+    WiFi.begin(ssid, pass, channel);
+  } else {
+    WiFi.begin(ssid, nullptr, channel);
+  }
+  unsigned long start = millis();
+  int dots = 0;
+  while (WiFi.status() != WL_CONNECTED && (int)(millis() - start) < timeoutMs) {
+    delay(500);
+    Serial1.print(".");
+    dots++;
+    if (dots % 10 == 0) {
+      Serial1.printf(" [%d]", (int)WiFi.status());
+    }
+  }
+  Serial1.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
 bool connectWiFi() {
   if (wifiSSID.length() == 0) {
     Serial1.println("No WiFi SSID configured");
     return false;
   }
-  
+
   Serial1.print("Connecting to WiFi: ");
   Serial1.print(wifiSSID);
+  Serial1.printf(" (pw len=%u)\n", (unsigned)wifiPassword.length());
+
+  // Debug: Passwort-Hex (erste 2 + letzte 2 Bytes) zur Erkennung von Encoding-Problemen
   if (wifiPassword.length() > 0) {
-    Serial1.println(" (with password)");
-  } else {
-    Serial1.println(" (open network)");
+    Serial1.print("  pw hex: ");
+    const char* p = wifiPassword.c_str();
+    size_t plen = strlen(p);
+    for (size_t i = 0; i < plen && i < 2; i++) Serial1.printf("%02X ", (uint8_t)p[i]);
+    if (plen > 4) Serial1.print(".. ");
+    for (size_t i = (plen > 2 ? plen - 2 : 0); i < plen; i++) Serial1.printf("%02X ", (uint8_t)p[i]);
+    Serial1.printf(" (strlen=%u)\n", (unsigned)plen);
   }
-  
-  // Disconnect any existing connection
-  WiFi.disconnect();
-  delay(100);
-  
-  // WiFi.mode is already set to WIFI_AP_STA by startConfigAP()
-  // Just begin the connection
-  if (wifiPassword.length() > 0) {
-    WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+
+  WiFi.persistent(false);
+
+  // --- Phase 1: Radio-Reset + Scan ---
+  resetWiFiRadio();
+  WiFi.setSleep(false);
+
+  Serial1.println("WiFi scan (2.4 GHz)…");
+  WiFi.scanDelete();
+  int n = WiFi.scanNetworks(false, true);
+  int32_t targetChannel = 0;
+  if (n <= 0) {
+    Serial1.println("  No networks / scan error");
   } else {
-    WiFi.begin(wifiSSID.c_str());
-  }
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) { // Increased timeout
-    delay(500);
-    Serial1.print(".");
-    attempts++;
-    
-    // Check WiFi status and print error if available
-    if (attempts % 10 == 0) {
-      wl_status_t status = WiFi.status();
-      Serial1.print(" [Status: ");
-      Serial1.print(status);
-      Serial1.print("]");
+    bool found = false;
+    for (int i = 0; i < n; i++) {
+      if (WiFi.SSID(i) == wifiSSID) {
+        found = true;
+        targetChannel = WiFi.channel(i);
+        Serial1.printf("  SSID found: ch=%d RSSI=%d enc=%d\n",
+                       WiFi.channel(i), WiFi.RSSI(i), (int)WiFi.encryptionType(i));
+        break;
+      }
+    }
+    if (!found) {
+      Serial1.println("  SSID not in scan — wrong name, 5 GHz-only, or out of range.");
     }
   }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial1.println();
-    Serial1.print("WiFi connected! IP: ");
-    Serial1.println(WiFi.localIP());
-    
-    // Configure time
-    configTime(0, 0, "pool.ntp.org");
-    
-    return true;
-  } else {
-    Serial1.println();
-    wl_status_t status = WiFi.status();
-    Serial1.print("WiFi connection failed! Status: ");
-    Serial1.print(status);
-    Serial1.print(" (");
-    switch(status) {
-      case WL_IDLE_STATUS: Serial1.print("IDLE"); break;
-      case WL_NO_SSID_AVAIL: Serial1.print("NO_SSID_AVAIL"); break;
-      case WL_SCAN_COMPLETED: Serial1.print("SCAN_COMPLETED"); break;
-      case WL_CONNECTED: Serial1.print("CONNECTED"); break;
-      case WL_CONNECT_FAILED: Serial1.print("CONNECT_FAILED"); break;
-      case WL_CONNECTION_LOST: Serial1.print("CONNECTION_LOST"); break;
-      case WL_DISCONNECTED: Serial1.print("DISCONNECTED"); break;
-      default: Serial1.print("UNKNOWN"); break;
+  WiFi.scanDelete();
+
+  // --- Phase 2: Radio nach Scan nochmals zurücksetzen (bekanntes ESP32-Problem) ---
+  resetWiFiRadio();
+  WiFi.setSleep(false);
+
+  // --- Phase 3: Verbindungsversuche (max. 2) ---
+  const int maxRetries = 2;
+  for (int attempt = 1; attempt <= maxRetries; attempt++) {
+    Serial1.printf("WiFi.begin() attempt %d/%d (ch=%d)…\n", attempt, maxRetries, (int)targetChannel);
+    if (tryConnect(wifiSSID.c_str(), wifiPassword.c_str(), targetChannel, 15000)) {
+      Serial1.print("WiFi connected! IP: ");
+      Serial1.println(WiFi.localIP());
+      configTime(0, 0, "pool.ntp.org");
+      return true;
     }
-    Serial1.println(")");
-    Serial1.print("SSID: ");
-    Serial1.println(wifiSSID);
-    Serial1.print("Password length: ");
-    Serial1.println(wifiPassword.length());
-    Serial1.print("RSSI: ");
-    Serial1.println(WiFi.RSSI());
-    
-    // Additional troubleshooting info
-    if (status == WL_CONNECT_FAILED) {
-      Serial1.println("Possible causes:");
-      Serial1.println("- Wrong password");
-      Serial1.println("- WLAN not in range");
-      Serial1.println("- WLAN uses 5 GHz only (ESP32 supports 2.4 GHz only)");
-      Serial1.println("- WLAN security not supported (try WPA2)");
+
+    wl_status_t st = WiFi.status();
+    Serial1.printf("Attempt %d failed — status %d\n", attempt, (int)st);
+
+    if (attempt < maxRetries) {
+      Serial1.println("Retry after full radio reset…");
+      resetWiFiRadio();
+      WiFi.setSleep(false);
+      targetChannel = 0; // beim Retry ohne Kanal-Hint
+      delay(500);
     }
-    
+  }
+
+  // --- Fehlgeschlagen ---
+  wl_status_t status = WiFi.status();
+  Serial1.printf("WiFi connection failed! Status: %d (", (int)status);
+  switch(status) {
+    case WL_IDLE_STATUS:     Serial1.print("IDLE"); break;
+    case WL_NO_SSID_AVAIL:   Serial1.print("NO_SSID_AVAIL"); break;
+    case WL_SCAN_COMPLETED:  Serial1.print("SCAN_COMPLETED"); break;
+    case WL_CONNECTED:       Serial1.print("CONNECTED"); break;
+    case WL_CONNECT_FAILED:  Serial1.print("CONNECT_FAILED"); break;
+    case WL_CONNECTION_LOST: Serial1.print("CONNECTION_LOST"); break;
+    case WL_DISCONNECTED:    Serial1.print("DISCONNECTED"); break;
+    default:                 Serial1.print("UNKNOWN"); break;
+  }
+  Serial1.println(")");
+  Serial1.print("SSID: "); Serial1.println(wifiSSID);
+  Serial1.printf("Password length: %u\n", (unsigned)wifiPassword.length());
+  Serial1.printf("RSSI: %d\n", WiFi.RSSI());
+
+  if (status == WL_CONNECT_FAILED) {
+    Serial1.println("Moegliche Ursachen:");
+    Serial1.println("- Falsches Passwort (Sonderzeichen/Encoding-Problem?)");
+    Serial1.println("- Router: nur WPA3 → WPA2/WPA3-Modus aktivieren");
+    Serial1.println("- Gast-WLAN / MAC-Filter / Client-Isolation");
+    Serial1.println("- Router neu starten, ESP stromlos machen, erneut versuchen");
+  }
+
+  return false;
+}
+
+// --- Boot-/Status-Branding: PNG von SD (wie Website: webassets/Logo.png + LogoText.png) ---
+static PNG g_brandPng;
+static File g_brandPngFile;
+static int g_brandOx, g_brandOy, g_brandScrW, g_brandScrH;
+/** Zielbreite in Pixeln (≤ Panel); Quellzeile = PNG-Breite — für horizontale Skalierung/Zentrierung */
+static int g_brandDestW = 0;
+static int g_brandSrcW = 0;
+
+static std::vector<uint8_t> g_brandHttpBuf;
+static std::vector<uint8_t>* g_brandRamPtr = nullptr;
+static size_t g_brandRamPos = 0;
+
+static void* brandPngOpenCB(const char* fn, int32_t* sz) {
+  g_brandPngFile = SD.open(fn, FILE_READ);
+  if (!g_brandPngFile) return nullptr;
+  *sz = g_brandPngFile.size();
+  return &g_brandPngFile;
+}
+static void brandPngCloseCB(void* /*h*/) { g_brandPngFile.close(); }
+static int32_t brandPngReadCB(PNGFILE* /*pf*/, uint8_t* buf, int32_t len) {
+  return g_brandPngFile.read(buf, len);
+}
+static int32_t brandPngSeekCB(PNGFILE* /*pf*/, int32_t pos) {
+  return g_brandPngFile.seek(pos, SeekSet) ? pos : -1;
+}
+
+static int brandPngDrawCB(PNGDRAW* pDraw) {
+  uint16_t line[800];
+  int wline = pDraw->iWidth;
+  if (wline > 800) wline = 800;
+  g_brandPng.getLineAsRGB565(pDraw, line, PNG_RGB565_LITTLE_ENDIAN, 0xffff);
+  int y = g_brandOy + pDraw->y;
+  if (y < 0 || y >= g_brandScrH) return 1;
+  for (int x = 0; x < wline; x++) {
+    int px = g_brandOx + x;
+    if (px < 0 || px >= g_brandScrW) continue;
+    uint16_t c = line[x];
+    int r = ((c >> 11) & 0x1F) * 527 / 31;
+    int g = ((c >> 5) & 0x3F) * 259 / 63;
+    int b = (c & 0x1F) * 527 / 31;
+    int lum = (r * 30 + g * 59 + b * 11) / 100;
+    uint16_t col = lum > 155 ? GxEPD_WHITE : GxEPD_BLACK;
+    display.drawPixel((int16_t)px, (int16_t)y, col);
+  }
+  return 1;
+}
+
+static bool drawBrandPngAtY(const char* path, int& cursorY) {
+  if (!sdCardMounted || !SD.exists(path)) return false;
+  g_brandScrW = display.width();
+  g_brandScrH = display.height();
+  int rc = g_brandPng.open(path, brandPngOpenCB, brandPngCloseCB, brandPngReadCB, brandPngSeekCB, brandPngDrawCB);
+  if (rc != PNG_SUCCESS) {
+    g_brandPng.close();
     return false;
   }
+  int iw = g_brandPng.getWidth();
+  int ih = g_brandPng.getHeight();
+  g_brandOx = (g_brandScrW - iw) / 2;
+  if (g_brandOx < 4) g_brandOx = 4;
+  g_brandOy = cursorY;
+  if (g_brandOy + ih > g_brandScrH - 72)
+    g_brandOy = max(8, g_brandScrH - 72 - ih);
+  rc = g_brandPng.decode(nullptr, 0);
+  g_brandPng.close();
+  if (rc != PNG_SUCCESS) return false;
+  cursorY = g_brandOy + ih + 8;
+  return true;
+}
+
+static int drawWebBrandingOnEpd(int startY) {
+  int y = startY;
+  static const char* logoPaths[] = {
+      "/webassets/Logo.png", "/Logo.png", "/EINK_SPECTRA6_730_sq_800x480_logo.png", nullptr};
+  static const char* textPaths[] = {"/webassets/LogoText.png", "/LogoText.png", nullptr};
+  for (const char** p = logoPaths; *p; p++) {
+    if (drawBrandPngAtY(*p, y)) break;
+  }
+  for (const char** p = textPaths; *p; p++) {
+    if (drawBrandPngAtY(*p, y)) break;
+  }
+  return y + 12;
+}
+
+// Statusmeldung auf dem E-Ink in lesbarer Größe (textSize 2, ~12 px/Zeichen)
+static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+  display.init(115200);
+  display.setRotation(currentOrientation);
+  display.setFullWindow();
+  display.fillScreen(GxEPD_WHITE);
+  display.setTextColor(GxEPD_BLACK);
+
+  int yText = 20;
+  if (sdCardMounted) {
+    yText = drawWebBrandingOnEpd(12);
+    if (yText < 100) yText = 100;
+    if (yText > 300) yText = 300;
+  } else {
+    yText = 60;
+  }
+
+  display.setTextSize(2);
+  display.setCursor(20, yText);
+  display.print(line1);
+  if (line2) {
+    yText += 40;
+    display.setCursor(20, yText);
+    display.print(line2);
+  }
+  if (line3) {
+    yText += 50;
+    display.setTextSize(1);
+    display.setCursor(20, yText);
+    display.print(line3);
+  }
+  display.setTextSize(1);
+  display.display(false);
 }
 
 // === Forward Declarations ===
 bool downloadImage(String imageName);
-bool decodeAndDisplayInk(String filename);
-bool decodeAndDisplayInkFromHTTP(String imageUrl);
+bool decodeAndDisplayInk(const String& filename, bool offlineHint = false);
+bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint = false);
 bool isSDCardAvailable();
+static String buildImageUrlForShow(const String& imageName);
+static bool tryRedisplayLastWithOfflineBadge();
+static bool redisplayLastWithoutOfflineBadge();
 
 // === Server Communication ===
-String makeServerRequest(String action, String jsonPayload = "{}") {
-  if (hostChannelUrl.length() == 0) {
-    Serial1.println("No host channel URL configured");
-    return "";
-  }
-  
+String doHttpPost(String url, String jsonPayload) {
   HTTPClient http;
-  
-  // Use URL exactly as configured (no automatic path addition)
-  // Supports different server types: ASPX, PHP, Node.js, etc.
-  String url = hostChannelUrl;
-  
-  // Ensure URL ends with / before adding query
-  if (!url.endsWith("/")) {
-    url += "/";
-  }
-  
-  // Add action parameter
-  url += "?action=" + action;
-  
-  Serial1.print("Requesting URL: ");
-  Serial1.println(url);
-  Serial1.print("Payload: ");
-  Serial1.println(jsonPayload);
-  Serial1.print("WiFi status: ");
-  Serial1.println(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "NOT_CONNECTED");
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial1.print("Local IP: ");
-    Serial1.println(WiFi.localIP());
-  }
-  
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000); // 10 second timeout
-  http.setReuse(true); // Reuse connection
-  
-  // Always use POST (like the web application does)
-  // The server expects POST with JSON body, even if it's just "{}"
+  http.setTimeout(10000);
+  http.setReuse(true);
+
   int httpCode = http.POST(jsonPayload);
+  g_lastHttpStatusCode = httpCode;
   String response = "";
-  
-  if (httpCode > 0) {
+
+  if (httpCode >= 200 && httpCode < 300) {
     response = http.getString();
     Serial1.print("Server response code: ");
     Serial1.println(httpCode);
-    if (httpCode == 200) {
-      Serial1.print("Response length: ");
-      Serial1.println(response.length());
-    } else {
-      Serial1.print("Error response: ");
-      Serial1.println(response);
-    }
+    Serial1.print("Response length: ");
+    Serial1.println(response.length());
+  } else if (httpCode > 0) {
+    String errorBody = http.getString();
+    Serial1.print("Server HTTP error: ");
+    Serial1.println(httpCode);
+    Serial1.print("Error body (first 120): ");
+    Serial1.println(errorBody.substring(0, min((int)errorBody.length(), 120)));
   } else {
     Serial1.print("HTTP request failed: ");
     Serial1.print(httpCode);
@@ -745,11 +955,48 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
       default: Serial1.print("UNKNOWN"); break;
     }
     Serial1.println(")");
-    Serial1.println("Check if server is running and URL is correct");
   }
-  
+
   http.end();
   return response;
+}
+
+String makeServerRequest(String action, String jsonPayload = "{}") {
+  if (hostChannelUrl.length() == 0) {
+    Serial1.println("No host channel URL configured");
+    return "";
+  }
+
+  Serial1.print("WiFi status: ");
+  Serial1.println(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "NOT_CONNECTED");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial1.print("Local IP: ");
+    Serial1.println(WiFi.localIP());
+  }
+
+  // Primary URL (relies on server-side URL rewrite)
+  String url = hostChannelUrl;
+  url += (url.indexOf('?') >= 0) ? "&" : "?";
+  url += "action=" + action;
+
+  Serial1.print("Requesting URL: ");
+  Serial1.println(url);
+
+  String response = doHttpPost(url, jsonPayload);
+  if (response.length() > 0) return response;
+
+  // Fallback: POST directly to ASPX handler (bypasses URL Rewrite)
+  if (g_lastHttpStatusCode == 405 || g_lastHttpStatusCode == 404) {
+    String baseUrl = hostChannelUrl;
+    if (!baseUrl.endsWith("/")) baseUrl += "/";
+    String fallbackUrl = baseUrl + "aspx/microPhotoFrame.aspx?action=" + action;
+    Serial1.print("Fallback URL: ");
+    Serial1.println(fallbackUrl);
+    response = doHttpPost(fallbackUrl, jsonPayload);
+    if (response.length() > 0) return response;
+  }
+
+  return "";
 }
 
 bool getActiveShow() {
@@ -757,11 +1004,12 @@ bool getActiveShow() {
   
   String response = makeServerRequest("getShows");
   if (response.length() == 0) {
-    Serial1.println("Empty response from server");
+    lastGetShowError = "HTTP " + String(g_lastHttpStatusCode) + " empty resp";
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = false;
     return false;
   }
   
-  // Debug: Print first 200 chars of response
   Serial1.print("Response (first 200 chars): ");
   Serial1.println(response.substring(0, 200));
   
@@ -769,63 +1017,103 @@ bool getActiveShow() {
   DeserializationError error = deserializeJson(doc, response);
   
   if (error) {
-    Serial1.print("JSON parse error: ");
-    Serial1.println(error.c_str());
+    lastGetShowError = "JSON: " + String(error.c_str());
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = false;
     return false;
   }
   
-  // Check if response has "ok" field
   bool responseOk = doc["ok"].as<bool>();
   Serial1.print("Response ok: ");
   Serial1.println(responseOk ? "true" : "false");
-  
-  // Get activeShows object
-  JsonObject activeShows = doc["output"]["shows"]["activeShows"];
-  if (activeShows.isNull()) {
-    Serial1.println("activeShows is null or missing");
+  if (!responseOk) {
+    lastGetShowError = "ok=false";
+    String errMsg = doc["error"]["msg"] | "";
+    if (errMsg.length() > 0) lastGetShowError += " " + errMsg;
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = false;
     return false;
   }
   
-  // Debug: Print all activeShows keys
+  // Cache erst NACH JSON-Validierung setzen (nie HTML-Fehlerseiten cachen)
+  cachedShowsJson = response;
+  
+  JsonObject activeShows = doc["output"]["shows"]["activeShows"];
+  if (activeShows.isNull()) {
+    // Detaillierte Diagnose: welche Pfade existieren?
+    bool hasOutput = !doc["output"].isNull();
+    bool hasShows  = hasOutput && !doc["output"]["shows"].isNull();
+    lastGetShowError = "activeShows null";
+    if (!hasOutput) lastGetShowError += " (kein output)";
+    else if (!hasShows) lastGetShowError += " (kein output.shows)";
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = false;
+    return false;
+  }
+  
   Serial1.print("Looking for display ID: ");
   Serial1.println(DEVICE_DISPLAY_ID);
   Serial1.print("Available display IDs in activeShows: ");
+  String availableIds = "";
   for (JsonPair kv : activeShows) {
     Serial1.print(kv.key().c_str());
     Serial1.print("=");
     Serial1.print(kv.value().as<String>());
     Serial1.print(" ");
+    if (availableIds.length() > 0) availableIds += ",";
+    availableIds += String(kv.key().c_str()) + "=" + kv.value().as<String>();
   }
   Serial1.println();
   
-  // Try to get the show name for this display ID
-  // Try both string key and numeric key (in case server sends numbers)
   JsonVariant showNameVariant = activeShows[DEVICE_DISPLAY_ID];
   if (showNameVariant.isNull()) {
-    // Try numeric key as fallback
     int displayIdNum = atoi(DEVICE_DISPLAY_ID);
     showNameVariant = activeShows[String(displayIdNum)];
   }
   
   if (showNameVariant.isNull() || !showNameVariant.is<String>()) {
-    Serial1.print("No active show found for display ID: ");
-    Serial1.println(DEVICE_DISPLAY_ID);
+    lastGetShowError = "ID '" + String(DEVICE_DISPLAY_ID) + "' not in {" + availableIds + "}";
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = true;
     return false;
   }
   
   String newShowName = showNameVariant.as<String>();
   if (newShowName.length() == 0) {
-    Serial1.println("Active show name is empty");
+    lastGetShowError = "Show name empty";
+    Serial1.println(lastGetShowError);
+    lastGetShowsSucceeded = true;
     return false;
   }
+  
+  lastGetShowError = "";
   
   Serial1.print("Found active show: ");
   Serial1.println(newShowName);
   
+  lastGetShowsSucceeded = true;
+
+  serverActiveShowCached = newShowName;
+
+  if (showTempOverrideUntilMs != 0 && (long)(millis() - showTempOverrideUntilMs) >= 0) {
+    showTempOverrideUntilMs = 0;
+    Serial1.println("Show-Override war abgelaufen (Deadline in getActiveShow bereinigt).");
+  }
+
+  if (isShowTempOverrideActive()) {
+    Serial1.print("Lokale Temp-Show aktiv, Server-Vorgabe nur Info: ");
+    Serial1.println(newShowName);
+    return false;
+  }
+
   if (newShowName != currentShowName) {
     currentShowName = newShowName;
     currentImageIndex = 0;
     currentShowImages.clear();
+    // Show-Name persistent speichern (Wiederherstellung nach Reboot)
+    preferences.begin("microPhotoFrame", false);
+    preferences.putString("lastShow", currentShowName);
+    preferences.end();
     Serial1.print("Active show changed to: ");
     Serial1.println(currentShowName);
     return true;
@@ -1146,9 +1434,45 @@ static int decodeLZW(const uint8_t* fileData, int fileSize, int dataPtr,
   return resIdx;
 }
 
+// Kleines Hinweis-Badge oben rechts (Server/WLAN-Problem) — in Bildkoordinaten
+static bool offlineBadgePixel(int x, int y, int dw, int dh, uint16_t& outColor) {
+  const int m = 6;
+  const int bw = 36;
+  const int bh = 40;
+  if (dw < m + bw + 4 || dh < m + bh + 4) return false;
+  int bx0 = dw - m - bw;
+  int by0 = m;
+  if (x < bx0 || x >= bx0 + bw || y < by0 || y >= by0 + bh) return false;
+  bool border = (x < bx0 + 2 || x >= bx0 + bw - 2 || y < by0 + 2 || y >= by0 + bh - 2);
+  if (border) {
+#if (EPD_SELECT == 1)
+    outColor = GxEPD_RED;
+#else
+    outColor = GxEPD_BLACK;
+#endif
+    return true;
+  }
+  int cx = bx0 + bw / 2;
+  if (x >= cx - 1 && x <= cx + 1 && y >= by0 + 6 && y <= by0 + 22) {
+    outColor = GxEPD_BLACK;
+    return true;
+  }
+  if (x >= cx - 1 && x <= cx + 1 && y >= by0 + 26 && y <= by0 + 30) {
+    outColor = GxEPD_BLACK;
+    return true;
+  }
+#if (EPD_SELECT == 1)
+  outColor = GxEPD_YELLOW;
+#else
+  outColor = GxEPD_WHITE;
+#endif
+  return true;
+}
+
 // Display decoded pixel data on the E-Ink display
 static void displayPixels(uint8_t* result, int resIdx,
-                          int displayWidth, int displayHeight, int fileOrientation) {
+                          int displayWidth, int displayHeight, int fileOrientation,
+                          bool offlineHint) {
   display.init(115200);
   display.setRotation(fileOrientation);
   display.fillScreen(GxEPD_WHITE);
@@ -1157,6 +1481,11 @@ static void displayPixels(uint8_t* result, int resIdx,
   do {
     for (int y = 0; y < displayHeight; y++) {
       for (int x = 0; x < displayWidth; x++) {
+        uint16_t epdColor;
+        if (offlineHint && offlineBadgePixel(x, y, displayWidth, displayHeight, epdColor)) {
+          display.drawPixel(x, y, epdColor);
+          continue;
+        }
         int pixelIdx = y * displayWidth + x;
         if (pixelIdx < resIdx) {
           uint8_t colorIdx = result[pixelIdx];
@@ -1172,15 +1501,103 @@ static void displayPixels(uint8_t* result, int resIdx,
   display.hibernate();
 }
 
-// Helper function to check if SD card is available
-bool isSDCardAvailable() {
-  if (digitalRead(SD_DET_PIN) == HIGH) {
-    return false;
+static String buildImageUrlForShow(const String& imageName) {
+  String baseUrl = hostChannelUrl;
+  int queryPos = baseUrl.indexOf("?");
+  if (queryPos >= 0) {
+    baseUrl = baseUrl.substring(0, queryPos);
   }
-  return SD.begin(SD_CS_PIN, hspi);
+  int portPos = baseUrl.lastIndexOf(":");
+  if (portPos > 0) {
+    int slashAfterPort = baseUrl.indexOf("/", portPos);
+    if (slashAfterPort > 0) {
+      baseUrl = baseUrl.substring(0, slashAfterPort);
+    }
+  }
+  if (!baseUrl.endsWith("/")) {
+    baseUrl += "/";
+  }
+  return baseUrl + "shows/show_" + currentShowName + "/" + imageName;
 }
 
-bool decodeAndDisplayInk(String filename) {
+static bool tryRedisplayLastWithOfflineBadge() {
+  if (offlineBadgeOnScreen || lastDisplayedInkName.length() == 0) return false;
+  if (isSDCardAvailable() && SD.exists("/" + lastDisplayedInkName)) {
+    if (decodeAndDisplayInk(lastDisplayedInkName, true)) {
+      offlineBadgeOnScreen = true;
+      return true;
+    }
+  }
+  if (WiFi.status() == WL_CONNECTED && hostChannelUrl.length() > 0 && currentShowName.length() > 0) {
+    String url = buildImageUrlForShow(lastDisplayedInkName);
+    if (decodeAndDisplayInkFromHTTP(url, true)) {
+      offlineBadgeOnScreen = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool redisplayLastWithoutOfflineBadge() {
+  if (lastDisplayedInkName.length() == 0) return false;
+  if (isSDCardAvailable() && SD.exists("/" + lastDisplayedInkName)) {
+    if (decodeAndDisplayInk(lastDisplayedInkName, false)) {
+      offlineBadgeOnScreen = false;
+      return true;
+    }
+  }
+  if (WiFi.status() == WL_CONNECTED && hostChannelUrl.length() > 0 && currentShowName.length() > 0) {
+    String url = buildImageUrlForShow(lastDisplayedInkName);
+    if (decodeAndDisplayInkFromHTTP(url, false)) {
+      offlineBadgeOnScreen = false;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Nach Neustart: letztes Bild mit Offline-Badge — zuerst SD, sonst HTTP (ohne SD nutzbar)
+static bool tryBootOfflineLastImage() {
+  if (lastDisplayedInkName.length() == 0) return false;
+  Serial1.println("Boot: letztes Bild mit Offline-Hinweis (SD oder HTTP)…");
+  if (isSDCardAvailable() && SD.exists("/" + lastDisplayedInkName)) {
+    if (decodeAndDisplayInk(lastDisplayedInkName, true)) {
+      offlineBadgeOnScreen = true;
+      lastImageChangeTime = millis();
+      return true;
+    }
+  }
+  if (WiFi.status() == WL_CONNECTED && hostChannelUrl.length() > 0 && currentShowName.length() > 0) {
+    String url = buildImageUrlForShow(lastDisplayedInkName);
+    if (decodeAndDisplayInkFromHTTP(url, true)) {
+      offlineBadgeOnScreen = true;
+      lastImageChangeTime = millis();
+      return true;
+    }
+  }
+  return false;
+}
+
+// SD optional: Slot leer → schnell false; einmal gemountet → sdCardMounted; sonst lazy mount
+bool isSDCardAvailable() {
+  pinMode(SD_EN_PIN, OUTPUT);
+  digitalWrite(SD_EN_PIN, HIGH);
+  if (digitalRead(SD_DET_PIN) == HIGH) {
+    sdCardMounted = false;
+    sdLazyMountFailed = false;
+    return false;
+  }
+  if (sdCardMounted) return true;
+  if (sdLazyMountFailed) return false;
+  if (SD.begin(SD_CS_PIN, hspi)) {
+    sdCardMounted = true;
+    return true;
+  }
+  sdLazyMountFailed = true;
+  return false;
+}
+
+bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   if (!isSDCardAvailable()) {
     Serial1.println("SD card not available for decodeAndDisplayInk");
     return false;
@@ -1246,7 +1663,7 @@ bool decodeAndDisplayInk(String filename) {
 
   Serial1.print("Decoded "); Serial1.print(resIdx); Serial1.println(" pixels");
 
-  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation);
+  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
   free(result);
 
   Serial1.println("Image displayed successfully");
@@ -1254,7 +1671,7 @@ bool decodeAndDisplayInk(String filename) {
 }
 
 // Decode and display .ink file directly from HTTP stream (without SD card)
-bool decodeAndDisplayInkFromHTTP(String imageUrl) {
+bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   Serial1.print("Loading .ink file from HTTP: ");
   Serial1.println(imageUrl);
   
@@ -1474,7 +1891,7 @@ bool decodeAndDisplayInkFromHTTP(String imageUrl) {
   Serial1.print("Decoded "); Serial1.print(resIdx);
   Serial1.print("/"); Serial1.print(totalPixels); Serial1.println(" pixels");
 
-  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation);
+  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
 
   free(result);
   free(fileData);
@@ -1631,7 +2048,7 @@ bool initMPU6050() {
 
 int readOrientation() {
   if (!mpu6050Available) {
-    return 0; // Default to landscape if MPU6050 not available
+    return (int)configDefaultOrientation; // NVS / Erstkonfiguration (ohne Sensor)
   }
   
   // Read accelerometer data (16-bit values, need to divide by 16384 for ±2g range)
@@ -1719,34 +2136,28 @@ void filterImagesByOrientation() {
 void displayNextImage() {
   if (currentShowImages.size() == 0) {
     Serial1.println("No images in current show");
-    // Show error message on display
-    display.init(115200);
-    display.setRotation(DEFAULT_DISPLAY_ROTATION);
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    display.setCursor(50, 200);
-    display.print("No images in show");
-    display.setCursor(50, 230);
-    display.print(currentShowName);
-    display.display(false);
+    showStatusScreen("No images in show", currentShowName.c_str());
     return;
   }
-  
-  // Select next image based on mode
+
+  const int prevIndex = currentImageIndex;
+  int nextIndex = prevIndex;
+
   if (currentShowMode == "random") {
-    currentImageIndex = random(0, currentShowImages.size());
+    nextIndex = random(0, currentShowImages.size());
   } else if (currentShowMode == "reversesequence") {
-    currentImageIndex--;
-    if (currentImageIndex < 0) {
-      currentImageIndex = currentShowImages.size() - 1;
+    nextIndex = prevIndex - 1;
+    if (nextIndex < 0) {
+      nextIndex = (int)currentShowImages.size() - 1;
     }
   } else { // forwardssequence (default)
-    currentImageIndex++;
-    if (currentImageIndex >= (int)currentShowImages.size()) {
-      currentImageIndex = 0;
+    nextIndex = prevIndex + 1;
+    if (nextIndex >= (int)currentShowImages.size()) {
+      nextIndex = 0;
     }
   }
-  
+
+  currentImageIndex = nextIndex;
   String imageName = currentShowImages[currentImageIndex];
   Serial1.print("Displaying image ");
   Serial1.print(currentImageIndex + 1);
@@ -1754,71 +2165,475 @@ void displayNextImage() {
   Serial1.print(currentShowImages.size());
   Serial1.print(": ");
   Serial1.println(imageName);
-  
-  // Check if image exists on SD card (if SD available)
+
   bool useSD = isSDCardAvailable();
-  bool imageOnSD = false;
-  
-  if (useSD && SD.exists("/" + imageName)) {
-    imageOnSD = true;
+  bool imageOnSD = (useSD && SD.exists("/" + imageName));
+
+  if (imageOnSD) {
     Serial1.println("Image found on SD card");
   } else {
     Serial1.println("Image not on SD - loading from server...");
   }
-  
+
   if (imageOnSD) {
-    // Decode and display from SD card
     Serial1.println("Decoding and displaying image from SD...");
-    if (decodeAndDisplayInk(imageName)) {
+    if (decodeAndDisplayInk(imageName, false)) {
       lastImageChangeTime = millis();
+      rememberDisplayedInk(imageName);
+      offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully");
     } else {
       Serial1.println("Failed to decode image from SD");
+      currentImageIndex = prevIndex;
+      tryRedisplayLastWithOfflineBadge();
+      lastImageChangeTime = millis();
     }
   } else {
-    // Load directly from server
-    // Extract base URL from hostChannelUrl (remove query parameters and path)
-    String baseUrl = hostChannelUrl;
-    int queryPos = baseUrl.indexOf("?");
-    if (queryPos >= 0) {
-      baseUrl = baseUrl.substring(0, queryPos);
-    }
-    // Find the port number (after :)
-    int portPos = baseUrl.lastIndexOf(":");
-    if (portPos > 0) {
-      // Find the first / after the port
-      int slashAfterPort = baseUrl.indexOf("/", portPos);
-      if (slashAfterPort > 0) {
-        // Keep only protocol://host:port
-        baseUrl = baseUrl.substring(0, slashAfterPort);
-      }
-    }
-    // Ensure baseUrl ends with /
-    if (!baseUrl.endsWith("/")) {
-      baseUrl += "/";
-    }
-    String imageUrl = baseUrl + "shows/show_" + currentShowName + "/" + imageName;
-    
+    String imageUrl = buildImageUrlForShow(imageName);
     Serial1.print("Loading image directly from server: ");
     Serial1.println(imageUrl);
-    
-    if (decodeAndDisplayInkFromHTTP(imageUrl)) {
+
+    if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
       lastImageChangeTime = millis();
+      rememberDisplayedInk(imageName);
+      offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully from server");
     } else {
-      Serial1.println("Failed to load image from server");
-      // Show error on display
-      display.init(115200);
-      display.setRotation(DEFAULT_DISPLAY_ROTATION);
-      display.fillScreen(GxEPD_WHITE);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(50, 200);
-      display.print("Load failed:");
-      display.setCursor(50, 230);
-      display.print(imageName);
-      display.display(false);
+      Serial1.println("Failed to load image from server — behalte letztes Bild (ohne leeren Fehlerbildschirm)");
+      currentImageIndex = prevIndex;
+      if (!tryRedisplayLastWithOfflineBadge()) {
+        Serial1.println("Kein lokales letztes Bild: E-Ink bleibt unverändert.");
+      }
+      lastImageChangeTime = millis();
     }
   }
+}
+
+// === OTA Firmware Update Handler ===
+void handleOtaUpdate() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial1.printf("OTA Update start: %s (%u bytes)\n", upload.filename.c_str(), upload.totalSize);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial1);
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial1);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial1.printf("OTA Update success: %u bytes\n", upload.totalSize);
+    } else {
+      Update.printError(Serial1);
+    }
+  }
+}
+
+void handleOtaResult() {
+  bool success = !Update.hasError();
+  server.sendHeader("Connection", "close");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  if (success) {
+    server.send(200, "application/json", "{\"ok\":true,\"msg\":\"Update successful, rebooting...\"}");
+    delay(500);
+    ESP.restart();
+  } else {
+    server.send(500, "application/json", "{\"ok\":false,\"msg\":\"Update failed\"}");
+  }
+}
+
+void handleDeviceInfo() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  String json = "{";
+  json += "\"name\":\"microPhotoFrame\"";
+  json += ",\"version\":\"" + String(FIRMWARE_VERSION) + "\"";
+  json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  json += ",\"mac\":\"" + WiFi.macAddress() + "\"";
+  json += ",\"freeHeap\":" + String(ESP.getFreeHeap());
+  json += ",\"sketchSize\":" + String(ESP.getSketchSize());
+  json += ",\"freeSketchSpace\":" + String(ESP.getFreeSketchSpace());
+  json += ",\"display\":\"" + String(DEVICE_DISPLAY_ID) + "\"";
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+void handleOtaCors() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.send(204);
+}
+
+// === Quick-Menu Web Handlers ===
+
+void handleQuickMenu() {
+  unsigned long remaining = 0;
+  if (quickMenuMode && millis() - quickMenuStart < QUICK_MENU_TIMEOUT)
+    remaining = (QUICK_MENU_TIMEOUT - (millis() - quickMenuStart)) / 1000;
+
+  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<link rel='icon' href='/favicon.ico' type='image/x-icon'><title>&micro;PhotoFrame</title><style>";
+  html += "body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;margin:0;padding:20px;}";
+  html += ".card{background:#16213e;border-radius:12px;padding:24px;max-width:420px;margin:0 auto;}";
+  html += ".header-logo{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;margin:0 0 18px;}";
+  html += ".header-logo img{max-height:56px;width:auto;max-width:100%;}";
+  html += "label{display:block;margin:12px 0 4px;font-size:14px;color:#aaa;}";
+  html += "select,input[type=number]{width:100%;padding:10px;border:1px solid #333;border-radius:6px;background:#0f3460;color:#fff;font-size:16px;}";
+  html += "button{width:100%;padding:12px;margin-top:16px;border:none;border-radius:6px;background:#e94560;color:#fff;font-size:16px;cursor:pointer;}";
+  html += "button:active{background:#c23152;}";
+  html += "button:disabled{opacity:.55;cursor:not-allowed;}";
+  html += ".radio-row{display:flex;flex-direction:column;gap:8px;margin:8px 0 4px;}";
+  html += ".radio-row label{display:flex;align-items:flex-start;gap:8px;font-size:15px;color:#ddd;cursor:pointer;margin:0;}";
+  html += ".radio-row input{margin-top:3px;}";
+  html += "#revertWrap{margin-top:4px;}";
+  html += "#srvHint{font-size:13px;color:#9ab;margin-top:8px;line-height:1.5;display:none;}";
+  html += ".timer{text-align:center;color:#e94560;font-size:13px;margin-top:12px;}";
+  html += ".info{background:#0f3460;border-radius:8px;padding:12px;margin-top:16px;font-size:13px;color:#aaa;line-height:1.6;}";
+  html += ".ok{background:#27ae60;border-radius:8px;padding:12px;margin-top:12px;text-align:center;display:none;line-height:1.5;}";
+  html += ".err{background:#c0392b;border-radius:8px;padding:12px;margin-top:12px;text-align:center;display:none;line-height:1.5;}";
+  html += "</style></head><body><div class='card'>";
+  html += "<div class='header-logo'>";
+  html += "<img src='/logo' alt='' onerror=\"this.style.display='none'\">";
+  html += "<img src='/logotext' alt='&micro;PhotoFrame' onerror=\"this.style.display='none'\">";
+  html += "</div>";
+
+  html += "<label>Show-Quelle:</label>";
+  html += "<div class='radio-row'>";
+  html += "<label><input type='radio' name='showSrc' id='followSrv' value='1' checked> Vom <b>Server</b> (wie Web-Interface; &Auml;nderung wirkt f&uuml;r alle Displays)</label>";
+  html += "<label><input type='radio' name='showSrc' id='followLocal' value='0'> Nur <b>auf diesem Rahmen</b> (nach Ablauf wieder Server-Vorgabe)</label>";
+  html += "</div>";
+  html += "<div id='revertWrap' style='display:none'><label>Zur&uuml;ck zur Server-Show nach (Minuten):</label><input type='number' id='revertMinIn' min='1' max='1440' value='" + String((unsigned)quickMenuRevertMinutes) + "'></div>";
+  html += "<div id='srvHint'></div>";
+  html += "<label>Aktive Show:</label><select id='showSel'><option>Lade...</option></select>";
+  html += "<label>Modus:</label><select id='modeSel'>";
+  html += "<option value='forwardssequence'" + String(currentShowMode == "forwardssequence" ? " selected" : "") + ">Vorw&auml;rts</option>";
+  html += "<option value='reversesequence'" + String(currentShowMode == "reversesequence" ? " selected" : "") + ">R&uuml;ckw&auml;rts</option>";
+  html += "<option value='random'" + String(currentShowMode == "random" ? " selected" : "") + ">Zufall</option></select>";
+  html += "<label>Bildwechsel (Minuten):</label><input type='number' id='timerIn' min='1' max='1440' value='" + String(currentShowTimer) + "'>";
+  if (!mpu6050Available) {
+    html += "<label>Standard-Ausrichtung (kein Lagesensor):</label><select id='orientSel'>";
+    html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
+    html += "<option value='1'" + String(configDefaultOrientation == 1 ? " selected" : "") + ">Hochkant (90&deg;)</option>";
+    html += "<option value='2'" + String(configDefaultOrientation == 2 ? " selected" : "") + ">Querformat gedreht (180&deg;)</option>";
+    html += "<option value='3'" + String(configDefaultOrientation == 3 ? " selected" : "") + ">Hochkant gedreht (270&deg;)</option>";
+    html += "</select>";
+  }
+  html += "<button type='button' id='saveBtn'>&#10004; Speichern</button>";
+  html += "<div class='ok' id='ok'><b>Gespeichert.</b><br>Rahmen &uuml;bernimmt die Einstellungen.<br><span style='font-size:12px;opacity:.9'>Formular unten wurde aktualisiert.</span></div>";
+  html += "<div class='err' id='err'></div>";
+
+  html += "<div class='timer'>Dieses Men&uuml; schlie&szlig;t in <span id='cd'>" + String(remaining) + "</span>s</div>";
+  html += "<div class='info'>";
+  html += "<b>Tipp:</b> Roten Knopf <b>lang dr&uuml;cken</b> (5 s) = WiFi-Reset &amp; Neukonfiguration.";
+  html += "</div></div>";
+
+  html += "<script>";
+  html += "let cd=" + String(remaining) + ";";
+  html += "setInterval(()=>{cd--;if(cd<0)cd=0;let el=document.getElementById('cd');if(el)el.textContent=cd;},1000);";
+  html += "function syncRevertVisibility(){";
+  html += "let loc=document.getElementById('followLocal');let rw=document.getElementById('revertWrap');";
+  html += "if(rw)rw.style.display=(loc&&loc.checked)?'block':'none';";
+  html += "}";
+  html += "function applyState(d){";
+  html += "let s=document.getElementById('showSel');if(!s)return;";
+  html += "s.innerHTML='';";
+  html += "if(d.shows&&d.shows.length){d.shows.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;if(n==d.active)o.selected=true;s.appendChild(o);});}";
+  html += "else{s.innerHTML='<option>Keine Shows</option>';}";
+  html += "let fs=document.getElementById('followSrv'),fl=document.getElementById('followLocal');";
+  html += "if(fs&&fl){if(d.followServer===false){fl.checked=true;}else{fs.checked=true;}}";
+  html += "let rmi=document.getElementById('revertMinIn');if(rmi&&d.revertMin!=null&&d.revertMin!==undefined){rmi.value=String(d.revertMin);}";
+  html += "syncRevertVisibility();";
+  html += "let hint=document.getElementById('srvHint');";
+  html += "if(hint){if(d.overrideActive&&d.serverActive){hint.style.display='block';hint.textContent='Server-Vorgabe: \"'+d.serverActive+'\". Dieser Rahmen spielt lokal noch ca. '+d.revertLeftMin+' Min.';}";
+  html += "else{hint.style.display='none';hint.textContent='';}}";
+  html += "if(d.mode){let m=document.getElementById('modeSel');if(m)m.value=d.mode;}";
+  html += "if(d.timer!=null&&d.timer!==undefined){let t=document.getElementById('timerIn');if(t)t.value=d.timer;}";
+  html += "let os=document.getElementById('orientSel');if(os&&d.defOrient!=null&&d.defOrient!==undefined){os.value=String(d.defOrient);}";
+  html += "}";
+  html += "document.getElementById('followSrv').addEventListener('change',syncRevertVisibility);";
+  html += "document.getElementById('followLocal').addEventListener('change',syncRevertVisibility);";
+  html += "function loadShows(){return fetch('/quickmenu/shows').then(r=>{if(!r.ok)throw new Error('Shows '+r.status);return r.json();}).then(d=>{applyState(d);return d;});}";
+  html += "loadShows().catch(e=>{document.getElementById('err').textContent='Shows laden: '+e.message;document.getElementById('err').style.display='block';});";
+  html += "function save(){";
+  html += "let okEl=document.getElementById('ok'),errEl=document.getElementById('err'),btn=document.getElementById('saveBtn');";
+  html += "okEl.style.display='none';errEl.style.display='none';errEl.textContent='';";
+  html += "btn.disabled=true;btn.textContent='Speichern\u2026';";
+  html += "let fs=document.getElementById('followSrv');";
+  html += "let b={show:document.getElementById('showSel').value,mode:document.getElementById('modeSel').value,timer:parseInt(document.getElementById('timerIn').value,10)||5,followServer:!!(fs&&fs.checked)};";
+  html += "if(!b.followServer){let rm=document.getElementById('revertMinIn');b.revertMinutes=parseInt((rm&&rm.value)||'60',10)||60;if(b.revertMinutes<1)b.revertMinutes=1;if(b.revertMinutes>1440)b.revertMinutes=1440;}";
+  html += "let os=document.getElementById('orientSel');if(os)b.defOrient=parseInt(os.value,10)||0;";
+  html += "fetch('/quickmenu/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})";
+  html += ".then(r=>r.json().then(j=>({ok:r.ok,status:r.status,body:j})))";
+  html += ".then(({ok,status,body})=>{";
+  html += "btn.disabled=false;btn.textContent='\u2714 Speichern';";
+  html += "if(!ok||!body.ok){errEl.textContent=(body&&body.msg)||('Speichern fehlgeschlagen (HTTP '+status+')');errEl.style.display='block';return Promise.reject();}";
+  html += "if(body.remainingSec!=null){cd=body.remainingSec;document.getElementById('cd').textContent=cd;}";
+  html += "okEl.style.display='block';okEl.scrollIntoView({behavior:'smooth',block:'nearest'});";
+  html += "return loadShows().catch(()=>{});";
+  html += "}).catch(e=>{btn.disabled=false;btn.textContent='\u2714 Speichern';if(!errEl.textContent){errEl.textContent=(e&&e.message)?e.message:'Netzwerkfehler';errEl.style.display='block';}});";
+  html += "}";
+  html += "document.getElementById('saveBtn').addEventListener('click',save);";
+  html += "</script></body></html>";
+
+  server.send(200, "text/html", html);
+}
+
+void handleQuickMenuShows() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+
+  // Immer frisch vom Server versuchen, nur valides JSON cachen
+  if (wifiConnected) {
+    String resp = makeServerRequest("getShows");
+    if (resp.length() > 0) {
+      JsonDocument testDoc;
+      if (deserializeJson(testDoc, resp) == DeserializationError::Ok && testDoc["ok"].as<bool>()) {
+        cachedShowsJson = resp;
+      }
+    }
+  }
+
+  String showsArr = "[]";
+  String activeShow = currentShowName;
+
+  if (cachedShowsJson.length() > 0) {
+    JsonDocument doc;
+    if (deserializeJson(doc, cachedShowsJson) == DeserializationError::Ok) {
+      JsonArray shows = doc["output"]["shows"]["shows"];
+      if (!shows.isNull() && shows.size() > 0) {
+        showsArr = "[";
+        for (size_t i = 0; i < shows.size(); i++) {
+          if (i > 0) showsArr += ",";
+          showsArr += "\"" + String(shows[i].as<const char*>()) + "\"";
+        }
+        showsArr += "]";
+      }
+      // Aktive Show direkt aus Server-Antwort ermitteln (falls lokal unbekannt, kein Temp-Override)
+      if (activeShow.length() == 0 && !isShowTempOverrideActive()) {
+        JsonObject activeShows = doc["output"]["shows"]["activeShows"];
+        if (!activeShows.isNull()) {
+          JsonVariant sv = activeShows[DEVICE_DISPLAY_ID];
+          if (sv.isNull()) {
+            sv = activeShows[String(atoi(DEVICE_DISPLAY_ID))];
+          }
+          if (!sv.isNull() && sv.is<String>()) {
+            activeShow = sv.as<String>();
+            currentShowName = activeShow;
+            preferences.begin("microPhotoFrame", false);
+            preferences.putString("lastShow", currentShowName);
+            preferences.end();
+            Serial1.print("Quick-Menu: aktive Show aus Server-Antwort: ");
+            Serial1.println(activeShow);
+          }
+        }
+      }
+    }
+  }
+
+  bool ov = isShowTempOverrideActive();
+  unsigned long leftMin = 0;
+  if (ov && showTempOverrideUntilMs > millis())
+    leftMin = (showTempOverrideUntilMs - millis()) / 60000UL;
+
+  String json = "{\"shows\":" + showsArr;
+  json += ",\"active\":\"" + activeShow + "\"";
+  json += ",\"defOrient\":" + String((int)configDefaultOrientation);
+  json += ",\"hasMpu\":" + String(mpu6050Available ? "true" : "false");
+  json += ",\"mode\":\"" + currentShowMode + "\"";
+  json += ",\"timer\":" + String(currentShowTimer);
+  json += ",\"followServer\":" + String(ov ? "false" : "true");
+  json += ",\"overrideActive\":" + String(ov ? "true" : "false");
+  {
+    String srvAct = serverActiveShowCached.length() > 0 ? serverActiveShowCached : activeShow;
+    json += ",\"serverActive\":\"" + srvAct + "\"";
+  }
+  json += ",\"revertMin\":" + String((unsigned)quickMenuRevertMinutes);
+  json += ",\"revertLeftMin\":" + String(leftMin) + "}";
+  server.send(200, "application/json", json);
+}
+
+void handleQuickMenuSave() {
+  String body = server.arg("plain");
+  JsonDocument doc;
+  if (deserializeJson(doc, body) != DeserializationError::Ok) {
+    server.send(400, "application/json", "{\"ok\":false,\"msg\":\"Ung\\u00fcltige Anfrage\"}");
+    return;
+  }
+
+  String newShow = doc["show"] | "";
+  String newMode = doc["mode"] | "forwardssequence";
+  int newTimer = doc["timer"] | 5;
+  if (newTimer < 1) newTimer = 1;
+  if (newTimer > 1440) newTimer = 1440;
+
+  bool followSrv = true;
+  if (doc["followServer"].is<bool>())
+    followSrv = doc["followServer"].as<bool>();
+
+  int revMin = (int)quickMenuRevertMinutes;
+  if (doc["revertMinutes"].is<int>())
+    revMin = doc["revertMinutes"].as<int>();
+  if (revMin < 1) revMin = 1;
+  if (revMin > 1440) revMin = 1440;
+  quickMenuRevertMinutes = (uint16_t)revMin;
+  preferences.begin("microPhotoFrame", false);
+  preferences.putUShort("qRevMin", quickMenuRevertMinutes);
+  preferences.end();
+
+  bool showChanged = (newShow.length() > 0 && newShow != currentShowName);
+
+  currentShowMode = newMode;
+  currentShowTimer = newTimer;
+
+  if (!mpu6050Available && doc["defOrient"].is<int>()) {
+    int o = doc["defOrient"].as<int>();
+    if (o >= 0 && o <= 3) {
+      configDefaultOrientation = (uint8_t)o;
+      preferences.begin("microPhotoFrame", false);
+      preferences.putUChar("defOrient", configDefaultOrientation);
+      preferences.end();
+      currentOrientation = (int)configDefaultOrientation;
+      filterImagesByOrientation();
+      if (currentShowImages.size() > 0) {
+        currentImageIndex = -1;
+        displayNextImage();
+      }
+    }
+  }
+
+  if (followSrv) {
+    showTempOverrideUntilMs = 0;
+    if (showChanged && wifiConnected) {
+      String payload = "{\"action\":\"setActiveShow\",\"input\":{\"showName\":\"" + newShow + "\",\"displayId\":\"" + String(DEVICE_DISPLAY_ID) + "\"}}";
+      makeServerRequest("setActiveShow", payload);
+      currentShowName = newShow;
+      getActiveShow();
+      loadShowData();
+      if (currentShowImages.size() > 0) {
+        currentImageIndex = -1;
+        displayNextImage();
+      }
+    } else if (wifiConnected) {
+      getActiveShow();
+      if (loadShowData() && currentShowImages.size() > 0) {
+        currentImageIndex = -1;
+        displayNextImage();
+      }
+    }
+  } else {
+    if (newShow.length() == 0) {
+      server.send(400, "application/json", "{\"ok\":false,\"msg\":\"Show w\\u00e4hlen (tempor\\u00e4r)\"}");
+      return;
+    }
+    showTempOverrideUntilMs = millis() + (unsigned long)revMin * 60000UL;
+    currentShowName = newShow;
+    preferences.begin("microPhotoFrame", false);
+    preferences.putString("lastShow", currentShowName);
+    preferences.end();
+    if (loadShowData() && currentShowImages.size() > 0) {
+      currentImageIndex = -1;
+      displayNextImage();
+    }
+  }
+
+  // Quick-Menü-Zeitfenster neu starten, damit Countdown nicht bei 0 stehen bleibt
+  if (quickMenuMode)
+    quickMenuStart = millis();
+  unsigned long remSec = QUICK_MENU_TIMEOUT / 1000;
+
+  String respJson = "{\"ok\":true,\"remainingSec\":" + String(remSec) + "}";
+  server.send(200, "application/json", respJson);
+
+  // Short feedback beep
+  tone(BUZZER_PIN, 1500, 80);
+}
+
+void enterQuickMenu() {
+  quickMenuMode = true;
+  quickMenuStart = millis();
+  cachedShowsJson = "";
+
+  // Feedback beep
+  tone(BUZZER_PIN, 1000, 100);
+  delay(120);
+  tone(BUZZER_PIN, 1500, 100);
+
+  Serial1.println("Quick-Menu mode active for 60 seconds");
+
+  display.init(115200);
+  display.setRotation(currentOrientation);
+  display.setFullWindow();
+  display.fillScreen(GxEPD_WHITE);
+  display.setTextColor(GxEPD_BLACK);
+
+  String ipStr = WiFi.localIP().toString();
+  int m = 20;
+  int y = 14;
+  if (sdCardMounted)
+    y = drawWebBrandingOnEpd(8);
+  if (y > 160) y = 160;
+
+  display.setCursor(m, y);       display.setTextSize(2);
+  display.print("Quick Menu");   display.setTextSize(1);
+  y += 40;
+  display.setCursor(m, y);
+  display.print("Im selben WLAN im Browser oeffnen:");
+  y += 35;
+  display.setCursor(m, y);       display.setTextSize(2);
+  display.print("http://");      display.setTextSize(1);
+  y += 28;
+  display.setCursor(m, y);       display.setTextSize(3);
+  display.print(ipStr);          display.setTextSize(1);
+  y += 45;
+  display.setCursor(m, y);
+  display.print("Shows auswaehlen & Bildwechsel einstellen.");
+  y += 22;
+  display.setCursor(m, y);
+  display.print("Menue schliesst nach 60 Sekunden automatisch.");
+  y += 35;
+  display.setCursor(m, y);
+  display.print("Tipp: Roten Knopf LANG druecken (5s)");
+  y += 18;
+  display.setCursor(m, y);
+  display.print("= WLAN-Reset & Neukonfiguration");
+
+  display.display(false);
+}
+
+void exitQuickMenu() {
+  if (!quickMenuMode) return;
+  quickMenuMode = false;
+  Serial1.println("Quick-Menu mode ended");
+  tone(BUZZER_PIN, 800, 150);
+
+  // Redisplay current image
+  if (currentShowImages.size() > 0) {
+    displayNextImage();
+  }
+}
+
+static void registerWebServerRoutes() {
+  server.on("/", handleRoot);
+  server.on("/logo", handleLogo);
+  server.on("/logotext", handleLogoText);
+  server.on("/favicon.ico", HTTP_GET, handleFavicon);
+  server.on("/scan", handleScan);
+  server.on("/save", HTTP_POST, handleSave);
+  server.on("/ota", HTTP_POST, handleOtaResult, handleOtaUpdate);
+  server.on("/ota", HTTP_OPTIONS, handleOtaCors);
+  server.on("/info", HTTP_GET, handleDeviceInfo);
+  server.on("/quickmenu", HTTP_GET, handleQuickMenu);
+  server.on("/quickmenu/shows", HTTP_GET, handleQuickMenuShows);
+  server.on("/quickmenu/save", HTTP_POST, handleQuickMenuSave);
+  server.on("/generate_204", handleRoot);
+  server.on("/gen_204", handleRoot);
+  server.on("/hotspot-detect.html", handleRoot);
+  server.on("/canonical.html", handleRoot);
+  server.on("/success.txt", handleRoot);
+  server.on("/ncsi.txt", handleRoot);
+  server.on("/connecttest.txt", handleRoot);
+  server.on("/redirect", handleRoot);
+  server.onNotFound(handleNotFound);
 }
 
 // === Setup Function ===
@@ -1828,50 +2643,32 @@ void setup() {
     delay(10);
   delay(2000);
   Serial1.println("--- microPhotoFrame Firmware ---");
-  
-  // Start AP FIRST, before anything else (so AP is always available)
-  // Open AP (no password) for easier captive portal access
-  Serial1.println("Starting configuration access point...");
-  WiFi.mode(WIFI_AP_STA);
-  if (!WiFi.softAP("microPhotoFrame")) {
-    Serial1.println("Failed to start AP!");
-  } else {
-    delay(500); // Give AP time to start
-    IPAddress AP_IP = WiFi.softAPIP();
-    Serial1.print("AP started. SSID: microPhotoFrame (open), IP: ");
-    Serial1.println(AP_IP);
-  }
-  
-  // Initialize buttons
-  pinMode(BTN_UP, INPUT_PULLUP);
-  pinMode(BTN_DOWN, INPUT_PULLUP);
-  pinMode(BTN_LEFT, INPUT_PULLUP);
-  pinMode(BTN_RIGHT, INPUT_PULLUP);
-  pinMode(BTN_CENTER, INPUT_PULLUP);
-  
-  // Check if config should be cleared (center button pressed for 5 seconds)
-  unsigned long buttonCheckStart = millis();
-  bool bothButtonsPressed = false;
-  bool clearConfigPressed = false;
-  while (millis() - buttonCheckStart < 5000) {
-    if (digitalRead(BTN_LEFT) == LOW && digitalRead(BTN_RIGHT) == LOW) {
-      bothButtonsPressed = true;
-    } else if (digitalRead(BTN_CENTER) == LOW) {
-      clearConfigPressed = true;
-    } else {
-      bothButtonsPressed = false;
-      clearConfigPressed = false;
-      break;
+
+  // Tasten: interne Pull-ups — verhindert „schwebendes LOW“ auf GPIO3 (sonst fälschlich
+  // 5s „gedrückt“ → NVS wird jedes Mal gelöscht → nur noch Config-Modus).
+  pinMode(BTN_ACTION, INPUT_PULLUP);
+  pinMode(BTN_NEXT, INPUT_PULLUP);
+  pinMode(BTN_PREV, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  delay(100);
+  bool resetRequested = false;
+  if (digitalRead(BTN_ACTION) == LOW) {
+    // Nur wenn Taste beim Einschalten wirklich gedrückt: bis 5s warten
+    unsigned long t0 = millis();
+    while (digitalRead(BTN_ACTION) == LOW && millis() - t0 < 5000) {
+      delay(100);
     }
-    delay(100);
-  }
-  
-  // Clear config if center button was pressed
-  if (clearConfigPressed) {
-    preferences.begin("microPhotoFrame", false);
-    preferences.clear();
-    preferences.end();
-    Serial1.println("Config cleared by button press");
+    if (digitalRead(BTN_ACTION) == LOW) {
+      resetRequested = true;
+      preferences.begin("microPhotoFrame", false);
+      preferences.clear();
+      preferences.end();
+      Serial1.println("Config cleared: red button held 5s at boot");
+      tone(BUZZER_PIN, 800, 300);
+      delay(350);
+      tone(BUZZER_PIN, 600, 500);
+    }
   }
   
   // Initialize shared SPI bus
@@ -1888,31 +2685,28 @@ void setup() {
   pinMode(SD_DET_PIN, INPUT_PULLUP);
   delay(100);
   
-  bool sdCardAvailable = false;
+  sdLazyMountFailed = false;
   if (digitalRead(SD_DET_PIN) == LOW) {
-    Serial1.println("SD card detected, attempting to mount...");
+    Serial1.println("SD slot: Karte erkannt, Mount wird versucht…");
     if (SD.begin(SD_CS_PIN, hspi)) {
-      Serial1.println("SD card mounted successfully.");
-      sdCardAvailable = true;
+      Serial1.println("SD-Karte gemountet (optional, für Cache/Logos/Offline).");
       sdCardMounted = true;
-      
+
       // Show startup image if available
-      // Try both landscape and portrait filenames (check for typo in filename)
       String startupFiles[] = {
         "/EINK_SPECTRA6_730_sq_800x480_startup_landscape.ink",
         "/EINK_SPECTRA6_730_sq_800x480_startup_landscsape.ink", // typo version
         "/EINK_SPECTRA6_730_sq_800x480_startup_portrait.ink"
       };
-      
+
       bool startupShown = false;
       for (int i = 0; i < 3 && !startupShown; i++) {
         if (SD.exists(startupFiles[i])) {
           Serial1.print("Found startup image: ");
           Serial1.println(startupFiles[i]);
-          // Extract filename without path
           String filename = startupFiles[i];
           filename.replace("/", "");
-          if (i == 2) { // portrait
+          if (i == 2) {
             display.setRotation(1);
             Serial1.println("Showing startup image (portrait)...");
           } else {
@@ -1922,38 +2716,37 @@ void setup() {
           if (decodeAndDisplayInk(filename)) {
             startupShown = true;
             if (i == 2) {
-              display.setRotation(DEFAULT_DISPLAY_ROTATION); // Reset to default
+              display.setRotation(DEFAULT_DISPLAY_ROTATION);
             }
           }
         }
       }
-      
+
       if (!startupShown) {
-        Serial1.println("No startup image found");
+        Serial1.println("Kein Startup-.ink auf SD — weiter ohne Begrüßungsbild.");
         display.fillScreen(GxEPD_WHITE);
         display.hibernate();
       }
     } else {
-      Serial1.println("SD Card Mount Failed!");
-      display.init(115200);
-      display.setCursor(10, 20);
-      display.print("SD Card Mount Failed!");
-      display.display(false);
+      Serial1.println("SD-Mount fehlgeschlagen — Betrieb ohne SD (nur Serial, kein Fehlerbildschirm).");
+      sdLazyMountFailed = true;
+      sdCardMounted = false;
+      display.fillScreen(GxEPD_WHITE);
+      display.hibernate();
     }
   } else {
-    Serial1.println("No SD card detected.");
-    display.init(115200);
-    display.setCursor(10, 20);
-    display.print("No SD card detected.");
-    display.display(false);
+    Serial1.println("Keine SD-Karte (optional) — voller Betrieb über WLAN/Server.");
+    sdCardMounted = false;
+    display.fillScreen(GxEPD_WHITE);
+    display.hibernate();
   }
   
-  // Get AP IP (already started above)
-  IPAddress AP_IP = WiFi.softAPIP();
-  
+  // Konfiguration vor MPU: Standard-Ausrichtung (defOrient) kommt aus NVS
+  loadConfig();
+
   // Initialize MPU6050 for orientation detection
   initMPU6050();
-  // Read initial orientation
+  // Read initial orientation (Sensor oder configDefaultOrientation)
   currentOrientation = readOrientation();
   Serial1.print("Initial orientation: ");
   const char* orientationNames[] = {"Landscape (0°)", "Portrait (90°)", "Landscape inverted (180°)", "Portrait inverted (270°)"};
@@ -1962,206 +2755,296 @@ void setup() {
   } else {
     Serial1.println(currentOrientation);
   }
-  
-  // Load configuration
-  loadConfig();
-  
-  // Setup web server for configuration
-  dnsServer.start(53, "*", AP_IP);
-  server.on("/", handleRoot);
-  server.on("/logo", handleLogo);
-  server.on("/scan", handleScan);
-  server.on("/save", HTTP_POST, handleSave);
-  server.on("/generate_204", handleRoot);
-  server.on("/gen_204", handleRoot);
-  server.on("/hotspot-detect.html", handleRoot);
-  server.on("/canonical.html", handleRoot);
-  server.on("/success.txt", handleRoot);
-  server.on("/ncsi.txt", handleRoot);
-  server.on("/connecttest.txt", handleRoot);
-  server.on("/redirect", handleRoot);
-  server.onNotFound(handleNotFound);
-  server.begin();
-  Serial1.println("Configuration web server started");
-  
-  // Start config mode if buttons pressed or no config exists
-  if (bothButtonsPressed || wifiSSID.length() == 0 || hostChannelUrl.length() == 0) {
+
+  dnsServerActive = false;
+  Serial1.printf("Config: SSID len=%u, URL len=%u, defOrient=%u, mpu=%d, factoryReset=%d\n",
+                 (unsigned)wifiSSID.length(), (unsigned)hostChannelUrl.length(),
+                 (unsigned)configDefaultOrientation, mpu6050Available ? 1 : 0, resetRequested ? 1 : 0);
+
+  bool needConfig =
+      resetRequested || wifiSSID.length() == 0 || hostChannelUrl.length() == 0;
+
+  if (needConfig) {
+    Serial1.println("Starting CONFIG mode (Soft-AP + Captive Portal)...");
+    WiFi.mode(WIFI_AP_STA);
+    if (!WiFi.softAP("microPhotoFrame")) {
+      Serial1.println("Failed to start AP!");
+    }
+    delay(500);
+    IPAddress AP_IP = WiFi.softAPIP();
+    Serial1.print("AP: microPhotoFrame  IP: ");
+    Serial1.println(AP_IP);
+    dnsServer.start(53, "*", AP_IP);
+    dnsServerActive = true;
+    registerWebServerRoutes();
+    server.begin();
+    Serial1.println("HTTP server started (config)");
     startConfigMode();
     return;
   }
-  
-  // Connect to WiFi (AP is already running)
+
+  // Normalbetrieb: kein offenes Gast-WLAN, nur Heim-WLAN
+  Serial1.println("Starting STA mode (slideshow)...");
+  WiFi.mode(WIFI_STA);
+  registerWebServerRoutes();
+  server.begin();
+  Serial1.println("HTTP server on STA (OTA /info /quickmenu when connected)");
+
   if (connectWiFi()) {
     wifiConnected = true;
     
-    // Show connecting message
-    display.init(115200);
-    display.setRotation(DEFAULT_DISPLAY_ROTATION);
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    display.setCursor(50, 200);
-    display.print("Connected to WiFi");
-    display.setCursor(50, 230);
-    display.print("Loading show...");
-    display.display(false);
+    showStatusScreen("Connected to WiFi", "Loading show...");
     
-    // Get active show and load images
-    if (getActiveShow()) {
-      if (loadShowData()) {
+    // Get active show (mit Retry falls Server beim ersten Versuch noch nicht antwortet)
+    bool showFound = false;
+    for (int attempt = 0; attempt < 3 && !showFound; attempt++) {
+      if (attempt > 0) {
+        Serial1.printf("getActiveShow Retry %d/2 nach 2s...\n", attempt);
+        delay(2000);
+      }
+      showFound = getActiveShow();
+    }
+
+    if (showFound) {
+      bool dataLoaded = loadShowData();
+      if (!dataLoaded) {
+        Serial1.println("loadShowData failed, Retry nach 2s...");
+        delay(2000);
+        dataLoaded = loadShowData();
+      }
+      if (dataLoaded) {
         if (currentShowImages.size() > 0) {
           Serial1.println("Displaying first image...");
-          currentImageIndex = -1; // Start from beginning
+          currentImageIndex = -1;
           displayNextImage();
         } else {
           Serial1.println("Show has no images");
-          display.init(115200);
-          display.setRotation(DEFAULT_DISPLAY_ROTATION);
-          display.fillScreen(GxEPD_WHITE);
-          display.setTextColor(GxEPD_BLACK);
-          display.setCursor(50, 200);
-          display.print("Show has no images");
-          display.setCursor(50, 230);
-          display.print(currentShowName);
-          display.display(false);
+          if (!tryBootOfflineLastImage()) {
+            showStatusScreen("Show has no images", currentShowName.c_str());
+          }
         }
       } else {
         Serial1.println("Failed to load show data");
-        display.init(115200);
-        display.setRotation(DEFAULT_DISPLAY_ROTATION);
-        display.fillScreen(GxEPD_WHITE);
-        display.setTextColor(GxEPD_BLACK);
-        display.setCursor(50, 200);
-        display.print("Failed to load show");
-        display.display(false);
+        if (!tryBootOfflineLastImage()) {
+          showStatusScreen("Failed to load show", currentShowName.c_str());
+        }
       }
     } else {
-      Serial1.println("No active show found");
-      display.init(115200);
-      display.setRotation(DEFAULT_DISPLAY_ROTATION);
-      display.fillScreen(GxEPD_WHITE);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(50, 200);
-      display.print("No active show");
-      display.setCursor(50, 230);
-      display.print("for this display");
-      display.display(false);
+      Serial1.println("No active show found (nach 3 Versuchen)");
+      // Fallback: NVS-Show-Name bekannt → versuche Show trotzdem zu laden
+      if (currentShowName.length() > 0) {
+        Serial1.print("Versuche gespeicherte Show aus NVS: ");
+        Serial1.println(currentShowName);
+        bool dataLoaded = loadShowData();
+        if (!dataLoaded) {
+          delay(2000);
+          dataLoaded = loadShowData();
+        }
+        if (dataLoaded && currentShowImages.size() > 0) {
+          Serial1.println("Gespeicherte Show geladen!");
+          currentImageIndex = -1;
+          displayNextImage();
+        } else if (!tryBootOfflineLastImage()) {
+          showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+        }
+      } else if (!tryBootOfflineLastImage()) {
+        showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+      }
     }
   } else {
-    Serial1.println("Failed to connect to WiFi, entering config mode");
-    // AP is already running, just switch to config mode
+    Serial1.println("WiFi connect failed — opening config AP for setup");
+    WiFi.mode(WIFI_AP_STA);
+    if (WiFi.softAP("microPhotoFrame")) {
+      delay(400);
+      IPAddress apip = WiFi.softAPIP();
+      dnsServer.start(53, "*", apip);
+      dnsServerActive = true;
+      Serial1.print("Fallback AP IP: ");
+      Serial1.println(apip);
+    }
     configMode = true;
     configModeStartTime = millis();
-    display.init(115200);
-    display.setRotation(DEFAULT_DISPLAY_ROTATION);
-    display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    display.setCursor(10, 30);
-    display.print("WiFi Connection Failed");
-    display.setCursor(10, 60);
-    display.print("SSID: ");
-    display.print(wifiSSID.length() > 0 ? wifiSSID : "not set");
-    display.setCursor(10, 90);
-    display.print("Config Mode Active");
-    display.setCursor(10, 120);
-    display.print("WiFi: microPhotoFrame");
-    display.setCursor(10, 150);
-    display.print("(Open - no password)");
-    IPAddress IP = WiFi.softAPIP();
-    display.setCursor(10, 180);
-    display.print("IP: ");
-    display.print(IP.toString());
-    display.display(false);
+    String ssidInfo = "SSID: " + (wifiSSID.length() > 0 ? wifiSSID : String("not set"));
+    String apInfo = "AP: microPhotoFrame  IP: " + WiFi.softAPIP().toString();
+    showStatusScreen("WiFi Connection Failed", ssidInfo.c_str(), apInfo.c_str());
   }
 }
 
 // === Loop Function ===
 void loop() {
-  // Always handle configuration web server (AP is always running)
-  dnsServer.processNextRequest();
+  if (dnsServerActive) {
+    dnsServer.processNextRequest();
+  }
   server.handleClient();
-  
+
+  // --- Config mode (WiFi setup) ---
   if (configMode) {
-    // Exit config mode after timeout
     if (millis() - configModeStartTime > CONFIG_MODE_TIMEOUT) {
       Serial1.println("Config mode timeout, restarting...");
       ESP.restart();
     }
     return;
   }
-  
-  // Handle button presses
-  if (digitalRead(BTN_LEFT) == LOW) {
-    delay(200); // Debounce
-    if (digitalRead(BTN_LEFT) == LOW) {
+
+  // --- Quick-Menu timeout ---
+  if (quickMenuMode) {
+    if (millis() - quickMenuStart > QUICK_MENU_TIMEOUT) {
+      exitQuickMenu();
+    }
+    // While in quick menu, still respond to buttons to exit early
+    if (digitalRead(BTN_ACTION) == LOW) {
+      delay(200);
+      if (digitalRead(BTN_ACTION) == LOW) {
+        exitQuickMenu();
+        delay(300);
+      }
+    }
+    delay(50);
+    return;
+  }
+
+  // --- Red button: short press = Quick Menu, long press handled at boot ---
+  if (digitalRead(BTN_ACTION) == LOW) {
+    delay(200); // debounce
+    if (digitalRead(BTN_ACTION) == LOW) {
+      // Measure how long held
+      unsigned long pressStart = millis();
+      while (digitalRead(BTN_ACTION) == LOW && millis() - pressStart < 5000) {
+        delay(50);
+      }
+      if (millis() - pressStart >= 5000) {
+        // Long press during runtime → reset & reboot
+        Serial1.println("Long press detected → resetting config...");
+        preferences.begin("microPhotoFrame", false);
+        preferences.clear();
+        preferences.end();
+        tone(BUZZER_PIN, 600, 500);
+        delay(600);
+        ESP.restart();
+      } else {
+        // Short press → Quick Menu
+        if (wifiConnected) {
+          enterQuickMenu();
+        } else {
+          tone(BUZZER_PIN, 300, 200); // error beep: no WiFi
+        }
+      }
+    }
+  }
+
+  // --- Previous image (left button) ---
+  if (digitalRead(BTN_PREV) == LOW) {
+    delay(200);
+    if (digitalRead(BTN_PREV) == LOW) {
       Serial1.println("Previous image");
       if (currentShowMode == "forwardssequence") {
-        currentImageIndex -= 2; // Will be incremented in displayNextImage
-        if (currentImageIndex < -1) currentImageIndex = currentShowImages.size() - 2;
+        currentImageIndex -= 2;
+        if (currentImageIndex < -1) currentImageIndex = (int)currentShowImages.size() - 2;
       } else if (currentShowMode == "reversesequence") {
         currentImageIndex += 2;
-        if (currentImageIndex >= currentShowImages.size()) currentImageIndex = 1;
+        if (currentImageIndex >= (int)currentShowImages.size()) currentImageIndex = 1;
       }
       displayNextImage();
     }
   }
-  
-  if (digitalRead(BTN_RIGHT) == LOW) {
-    delay(200); // Debounce
-    if (digitalRead(BTN_RIGHT) == LOW) {
+
+  // --- Next image (right button) ---
+  if (digitalRead(BTN_NEXT) == LOW) {
+    delay(200);
+    if (digitalRead(BTN_NEXT) == LOW) {
       Serial1.println("Next image");
       displayNextImage();
     }
   }
-  
-  // Check orientation periodically
-  if (millis() - lastOrientationCheck > ORIENTATION_CHECK_INTERVAL) {
+
+  // --- Orientation sensor (nur mit MPU6050) ---
+  if (mpu6050Available && millis() - lastOrientationCheck > ORIENTATION_CHECK_INTERVAL) {
     lastOrientationCheck = millis();
     int newOrientation = readOrientation();
     if (newOrientation != currentOrientation) {
-      Serial1.print("Orientation changed from ");
-      const char* orientationNames[] = {"landscape (0°)", "portrait (90°)", "landscape inverted (180°)", "portrait inverted (270°)"};
-      if (currentOrientation >= 0 && currentOrientation < 4) {
-        Serial1.print(orientationNames[currentOrientation]);
-      } else {
-        Serial1.print(currentOrientation);
-      }
-      Serial1.print(" to ");
-      if (newOrientation >= 0 && newOrientation < 4) {
-        Serial1.println(orientationNames[newOrientation]);
-      } else {
-        Serial1.println(newOrientation);
-      }
+      const char* orientationNames[] = {"landscape (0)", "portrait (90)", "landscape inv (180)", "portrait inv (270)"};
+      Serial1.printf("Orientation: %s -> %s\n",
+        (currentOrientation >= 0 && currentOrientation < 4) ? orientationNames[currentOrientation] : "?",
+        (newOrientation >= 0 && newOrientation < 4) ? orientationNames[newOrientation] : "?");
       currentOrientation = newOrientation;
-      // Re-filter images for new orientation
       filterImagesByOrientation();
-      // Reset image index and display new image
       if (currentShowImages.size() > 0) {
         currentImageIndex = -1;
         displayNextImage();
       }
     }
   }
-  
-  // Check for new active show periodically
-  if (wifiConnected && millis() - lastServerCheck > SERVER_CHECK_INTERVAL) {
-    lastServerCheck = millis();
-    
-    Serial1.println("Checking for active show update...");
-    if (getActiveShow()) {
-      Serial1.println("Active show changed, reloading...");
-      if (loadShowData()) {
-        if (currentShowImages.size() > 0) {
-          currentImageIndex = -1; // Reset to start
-          displayNextImage();
-        }
-      }
+
+  // --- WiFi-Reconnect wenn Verbindung verloren ---
+  if (wifiConnected && WiFi.status() != WL_CONNECTED) {
+    Serial1.println("WiFi verloren, Reconnect...");
+    WiFi.disconnect(false);
+    delay(500);
+    WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+    unsigned long t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) {
+      delay(500);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial1.print("WiFi reconnected! IP: ");
+      Serial1.println(WiFi.localIP());
+    } else {
+      Serial1.println("WiFi Reconnect fehlgeschlagen");
     }
   }
-  
-  // Change image based on timer
+
+  // --- Temporäre Quick-Menü-Show: Frist abgelaufen -> wieder Server-Vorgabe ---
+  if (showTempOverrideUntilMs != 0 && millis() >= showTempOverrideUntilMs) {
+    showTempOverrideUntilMs = 0;
+    Serial1.println("Temporäre Show abgelaufen -> Server-Vorgabe laden");
+    lastServerCheck = millis();
+    if (wifiConnected && WiFi.status() == WL_CONNECTED) {
+      bool showUpdate = getActiveShow();
+      if (showUpdate || currentShowImages.size() == 0) {
+        if (loadShowData()) {
+          if (currentShowImages.size() > 0) {
+            currentImageIndex = -1;
+            displayNextImage();
+          }
+        } else {
+          tryRedisplayLastWithOfflineBadge();
+        }
+      }
+      if (offlineBadgeOnScreen && lastGetShowsSucceeded)
+        redisplayLastWithoutOfflineBadge();
+    }
+  }
+
+  // --- Periodic server check for active show ---
+  if (wifiConnected && WiFi.status() == WL_CONNECTED && millis() - lastServerCheck > SERVER_CHECK_INTERVAL) {
+    lastServerCheck = millis();
+    Serial1.println("Checking for active show update...");
+    bool showUpdate = getActiveShow();
+    if (lastGetShowsSucceeded) {
+      if (showUpdate) {
+        Serial1.println("Active show changed, reloading...");
+        if (loadShowData()) {
+          if (currentShowImages.size() > 0) {
+            currentImageIndex = -1;
+            displayNextImage();
+          }
+        } else {
+          Serial1.println("loadShowData failed — Hinweis-Badge, letztes Bild");
+          tryRedisplayLastWithOfflineBadge();
+        }
+      } else if (offlineBadgeOnScreen) {
+        redisplayLastWithoutOfflineBadge();
+      }
+    } else {
+      Serial1.println("getShows fehlgeschlagen — letztes Bild mit Offline-Hinweis (einmal)");
+      tryRedisplayLastWithOfflineBadge();
+    }
+  }
+
+  // --- Auto image change ---
   if (currentShowImages.size() > 0 && millis() - lastImageChangeTime > (currentShowTimer * 60000UL)) {
     displayNextImage();
   }
-  
+
   delay(100);
 }

@@ -1,7 +1,8 @@
 {
-  "displayId": "9",
+  "displayId": "I",
   "dither": "floyd",
   "orientation": 0,
+  "compression": "deflatePaeth",
   "colorAdjust": {
     "saturation": 1.8,
     "contrast": 1.4,

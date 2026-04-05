@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>µPhotoFrame</title>
+	<link rel="icon" href="favicon.ico" type="image/x-icon">
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		body {
+			font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+			background: linear-gradient(135deg, #e8edf5 0%, #c3cfe2 50%, #a8b8d0 100%);
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: #333;
+			padding: 24px;
+		}
+		.card {
+			background: #fff;
+			border-radius: 16px;
+			box-shadow: 0 4px 6px rgba(0,0,0,.04), 0 20px 50px rgba(0,0,0,.10);
+			max-width: 620px;
+			width: 100%;
+			padding: 52px;
+			position: relative;
+			overflow: hidden;
+		}
+		.card::before {
+			content: '';
+			position: absolute;
+			top: 0; left: 0; right: 0;
+			height: 4px;
+		}
+		.card.is-install::before { background: linear-gradient(90deg, #27ae60, #2ecc71); }
+		.card.is-update::before  { background: linear-gradient(90deg, #2980b9, #3498db); }
+
+		.icon {
+			width: 56px; height: 56px;
+			border-radius: 14px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 28px;
+			margin-bottom: 20px;
+		}
+		.icon-install { background: #eafaf1; color: #27ae60; }
+		.icon-update  { background: #ebf5fb; color: #2980b9; }
+
+		.badge {
+			display: inline-block;
+			color: #fff;
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: .8px;
+			text-transform: uppercase;
+			padding: 5px 14px;
+			border-radius: 20px;
+			margin-bottom: 16px;
+		}
+		.badge-install { background: #27ae60; }
+		.badge-update  { background: #2980b9; }
+
+		h1 {
+			font-size: 26px;
+			font-weight: 700;
+			margin-bottom: 6px;
+			color: #1a1a2e;
+			line-height: 1.2;
+		}
+		.subtitle {
+			font-size: 14px;
+			color: #8899aa;
+			margin-bottom: 32px;
+			font-weight: 400;
+		}
+		p {
+			font-size: 15px;
+			line-height: 1.75;
+			margin-bottom: 16px;
+			color: #555;
+		}
+
+		.box {
+			border-radius: 10px;
+			padding: 18px 22px;
+			margin: 24px 0;
+			border-left: 4px solid;
+		}
+		.box h3 {
+			font-size: 14px;
+			font-weight: 700;
+			margin-bottom: 6px;
+			letter-spacing: .2px;
+		}
+		.box p { margin-bottom: 0; font-size: 14px; color: #555; }
+
+		.box-success { background: #f0faf0; border-color: #27ae60; }
+		.box-success h3 { color: #1e8449; }
+		.box-info    { background: #f0f7ff; border-color: #3498db; }
+		.box-info h3 { color: #2471a3; }
+		.box-warn    { background: #fef9e7; border-color: #f0b429; }
+		.box-warn h3 { color: #b7791f; }
+
+		.steps {
+			list-style: none;
+			margin: 24px 0;
+			padding: 0;
+			counter-reset: step;
+		}
+		.steps li {
+			position: relative;
+			padding: 12px 0 12px 44px;
+			font-size: 14px;
+			line-height: 1.6;
+			color: #555;
+			border-bottom: 1px solid #f0f0f0;
+			counter-increment: step;
+		}
+		.steps li:last-child { border-bottom: none; }
+		.steps li::before {
+			content: counter(step);
+			position: absolute;
+			left: 0; top: 12px;
+			width: 28px; height: 28px;
+			background: #3498db;
+			color: #fff;
+			border-radius: 50%;
+			font-size: 13px;
+			font-weight: 700;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+
+		.app-link {
+			display: inline-block;
+			margin-top: 28px;
+			padding: 12px 28px;
+			border-radius: 8px;
+			color: #fff;
+			text-decoration: none;
+			font-size: 15px;
+			font-weight: 600;
+			transition: opacity .15s;
+		}
+		.app-link:hover { opacity: .85; }
+		.app-link-install { background: #27ae60; }
+		.app-link-update  { background: #2980b9; }
+
+		.box-error {
+			background: #fef0f0;
+			border-color: #e74c3c;
+		}
+		.box-error h3 { color: #c0392b; }
+
+		.badge-error { background: #e74c3c; }
+		.icon-error  { background: #fef0f0; color: #e74c3c; }
+		.card.is-error::before { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+
+		.support-links {
+			margin-top: 24px;
+			padding: 16px 0;
+			display: flex;
+			gap: 16px;
+			flex-wrap: wrap;
+		}
+		.support-links a {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			color: #2980b9;
+			text-decoration: none;
+			font-size: 13px;
+			font-weight: 500;
+		}
+		.support-links a:hover { text-decoration: underline; }
+
+		.footer {
+			margin-top: 36px;
+			padding-top: 20px;
+			border-top: 1px solid #eee;
+			font-size: 12px;
+			color: #aab;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+
+		.logo {
+			text-align: center;
+			margin-bottom: 28px;
+		}
+		.logo img {
+			max-width: 220px;
+			height: auto;
+		}
+
+		.hidden { display: none; }
+	</style>
+</head>
+<body>
+	<div class="card" id="card">
+		<div class="logo"><img src="favicon.ico" alt="µPhotoFrame" width="64" height="64"></div>
+		<div class="icon" id="iconEl"></div>
+		<span class="badge" id="badgeEl"></span>
+		<h1 id="titleEl"></h1>
+		<div class="subtitle" id="subtitleEl"></div>
+
+		<!-- First install content -->
+		<div id="installContent" class="hidden">
+			<p id="installText"></p>
+
+			<div id="noHttpsHint" class="box box-info hidden">
+				<h3>HTTPS-Verbindung empfohlen</h3>
+				<p>
+					Es wurde kein Zertifikat bei der Installation konfiguriert.
+					Wir empfehlen dringend, HTTPS nachtr&auml;glich einzurichten
+					(z.&nbsp;B. &uuml;ber IIS, einen Reverse-Proxy oder den eingebetteten Server),
+					um die Kommunikation abzusichern.
+				</p>
+			</div>
+
+			<div id="httpsOkHint" class="box box-success hidden">
+				<h3>HTTPS aktiv</h3>
+				<p>
+					Die HTTPS-Verbindung wurde bei der Installation konfiguriert.
+					Die Anwendung ist &uuml;ber eine verschl&uuml;sselte Verbindung erreichbar.
+				</p>
+			</div>
+
+			<p><strong>N&auml;chste Schritte:</strong></p>
+			<ol class="steps" id="installSteps">
+				<li>Pr&uuml;fen Sie die Erreichbarkeit von µPhotoFrame im Browser (Port laut Konfiguration).</li>
+			</ol>
+		</div>
+
+		<!-- Update content -->
+		<div id="updateContent" class="hidden">
+			<div class="box box-success">
+				<h3>Aktualisierung abgeschlossen</h3>
+				<p>
+					Die Anwendung wurde erfolgreich aktualisiert. Ihre bestehende
+					Konfiguration (<em>web.config</em>) wurde beibehalten.
+				</p>
+			</div>
+
+			<p>
+				Der IIS-Dienst wurde w&auml;hrend des Updates neu gestartet.
+				Die Anwendung sollte nun unter der gewohnten Adresse erreichbar sein.
+			</p>
+
+			<div class="box box-warn">
+				<h3>Hinweis</h3>
+				<p>
+					Sollte es nach dem Update zu Problemen kommen, pr&uuml;fen Sie bitte die
+					Server-Logausgabe bzw. das Windows-Ereignisprotokoll.
+				</p>
+			</div>
+		</div>
+
+		<!-- Error content -->
+		<div id="errorContent" class="hidden">
+			<div class="box box-error">
+				<h3>Installation fehlgeschlagen</h3>
+				<p>
+					Die Installation wurde aufgrund eines Fehlers abgebrochen.
+					Pr&uuml;fen Sie die Installationsausgabe und die Server-Konfiguration.
+				</p>
+			</div>
+
+			<p>
+				Weitere Hilfe: siehe README.md / INSTALLATION.md oder
+				<a href="https://github.com/mamekudz/microPhotoFrame/issues" target="_blank" rel="noopener">GitHub Issues</a>.
+			</p>
+		</div>
+
+		<div id="appLinkContainer" style="text-align:center" class="hidden">
+			<a id="appLink" class="app-link" target="_blank"></a>
+		</div>
+
+		<div class="support-links">
+			<a href="https://github.com/mamekudz/microPhotoFrame" target="_blank" rel="noopener">&#127760; GitHub: microPhotoFrame</a>
+			<a id="supportMail" href="https://github.com/mamekudz/microPhotoFrame/issues" target="_blank" rel="noopener">&#9993; Issues / Support</a>
+		</div>
+
+		<div class="footer">
+			<span>Meinolf Amekudzi · MIT License</span>
+			<span id="footerVersion"></span>
+		</div>
+	</div>
+
+	<!-- Installer writes this file with WELCOME_TYPE, WELCOME_HTTPS, WELCOME_VERSION -->
+	<script src="welcome2microPhotoFrame_config.js"></script>
+	<script>
+		var type     = (typeof WELCOME_TYPE    !== 'undefined') ? WELCOME_TYPE    : 'install';
+		var hasHttps = (typeof WELCOME_HTTPS  !== 'undefined') ? WELCOME_HTTPS   : false;
+		var version  = (typeof WELCOME_VERSION !== 'undefined') ? WELCOME_VERSION : '';
+
+		var productName = 'µPhotoFrame';
+
+		var card       = document.getElementById('card');
+		var iconEl     = document.getElementById('iconEl');
+		var badgeEl    = document.getElementById('badgeEl');
+		var titleEl    = document.getElementById('titleEl');
+		var subtitleEl = document.getElementById('subtitleEl');
+		var footerVer  = document.getElementById('footerVersion');
+
+		if (type === 'error') {
+			card.classList.add('is-error');
+			iconEl.classList.add('icon-error');
+			iconEl.textContent = '\u2717';
+			badgeEl.textContent = 'Fehler';
+			badgeEl.classList.add('badge-error');
+			titleEl.textContent = productName + ' Installation';
+			subtitleEl.textContent = version
+				? 'Version ' + version + ' \u2013 Installation abgebrochen.'
+				: 'Die Installation wurde abgebrochen.';
+			document.getElementById('errorContent').classList.remove('hidden');
+		} else if (type === 'update') {
+			card.classList.add('is-update');
+			iconEl.classList.add('icon-update');
+			iconEl.textContent = '\u2191';
+			badgeEl.textContent = 'Update';
+			badgeEl.classList.add('badge-update');
+			titleEl.textContent = productName + ' aktualisiert';
+			subtitleEl.textContent = version
+				? 'Version ' + version + ' wurde erfolgreich eingespielt.'
+				: 'Das Update wurde erfolgreich eingespielt.';
+			document.getElementById('updateContent').classList.remove('hidden');
+		} else {
+			card.classList.add('is-install');
+			iconEl.classList.add('icon-install');
+			iconEl.textContent = '\u2713';
+			badgeEl.textContent = 'Erstinstallation';
+			badgeEl.classList.add('badge-install');
+			titleEl.textContent = 'Willkommen bei ' + productName;
+			subtitleEl.textContent = version
+				? 'Version ' + version + ' wurde erfolgreich installiert.'
+				: 'Die Installation war erfolgreich.';
+			document.getElementById('installContent').classList.remove('hidden');
+
+			var stepsEl = document.getElementById('installSteps');
+			if (hasHttps) {
+				document.getElementById('httpsOkHint').classList.remove('hidden');
+			} else {
+				document.getElementById('noHttpsHint').classList.remove('hidden');
+				var li2 = document.createElement('li');
+				li2.textContent = 'Richten Sie ein Zertifikat f\u00fcr HTTPS ein (Port 443).';
+				stepsEl.appendChild(li2);
+				var li3 = document.createElement('li');
+				li3.innerHTML = 'Bei IIS: in der <em>web.config</em> die HTTPS-Rewrite-Regel auf <em>enabled="true"</em> setzen.';
+				stepsEl.appendChild(li3);
+			}
+		}
+
+		// Show app link only on success
+		if (type !== 'error') {
+			var domain = (typeof WELCOME_DOMAIN !== 'undefined' && WELCOME_DOMAIN) ? WELCOME_DOMAIN : 'localhost';
+			var protocol = hasHttps ? 'https' : 'http';
+			var linkEl = document.getElementById('appLink');
+			linkEl.href = protocol + '://' + domain;
+			linkEl.classList.add(type === 'update' ? 'app-link-update' : 'app-link-install');
+			document.getElementById('appLinkContainer').classList.remove('hidden');
+		}
+
+		if (version) {
+			footerVer.textContent = productName + ' ' + version;
+		}
+
+		document.title = productName;
+		document.getElementById('installText').textContent =
+			productName + ' wurde erfolgreich auf Ihrem System installiert. ' +
+			'Die Anwendung ist unter der konfigurierten Adresse erreichbar.';
+
+		if (type !== 'error') {
+			document.getElementById('appLink').textContent = productName + ' \u00f6ffnen';
+		}
+
+		document.getElementById('supportMail').href =
+			'https://github.com/mamekudz/microPhotoFrame/issues';
+	</script>
+</body>
+</html>

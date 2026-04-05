@@ -764,6 +764,57 @@ function importShow(&$rest) {
     }
 }
 
+function firmwareUpdateProxy(&$rest) {
+    global $input;
+    $deviceIp = $input['deviceIp'] ?? '';
+    $fw64 = $input['firmware'] ?? '';
+    if (empty($deviceIp)) throw new Exception('deviceIp fehlt.');
+    if (empty($fw64)) throw new Exception('firmware (Base64) fehlt.');
+
+    $fwBin = base64_decode($fw64, true);
+    if ($fwBin === false) throw new Exception('Ungültige Base64-Firmware.');
+
+    $boundary = '----FWUpload' . time();
+    $body = "--{$boundary}\r\n"
+          . "Content-Disposition: form-data; name=\"firmware\"; filename=\"firmware.bin\"\r\n"
+          . "Content-Type: application/octet-stream\r\n\r\n"
+          . $fwBin
+          . "\r\n--{$boundary}--\r\n";
+
+    $opts = [
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: multipart/form-data; boundary={$boundary}\r\nContent-Length: " . strlen($body),
+            'content' => $body,
+            'timeout' => 120,
+            'ignore_errors' => true
+        ]
+    ];
+    $ctx = stream_context_create($opts);
+    $result = @file_get_contents("http://{$deviceIp}/ota", false, $ctx);
+    if ($result === false) throw new Exception('Gerät nicht erreichbar: ' . $deviceIp);
+
+    $json = json_decode($result, true);
+    $rest['output']['deviceResponse'] = $json ?: ['msg' => $result];
+    $rest['ok'] = isset($json['ok']) ? (bool)$json['ok'] : false;
+    if (!$rest['ok']) {
+        $rest['error'] = ['msg' => $json['msg'] ?? 'Firmware-Update fehlgeschlagen', 'code' => 10];
+    }
+}
+
+function getDeviceInfoProxy(&$rest) {
+    global $input;
+    $deviceIp = $input['deviceIp'] ?? '';
+    if (empty($deviceIp)) throw new Exception('deviceIp fehlt.');
+
+    $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
+    $result = @file_get_contents("http://{$deviceIp}/info", false, $ctx);
+    if ($result === false) throw new Exception('Gerät nicht erreichbar: ' . $deviceIp);
+
+    $rest['output']['deviceInfo'] = json_decode($result, true) ?: ['raw' => $result];
+    $rest['ok'] = true;
+}
+
 // Route actions
 switch ($action) {
     case 'getDevices':
@@ -798,6 +849,12 @@ switch ($action) {
         break;
     case 'importShow':
         importShow($rest);
+        break;
+    case 'firmwareUpdate':
+        firmwareUpdateProxy($rest);
+        break;
+    case 'getDeviceInfo':
+        getDeviceInfoProxy($rest);
         break;
     default:
         if (empty($action)) {
