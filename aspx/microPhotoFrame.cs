@@ -419,8 +419,8 @@ public partial class microPhotoFrame : System.Web.UI.Page {
         // Detect format version: Version 1 starts with 1, old format starts with display ID (< 32)
         int currentOrientation;
         string displayId;
-        if (rawdata.Length >= 4 && rawdata[0] == 1) {
-          // New format (Version 1): [version=1, displayId, dither, orient, ...]
+        if (rawdata.Length >= 4 && (rawdata[0] == 1 || rawdata[0] == 2 || rawdata[0] == 3)) {
+          // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
           displayId = ((char)rawdata[1]).ToString();
           currentOrientation = rawdata[3]; // 0 = landscape, 1 = portrait
         } else {

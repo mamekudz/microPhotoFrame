@@ -1368,27 +1368,10 @@ async function LoadKIModel() {
             console.warn("AI: Backend test failed, but we'll still try to load the model...");
         }
 
-        // Try to load local model (Google's standard model returns 404)
-        try {
-            console.log("AI: Attempting to load local model...");
-            // Local model (ssdlite_mobilenet_v2) - detects 80 object classes (people, animals, vehicles, etc.)
-        detectorModel = await cocoSsd.load({
-                base: 'lite_mobilenet_v2',
-            modelUrl: './src/libs/models/model.json'
-        });
-            console.log("AI: Local model loaded successfully.");
-        } catch (localErr) {
-            console.warn("AI: Local model could not be loaded:", localErr.message);
-            console.log("AI: Trying standard model as fallback...");
-            try {
-                // Fallback: Try standard model (may fail due to 404)
-                detectorModel = await cocoSsd.load();
-                console.log("AI: Standard model loaded successfully.");
-            } catch (stdErr) {
-                console.error("AI: Standard model could also not be loaded:", stdErr);
-                throw new Error("No model could be loaded. Local model: " + localErr.message);
-            }
-        }
+        // Standard-MobileNet-Modell (lädt Gewichte von TensorFlow-Hosting / CDN — Internet nötig)
+        console.log("AI: Loading COCO-SSD model…");
+        detectorModel = await cocoSsd.load();
+        console.log("AI: Model loaded.");
 
         if (!detectorModel) {
             throw new Error("Model could not be loaded");

@@ -8,6 +8,7 @@
   "scripts": {
     "build:packages": "gulp BUILD_ALL_SERVER_PACKAGES",
     "build:installer": "gulp BUILD_INSTALLER",
+    "fetch:installer-assets": "gulp FETCH_INSTALLER_ASSETS",
     "build:server:pick": "gulp BUILD_SERVER_PACKAGES",
     "encode:ink": "gulp ENCODE_INK",
     "firmware:build": "gulp FIRMWARE_BUILD",

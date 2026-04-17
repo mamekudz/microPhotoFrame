@@ -16,6 +16,7 @@ import replace from 'gulp-replace';
 import prompt from 'gulp-prompt';
 import glob from 'fast-glob';
 import pngToIco from 'png-to-ico';
+import { fetchInstallerRedistributables } from './tools/installer-redistributables.mjs';
 
 // Gulp-Tasks-Panel (u. a. nickdodd79/vscode-gulptasks) setzt bei lokalem Gulp --cwd auf
 // node_modules/.bin — dann wären ./package.json und alle gulp.src-Pfade falsch.
@@ -99,6 +100,32 @@ const Log        = (t) => console.log(`${C.reset}${t}`);
 
 function _ensureDir(dir) {
 	if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+/** NSIS: kein eingechecktes NSISBI — systemweites makensis (PATH / MAKENSIS / NSISDIR). */
+function _resolveMakensis() {
+	const fromEnv = process.env.MAKENSIS || process.env.NSIS_MAKENSIS || '';
+	if (fromEnv && fs.existsSync(fromEnv)) return path.resolve(fromEnv);
+	const nsisdir = process.env.NSISDIR;
+	if (nsisdir) {
+		const p = path.join(nsisdir, 'makensis.exe');
+		if (fs.existsSync(p)) return p;
+	}
+	const candidates = [
+		'C:\\Program Files (x86)\\NSIS\\makensis.exe',
+		'C:\\Program Files\\NSIS\\makensis.exe'
+	];
+	for (const p of candidates) {
+		if (fs.existsSync(p)) return p;
+	}
+	try {
+		const out = cp.execSync('where makensis', { encoding: 'utf8', shell: true, stdio: ['ignore', 'pipe', 'ignore'] });
+		const line = out.trim().split(/\r?\n/)[0];
+		if (line && fs.existsSync(line)) return line.trim();
+	} catch {
+		/* where fehlgeschlagen */
+	}
+	return null;
 }
 
 function _RunSeries(...tasks) {
@@ -262,6 +289,23 @@ function _buildSelectedPackage(cb) {
 // NSIS INSTALLER
 // ==============================================
 
+async function _fetchInstallerRedistributables(cb) {
+	SectionLog('Installer-Assets (Redistributables) prüfen / bei Bedarf von Microsoft laden …');
+	try {
+		await fetchInstallerRedistributables({
+			root: PROJECT_ROOT,
+			log: Log,
+			ok: ResultLog,
+			warn: (t) => console.warn(`${C.yellow}${t}${C.reset}`),
+			err: ErrLog
+		});
+		cb();
+	} catch (err) {
+		ErrLog(err.message);
+		cb(err);
+	}
+}
+
 async function _buildInstaller(cb) {
 	SectionLog('Building NSIS installer...');
 	_ensureDir(DIST_DIR);
@@ -289,19 +333,19 @@ async function _buildInstaller(cb) {
 		`!define INSTALLER_OUTDIR "${outDir}"\n`;
 	fs.writeFileSync(path.join(TMP_DIR, 'version.nsh'), versionNsh);
 
-	const makensisPath = path.resolve('./installer/NSISBI_3.08/makensis.exe');
-	const makensisCwd = path.resolve('./installer/NSISBI_3.08');
-	if (!fs.existsSync(makensisPath)) {
-		ErrLog('makensis.exe not found at: ' + makensisPath);
-		Log('Please ensure NSISBI_3.08 contains the makensis.exe binary.');
+	const makensisPath = _resolveMakensis();
+	if (!makensisPath) {
+		ErrLog('makensis.exe nicht gefunden. NSIS installieren oder MAKENSIS setzen.');
+		Log('Hinweis: siehe docs/BUILD_INSTALLER.md');
 		cb(new Error('makensis.exe not found'));
 		return;
 	}
+	Log('makensis: ' + makensisPath);
 
 	try {
-		// NSIS: File-Pfade sind relativ zum Verzeichnis der .nsi (installer\) → Projektroot = "..\".
-		// cwd = NSISBI_3.08, damit gebündelte Plugins/Includes von makensis gefunden werden.
-		await _spawn(makensisPath, ['/V3', nsisScript], { cwd: makensisCwd });
+		// .nsi liegt unter installer\ — File "..\…" relativ zur .nsi-Datei; Aufruf vom Projektroot.
+		const scriptArg = path.relative(PROJECT_ROOT, nsisScript).replace(/\//g, '\\');
+		await _spawn(makensisPath, ['/V3', scriptArg], { cwd: PROJECT_ROOT });
 		const exeName = `${PROJECT_NAME}_Setup_v${VERSION}.exe`;
 		const exePath = path.join(INSTALLERS_DIR, exeName);
 		if (fs.existsSync(exePath)) {
@@ -497,6 +541,7 @@ const Build_All_Server_Packages = gulp.series(
 );
 
 const Build_Installer = gulp.series(
+	_fetchInstallerRedistributables,
 	_cleanDist,
 	_buildNodePackage,
 	_buildIISPackage,
@@ -514,6 +559,7 @@ export {
 	Build_Server_Packages      as BUILD_SERVER_PACKAGES,
 	Build_All_Server_Packages  as BUILD_ALL_SERVER_PACKAGES,
 	Build_Installer            as BUILD_INSTALLER,
+	_fetchInstallerRedistributables as FETCH_INSTALLER_ASSETS,
 	_firmwareBuild             as FIRMWARE_BUILD,
 	_firmwareUpload            as FIRMWARE_UPLOAD,
 	_firmwareUploadMonitor     as FIRMWARE_UPLOAD_MONITOR,

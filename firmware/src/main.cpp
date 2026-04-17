@@ -25,6 +25,7 @@
 #include <Update.h>
 #include <esp32s3/rom/miniz.h>
 #include <PNGdec.h>
+#include <esp_task_wdt.h>
 
 #define FIRMWARE_VERSION "1.0.0"
 
@@ -174,13 +175,15 @@ unsigned long lastOrientationCheck = 0;
 const unsigned long ORIENTATION_CHECK_INTERVAL = 1000; // Check every second
 const float ORIENTATION_THRESHOLD = 0.5; // Threshold for orientation change (g-force)
 std::vector<String> allShowImages; // Store all images before filtering
+/** Hash der Server-„imgs“-Liste der zuletzt erfolgreich geladenen Show (gleicher Show-Name, neue Bilder). */
+static uint32_t loadedShowImagesFingerprint = 0;
 
 // MPU6050 Helper Functions
 int16_t readMPU6050Register(uint8_t reg) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(reg);
   Wire.endTransmission(false);
-  Wire.requestFrom(MPU6050_ADDR, 2, true);
+  Wire.requestFrom(static_cast<uint8_t>(MPU6050_ADDR), static_cast<size_t>(2), true);
   return (Wire.read() << 8) | Wire.read();
 }
 
@@ -999,6 +1002,40 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
   return "";
 }
 
+// --- Fingerprint der Bildliste (getShow): Reload wenn Server imgs sich ändern, Show-Name gleich ---
+static uint32_t computeShowImagesFingerprint(JsonArray imgs) {
+  uint32_t h = 5381;
+  size_t n = 0;
+  if (!imgs.isNull()) {
+    for (JsonVariant img : imgs) {
+      String s = img.as<String>();
+      n++;
+      for (unsigned int i = 0; i < s.length(); i++) {
+        h = ((h << 5) + h) + (uint8_t)s.charAt(i);
+      }
+    }
+  }
+  h ^= (uint32_t)(n ^ (n << 16)) ^ 0xA5A5A5A5u;
+  return h;
+}
+
+static bool fetchServerShowImagesFingerprint(const String& showName, uint32_t* outFp) {
+  if (!outFp) return false;
+  *outFp = 0;
+  JsonDocument requestDoc;
+  requestDoc["input"]["showName"] = showName;
+  String requestJson;
+  serializeJson(requestDoc, requestJson);
+  String response = makeServerRequest("getShow", requestJson);
+  if (response.length() == 0) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, response) != DeserializationError::Ok) return false;
+  if (!doc["ok"].as<bool>()) return false;
+  JsonArray imgs = doc["output"]["show"]["imgs"];
+  *outFp = computeShowImagesFingerprint(imgs);
+  return true;
+}
+
 bool getActiveShow() {
   Serial1.println("Fetching active show...");
   
@@ -1125,7 +1162,22 @@ bool getActiveShow() {
     Serial1.println("Show name unchanged, but no images loaded - will reload");
     return true;
   }
-  
+
+  // Gleicher Show-Name, aber neue/entfernte Bilder auf dem Server (z. B. Upload im Web-UI)
+  if (allShowImages.size() > 0 || currentShowImages.size() > 0) {
+    uint32_t srvFp = 0;
+    if (fetchServerShowImagesFingerprint(newShowName, &srvFp)) {
+      if (srvFp != loadedShowImagesFingerprint) {
+        Serial1.print("Show image list changed on server (fp ");
+        Serial1.print(loadedShowImagesFingerprint, HEX);
+        Serial1.print(" -> ");
+        Serial1.print(srvFp, HEX);
+        Serial1.println(") — will reload");
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 
@@ -1215,7 +1267,9 @@ bool loadShowData() {
   } else {
     Serial1.println("No SD card - images will be loaded directly from server");
   }
-  
+
+  loadedShowImagesFingerprint = computeShowImagesFingerprint(imgs);
+
   return true;
 }
 
@@ -1291,22 +1345,56 @@ bool downloadImage(String imageName) {
   int len = http.getSize();
   uint8_t buff[128] = {0};
   WiFiClient *stream = http.getStreamPtr();
-  
-  while (http.connected() && (len > 0 || len == -1)) {
-    size_t size = stream->available();
-    if (size) {
-      int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-      file.write(buff, c);
-      if (len > 0) {
-        len -= c;
+  const unsigned long kDownloadTimeoutMs = 120000UL;
+  unsigned long dwStart = millis();
+
+  if (len > 0) {
+    while (len > 0) {
+      if (millis() - dwStart > kDownloadTimeoutMs) {
+        Serial1.println("downloadImage: timeout (Content-Length)");
+        break;
+      }
+      int av = stream->available();
+      if (av > 0) {
+        int chunk = min(av, (int)sizeof(buff));
+        chunk = min(chunk, len);
+        int c = stream->readBytes(buff, (size_t)chunk);
+        if (c > 0) {
+          file.write(buff, c);
+          len -= c;
+        }
+      } else if (!http.connected()) {
+        break;
+      } else {
+        delay(2);
       }
     }
-    delay(1);
+    if (len != 0) {
+      Serial1.println("downloadImage: incomplete body");
+      file.close();
+      http.end();
+      SD.remove(filePath.c_str());
+      return false;
+    }
+  } else {
+    while (http.connected() || stream->available() > 0) {
+      if (millis() - dwStart > kDownloadTimeoutMs) {
+        Serial1.println("downloadImage: timeout (chunked/unknown length)");
+        break;
+      }
+      int av = stream->available();
+      if (av > 0) {
+        int c = stream->readBytes(buff, min(av, (int)sizeof(buff)));
+        if (c > 0) file.write(buff, c);
+      } else {
+        delay(2);
+      }
+    }
   }
-  
+
   file.close();
   http.end();
-  
+
   Serial1.println("Image downloaded successfully");
   return true;
 }
@@ -1322,16 +1410,33 @@ static const uint16_t displayPalette[6] = {
   GxEPD_BLACK, GxEPD_WHITE, GxEPD_RED, GxEPD_YELLOW, GxEPD_BLUE, GxEPD_GREEN
 };
 
-// Decode raw deflate data using ESP32 ROM miniz (tinfl)
+// Decode raw deflate using ESP32 ROM tinfl. tinfl_decompressor is ~12–15 kB;
+// tinfl_decompress_mem_to_mem keeps it on the caller stack and overflows the
+// Arduino loop stack (8 kB) — allocate on heap instead (same logic as miniz).
 static size_t decodeDeflate(const uint8_t* compData, size_t compLen,
                             uint8_t* outBuf, size_t outBufLen) {
-  size_t result = tinfl_decompress_mem_to_mem(
-    outBuf, outBufLen, compData, compLen, 0);
-  if (result == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
-    Serial1.println("Deflate decompression failed");
+  tinfl_decompressor* decomp =
+      (tinfl_decompressor*)malloc(sizeof(tinfl_decompressor));
+  if (!decomp) {
+    Serial1.println("decodeDeflate: malloc tinfl_decompressor failed");
     return 0;
   }
-  return result;
+  tinfl_init(decomp);
+  size_t srcLeft = compLen;
+  size_t dstLeft = outBufLen;
+  const mz_uint32 flags =
+      (0u & ~(mz_uint32)TINFL_FLAG_HAS_MORE_INPUT) |
+      (mz_uint32)TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+  tinfl_status st = tinfl_decompress(
+      decomp, (const mz_uint8*)compData, &srcLeft, (mz_uint8*)outBuf,
+      (mz_uint8*)outBuf, &dstLeft, flags);
+  free(decomp);
+  if (st != TINFL_STATUS_DONE) {
+    Serial1.print("Deflate decompression failed, status=");
+    Serial1.println((int)st);
+    return 0;
+  }
+  return dstLeft;
 }
 
 // Paeth predictor (same algorithm as PNG/WebP VP8L)
@@ -1348,6 +1453,10 @@ static inline uint8_t paethPredictor(int a, int b, int c) {
 // Reverse Paeth prediction in-place: deltas → original pixel indices
 static void inversePaethPrediction(uint8_t* data, int count, int width, int numColors) {
   for (int i = 0; i < count; i++) {
+    if ((i & 0x1FFF) == 0) {
+      yield();
+      esp_task_wdt_reset();
+    }
     int a = (width > 0 && (i % width) > 0) ? data[i - 1] : 0;
     int b = (width > 0 && i >= width)       ? data[i - width] : 0;
     int c = (width > 0 && (i % width) > 0 && i >= width) ? data[i - width - 1] : 0;
@@ -1480,6 +1589,10 @@ static void displayPixels(uint8_t* result, int resIdx,
   display.firstPage();
   do {
     for (int y = 0; y < displayHeight; y++) {
+      if ((y & 7) == 0) {
+        yield();
+        esp_task_wdt_reset();
+      }
       for (int x = 0; x < displayWidth; x++) {
         uint16_t epdColor;
         if (offlineHint && offlineBadgePixel(x, y, displayWidth, displayHeight, epdColor)) {
@@ -1663,6 +1776,12 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
 
   Serial1.print("Decoded "); Serial1.print(resIdx); Serial1.println(" pixels");
 
+  if (resIdx != totalPixels) {
+    Serial1.println("Decode size mismatch (SD) — abort display");
+    free(result);
+    return false;
+  }
+
   displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
   free(result);
 
@@ -1706,9 +1825,9 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   // Add standard headers like Postman sends them
   http.addHeader("Accept", "*/*");
   http.addHeader("User-Agent", "microPhotoFrame/1.0");
-  // Set longer timeouts for large image files
-  http.setTimeout(60000); // 60 second timeout for large files
-  http.setConnectTimeout(15000); // 15 second connection timeout
+  // HTTPClient::setTimeout is uint16_t ms on ESP32 (max ~65 s — larger values overflow).
+  http.setTimeout(65000);
+  http.setConnectTimeout(20000);
   http.setReuse(false); // Don't reuse connection for large files
   
   Serial1.println("Sending HTTP GET request...");
@@ -1722,11 +1841,10 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   
   while (retryCount < maxRetries && httpCode != HTTP_CODE_OK) {
     if (retryCount > 0) {
-      Serial1.print("Retry attempt ");
+      Serial1.print("HTTP GET retry ");
       Serial1.print(retryCount);
-      Serial1.print("/");
-      Serial1.print(maxRetries - 1);
-      Serial1.println("...");
+      Serial1.print(" of ");
+      Serial1.println(maxRetries);
       delay(1000); // Wait 1 second before retry
     }
     
@@ -1766,8 +1884,8 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
       // Add standard headers like Postman sends them
       http.addHeader("Accept", "*/*");
       http.addHeader("User-Agent", "microPhotoFrame/1.0");
-      http.setTimeout(60000);
-      http.setConnectTimeout(15000);
+      http.setTimeout(65000);
+      http.setConnectTimeout(20000);
       http.setReuse(false);
     }
   }
@@ -1797,55 +1915,124 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
     return false;
   }
   
-  // Get file size
-  int fileSize = http.getSize();
-  Serial1.print("File size: ");
-  Serial1.println(fileSize);
-  
-  if (fileSize < 4) {
-    Serial1.println("File too small");
-    http.end();
-    return false;
-  }
-  
-  // Read entire file into buffer
-  Serial1.println("Allocating memory for file...");
-  uint8_t* fileData = (uint8_t*)malloc(fileSize);
-  if (!fileData) {
-    Serial1.println("Failed to allocate memory");
-    http.end();
-    return false;
-  }
-  
-  Serial1.println("Reading file data...");
+  // HTTP-Body: Content-Length bekannt ODER chunked / ohne Länge (getSize() == -1)
+  const int announcedSize = http.getSize();
+  Serial1.print("HTTP getSize (Content-Length): ");
+  Serial1.println(announcedSize);
+
   WiFiClient *stream = http.getStreamPtr();
-  size_t bytesRead = 0;
-  unsigned long readStartTime = millis();
-  while (http.connected() && bytesRead < (size_t)fileSize) {
-    size_t available = stream->available();
-    if (available) {
-      size_t read = stream->readBytes(fileData + bytesRead, min(available, (size_t)fileSize - bytesRead));
-      bytesRead += read;
-      Serial1.print("Read ");
-      Serial1.print(bytesRead);
-      Serial1.print("/");
-      Serial1.println(fileSize);
-    }
-    delay(1);
-    
-    // Timeout after 30 seconds
-    if (millis() - readStartTime > 30000) {
-      Serial1.println("Read timeout!");
-      break;
-    }
+  if (stream) {
+    // WiFiClient::setTimeout(seconds) — socket SO_RCVTIMEO for slow .ink body reads
+    stream->setTimeout(240);
   }
-  http.end();
-  
-  Serial1.print("Total bytes read: ");
-  Serial1.println(bytesRead);
-  
-  if (bytesRead < 4) {
-    Serial1.println("Failed to read file");
+  unsigned long readStartTime = millis();
+  // Large .ink over WiFi: allow slow servers; avoid per-chunk Serial (blocks TCP/WiFi).
+  const unsigned long kHttpBodyTimeoutMs =
+      180000UL + (announcedSize > 0 ? (unsigned long)announcedSize / 400UL : 0UL);
+  const size_t kMaxInkBodyBytes = 1700 * 1024;
+  const size_t kReadLogStepBytes = 8192;
+
+  uint8_t* fileData = nullptr;
+  size_t bodyLen = 0;
+
+  if (announcedSize > 0) {
+    if ((size_t)announcedSize > kMaxInkBodyBytes) {
+      Serial1.println("HTTP body larger than max");
+      http.end();
+      return false;
+    }
+    fileData = (uint8_t*)malloc((size_t)announcedSize);
+    if (!fileData) {
+      Serial1.println("Failed to allocate memory");
+      http.end();
+      return false;
+    }
+    size_t nextLogAt = 0;
+    while (bodyLen < (size_t)announcedSize) {
+      size_t available = stream->available();
+      if (available) {
+        size_t n = min(available, (size_t)announcedSize - bodyLen);
+        size_t got = stream->readBytes(fileData + bodyLen, n);
+        bodyLen += got;
+        if (bodyLen >= nextLogAt || bodyLen == (size_t)announcedSize) {
+          Serial1.print("Read ");
+          Serial1.print(bodyLen);
+          Serial1.print("/");
+          Serial1.println(announcedSize);
+          nextLogAt = bodyLen + kReadLogStepBytes;
+        }
+      } else if (!http.connected()) {
+        delay(5);
+        yield();
+        if (stream->available() == 0) break;
+      } else {
+        delay(2);
+        yield();
+        esp_task_wdt_reset();
+      }
+      if (millis() - readStartTime > kHttpBodyTimeoutMs) {
+        Serial1.println("Read timeout!");
+        break;
+      }
+    }
+    http.end();
+    if (bodyLen != (size_t)announcedSize) {
+      Serial1.println("Incomplete HTTP body for .ink (Content-Length)");
+      free(fileData);
+      return false;
+    }
+  } else {
+    Serial1.println("No Content-Length (chunked/unknown) — read until connection closes");
+    size_t cap = 32768;
+    fileData = (uint8_t*)malloc(cap);
+    if (!fileData) {
+      Serial1.println("Failed to allocate memory");
+      http.end();
+      return false;
+    }
+    while (millis() - readStartTime < kHttpBodyTimeoutMs) {
+      int av = stream->available();
+      if (av > 0) {
+        if (bodyLen + (size_t)av > cap) {
+          size_t ncap = cap;
+          while (bodyLen + (size_t)av > ncap) {
+            ncap *= 2;
+            if (ncap > kMaxInkBodyBytes) break;
+          }
+          if (bodyLen + (size_t)av > ncap || ncap > kMaxInkBodyBytes) {
+            Serial1.println("HTTP body exceeds max size");
+            free(fileData);
+            http.end();
+            return false;
+          }
+          void* p = realloc(fileData, ncap);
+          if (!p) {
+            free(fileData);
+            http.end();
+            return false;
+          }
+          fileData = (uint8_t*)p;
+          cap = ncap;
+        }
+        int got = stream->readBytes(fileData + bodyLen, (size_t)av);
+        if (got > 0) bodyLen += (size_t)got;
+      } else if (!http.connected()) {
+        delay(5);
+        yield();
+        if (stream->available() == 0) break;
+      } else {
+        delay(2);
+        yield();
+        esp_task_wdt_reset();
+      }
+    }
+    http.end();
+  }
+
+  Serial1.print("Total body bytes: ");
+  Serial1.println(bodyLen);
+  if (bodyLen < 4) {
+    Serial1.println("HTTP body too small for .ink header");
     free(fileData);
     return false;
   }
@@ -1877,19 +2064,26 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
 
   int resIdx = 0;
   if (version == 3) {
-    resIdx = decodeDeflate(fileData + 4, bytesRead - 4, result, totalPixels);
+    resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
     if (resIdx > 0) {
       inversePaethPrediction(result, resIdx, displayWidth, 6);
     }
   } else if (version == 2) {
-    resIdx = decodeDeflate(fileData + 4, bytesRead - 4, result, totalPixels);
+    resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
   } else {
     uint8_t minCodeSize = 3;
-    resIdx = decodeLZW(fileData, bytesRead, 4, minCodeSize, result, totalPixels);
+    resIdx = decodeLZW(fileData, bodyLen, 4, minCodeSize, result, totalPixels);
   }
 
   Serial1.print("Decoded "); Serial1.print(resIdx);
   Serial1.print("/"); Serial1.print(totalPixels); Serial1.println(" pixels");
+
+  if (resIdx != totalPixels) {
+    Serial1.println("Decode size mismatch — abort display");
+    free(result);
+    free(fileData);
+    return false;
+  }
 
   displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
 
@@ -1930,8 +2124,8 @@ void scanI2C() {
       // Verify it's a real device by trying to read a byte
       Wire.beginTransmission(address);
       Wire.endTransmission(false);
-      Wire.requestFrom(address, 1, true);
-      
+      Wire.requestFrom(address, static_cast<size_t>(1), true);
+
       if (Wire.available() || Wire.read() != 0xFF) {
         Serial1.print("I2C device found at address 0x");
         if (address < 16) Serial1.print("0");
@@ -1942,7 +2136,7 @@ void scanI2C() {
           Wire.beginTransmission(address);
           Wire.write(0x75); // WHO_AM_I register
           Wire.endTransmission(false);
-          Wire.requestFrom(address, 1, true);
+          Wire.requestFrom(address, static_cast<size_t>(1), true);
           if (Wire.available()) {
             uint8_t whoAmI = Wire.read();
             Serial1.print(" (WHO_AM_I: 0x");
@@ -2007,8 +2201,8 @@ bool initMPU6050() {
       Wire.beginTransmission(addr);
       Wire.write(0x75);
       Wire.endTransmission(false);
-      Wire.requestFrom(addr, 1, true);
-      
+      Wire.requestFrom(addr, static_cast<size_t>(1), true);
+
       if (Wire.available()) {
         uint8_t whoAmI = Wire.read();
         Serial1.print("WHO_AM_I register value: 0x");
@@ -2113,7 +2307,16 @@ void filterImagesByOrientation() {
       currentShowImages.push_back(imageName);
     }
   }
-  
+
+  // Wenn z. B. nur Hochformat-Dateien in der Show sind, das Gerät aber Quer meldet (oder umgekehrt),
+  // wäre die Liste leer obwohl Bilder existieren — dann alle Bilder verwenden (Dekodierung nutzt Dateiname/Header).
+  if (currentShowImages.size() == 0 && allShowImages.size() > 0) {
+    Serial1.println("filterImagesByOrientation: keine Treffer für MPU-Ausrichtung — Fallback: alle Bilder der Show");
+    for (size_t i = 0; i < allShowImages.size(); i++) {
+      currentShowImages.push_back(allShowImages[i]);
+    }
+  }
+
   Serial1.print("Filtered to ");
   Serial1.print(currentShowImages.size());
   Serial1.print(" images for orientation ");
@@ -2183,10 +2386,20 @@ void displayNextImage() {
       offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully");
     } else {
-      Serial1.println("Failed to decode image from SD");
-      currentImageIndex = prevIndex;
-      tryRedisplayLastWithOfflineBadge();
-      lastImageChangeTime = millis();
+      // Alte/kurze SD-Kopie (z. B. vor v2/v3 oder abgebrochener Download) — frische Datei vom Server
+      Serial1.println("SD decode failed — trying same file via HTTP");
+      String imageUrl = buildImageUrlForShow(imageName);
+      if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
+        lastImageChangeTime = millis();
+        rememberDisplayedInk(imageName);
+        offlineBadgeOnScreen = false;
+        Serial1.println("Image displayed from server (SD file unusable)");
+      } else {
+        Serial1.println("Failed to decode from SD and from server");
+        currentImageIndex = prevIndex;
+        tryRedisplayLastWithOfflineBadge();
+        lastImageChangeTime = millis();
+      }
     }
   } else {
     String imageUrl = buildImageUrlForShow(imageName);

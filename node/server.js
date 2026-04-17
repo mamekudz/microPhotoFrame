@@ -108,22 +108,20 @@ const registerDeviceEcho = (input) => {
     }
 };
 
-// Image-Orientierung erkennen (Old und New Format)
+// Image-Orientierung erkennen (Legacy und Versionen 1–3: gleicher 4-Byte-Header)
 const detectImageOrientation = (rawBuffer) => {
     if (rawBuffer.length < 4) return 0;
     
     const firstByte = rawBuffer[0];
-    const secondByte = rawBuffer[1];
     const thirdByte = rawBuffer[2];
     const fourthByte = rawBuffer[3];
     
-    // New format: Version 1 starts with 1 byte, then displayId, dither, orient
-    if (firstByte === 1) {
-        return fourthByte; // Index 3
-    } else {
-        // Old format: displayId, dither, orient, minCodeSize...
-        return thirdByte; // Index 2
+    // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
+    if (firstByte === 1 || firstByte === 2 || firstByte === 3) {
+        return fourthByte;
     }
+    // Legacy: displayId, dither, orient, minCodeSize...
+    return thirdByte;
 };
 
 // DisplayId aus Image-Buffer erkennen
@@ -132,13 +130,11 @@ const detectDisplayIdFromImage = (rawBuffer) => {
     
     const firstByte = rawBuffer[0];
     
-    // New format: Version 1
-    if (firstByte === 1 && rawBuffer.length >= 2) {
+    if (rawBuffer.length >= 2 && (firstByte === 1 || firstByte === 2 || firstByte === 3)) {
         return String.fromCharCode(rawBuffer[1]);
-    } else {
-        // Old format: displayId ist das erste Byte
-        return String.fromCharCode(firstByte);
     }
+    // Legacy: erstes Byte ist displayId
+    return String.fromCharCode(firstByte);
 };
 
 // Validiere Verzeichnisnamen

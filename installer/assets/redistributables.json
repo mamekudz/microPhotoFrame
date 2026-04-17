@@ -1,0 +1,21 @@
+{
+  "comment": "URL + Hash anpassen, wenn Microsoft neue Builds ausliefert. sha512 kommt z. B. aus https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json (windowsdesktop-runtime-win-x64.exe).",
+  "items": [
+    {
+      "file": "VC_redist.x64.exe",
+      "url": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+      "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+    },
+    {
+      "file": "dotNETx64.exe",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.25/windowsdesktop-runtime-8.0.25-win-x64.exe",
+      "sha512": "044628141cb05423b7e3a819d3baf13cab75382174a1e528c9c00f9e93919fd2684d68b5d70293f69560316c3909c49be279290da22541ed130a91924842e8ad"
+    },
+    {
+      "file": "SQLEXPR_x64_ENU.exe",
+      "url": "https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8eae-06e247e17b25/SQLEXPR_x64_ENU.exe",
+      "minSizeBytes": 270000000,
+      "comment": "Optional sha256/sha512 aus Gulp-Log übernehmen, dann Download nur noch bei Hash-Änderung."
+    }
+  ]
+}

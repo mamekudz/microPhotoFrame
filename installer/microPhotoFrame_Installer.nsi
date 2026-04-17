@@ -4,7 +4,7 @@
 ; ===============================================================
 ;
 ; Creates a Windows installer with server type selection.
-; Built via: gulp BUILD_INSTALLER  (Ausgabe: ../installers/*.exe, Version aus ../releases.json)
+; Built via: gulp BUILD_INSTALLER  (Ausgabe: ../installers/*.exe). NSIS systemweit (makensis im PATH oder MAKENSIS). Siehe ../docs/BUILD_INSTALLER.md
 ; ===============================================================
 
 Unicode True

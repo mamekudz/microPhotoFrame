@@ -41,5 +41,13 @@
   "taskexplorer.useGulp": true,
   "platformio-ide.useBuiltinPIOCore": false,
   "platformio-ide.showEditorTitleShortcuts": true,
-  "platformio-ide.activateProjectOnTextEditorChange": true
+  "platformio-ide.activateProjectOnTextEditorChange": true,
+  "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.3.1/",
+  "platformio-ide.toolbar": [
+    { "text": "PIO", "tooltip": "PlatformIO: Home", "commands": "platformio-ide.showHome" },
+    { "text": "Build", "tooltip": "PlatformIO: Build", "commands": "platformio-ide.build" },
+    { "text": "Upload", "tooltip": "PlatformIO: Upload", "commands": "platformio-ide.upload" },
+    { "text": "Clean", "tooltip": "PlatformIO: Clean", "commands": "platformio-ide.clean" },
+    { "text": "Monitor", "tooltip": "PlatformIO: Serial Monitor", "commands": "platformio-ide.serialMonitor" }
+  ]
 }

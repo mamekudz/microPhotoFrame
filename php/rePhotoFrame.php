@@ -508,8 +508,8 @@ function saveShowImage(&$rest) {
             $currentOrientation = null;
             $displayId = null;
             
-            if ($firstByte === 1 && strlen($rawdata) >= 4) {
-                // Version 1: [version=1, displayId, dither, orient, ...]
+            if (($firstByte === 1 || $firstByte === 2 || $firstByte === 3) && strlen($rawdata) >= 4) {
+                // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
                 $displayId = chr(ord($rawdata[1]));
                 $currentOrientation = ord($rawdata[3]);
             } else {

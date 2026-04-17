@@ -72,3 +72,12 @@ firmware/backups
 
 # SQL Express-Installer > GitHub 100 MB Limit; lokal in installer/assets ablegen
 installer/assets/SQLEXPR_x64_ENU.exe
+
+# --- Drittanbieter (nicht versionieren); Build: docs/BUILD_INSTALLER.md ---
+installer/NSISBI_3.08/
+installer/bin/
+installer/assets/*.exe
+installer/assets/*.msi
+installer/assets/*.phar
+!installer/assets/microPhotoFrame.ico
+!installer/assets/redistributables.json

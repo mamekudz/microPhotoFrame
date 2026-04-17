@@ -42,7 +42,7 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, as we
 
 #### 🎨 Image Processing
 - ✅ Fully automated image processing in browser
-- ✅ AI-powered cropping (local processing)
+- ✅ AI-powered cropping (TensorFlow.js / COCO-SSD via CDN when online — see `docs/BUILD_INSTALLER.md`)
 - ✅ Extreme compression with highest quality
 - ✅ Support for both landscape and portrait formats
 - ✅ Custom `.ink` format for optimal storage (mimetype image/ink)
@@ -165,7 +165,7 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 
 #### 🎨 Bildverarbeitung
 - ✅ Vollautomatische Bildaufbereitung im Browser
-- ✅ KI-gestützter Zuschnitt (lokale Verarbeitung)
+- ✅ KI-gestützter Zuschnitt (TensorFlow.js / COCO-SSD per CDN bei Online — siehe `docs/BUILD_INSTALLER.md`)
 - ✅ Extreme Kompression bei höchster Qualität
 - ✅ Unterstützung für Quer- und Hochformat
 - ✅ Eigenes `.ink` Format für optimale Speicherung (mimetype image/ink)
