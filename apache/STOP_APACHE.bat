@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Apache Stop Script für µPhotoFrame
+REM Apache Stop Script für µPhotoFrame™
 REM =========================================
 
 echo Stoppe Apache...

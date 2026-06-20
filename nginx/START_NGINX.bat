@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Start Nginx for µPhotoFrame
+REM Start Nginx for µPhotoFrame™
 REM =========================================
 
 echo Starting Nginx...

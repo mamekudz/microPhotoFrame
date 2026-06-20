@@ -1,4 +1,4 @@
-# µPhotoFrame Firmware Upload Script
+# µPhotoFrame™ Firmware Upload Script
 # UTF-8 encoding fix for Windows
 $env:PYTHONIOENCODING="utf-8"
 chcp 65001 | Out-Null

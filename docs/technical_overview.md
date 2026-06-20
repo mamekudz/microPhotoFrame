@@ -1,7 +1,7 @@
 
 **English**
 
-## Components of the µPhotoFrame Project
+## Components of the µPhotoFrame™ Project
 
 # Client
 Users can manage (photo) shows and fill them with their own photos via a single-page application using any browser. Entire photo albums can be automatically processed here for the special characteristics of e-ink displays (colors, dithering, tone values) and uploaded. The image cropping for the respective landscape and portrait formats is done using local AI.

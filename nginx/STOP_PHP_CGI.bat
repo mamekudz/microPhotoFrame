@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Stop PHP-CGI for µPhotoFrame (Nginx)
+REM Stop PHP-CGI for µPhotoFrame™ (Nginx)
 REM =========================================
 
 echo Stopping PHP-CGI...

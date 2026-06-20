@@ -7,13 +7,13 @@
 ## 1. Betreffzeile (E-Mail) – Vorschläge
 
 - „Kommerzielle Firmware-Option für [Produktname, z. B. NeoFrame] – Lizenz & Zusammenarbeit“
-- „OEM-Angebot: erweiterte E-Ink-Bilderrahmen-Firmware (µPhotoFrame)“
+- „OEM-Angebot: erweiterte E-Ink-Bilderrahmen-Firmware (µPhotoFrame™)“
 
 ---
 
 ## 2. Struktur des Anschreibens
 
-1. **Kurzvorstellung** – wer ihr seid, was µPhotoFrame ist (1–2 Sätze).
+1. **Kurzvorstellung** – wer ihr seid, was µPhotoFrame™ ist (1–2 Sätze).
 2. **Bezug zu deren Hardware** – konkret NeoFrame / SKU, nach eurem Test.
 3. **Problem / Chance** – Nutzer wünschen reichere Firmware; Referenz-Open-Source-Basis existiert.
 4. **Was ihr anbietet**

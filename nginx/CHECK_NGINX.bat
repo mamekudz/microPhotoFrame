@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Check Nginx status for µPhotoFrame
+REM Check Nginx status for µPhotoFrame™
 REM =========================================
 
 echo Checking Nginx status...

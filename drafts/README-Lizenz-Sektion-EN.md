@@ -18,7 +18,7 @@ See the `LICENSE` file in the repository root for the full terms.
 Contact: **[PLACEHOLDER: email or form URL]**  
 Please briefly describe: company, intended use, target devices/platforms, volume or timeframe.
 
-**Trademarks:** The names “microPhotoFrame” / “µPhotoFrame” **[PLACEHOLDER: and logo if applicable]** **[PLACEHOLDER: e.g. may not be used without permission – see TRADEMARKS.md]** – independent of the open-source license for the code.
+**Trademarks:** The names “microPhotoFrame” / “µPhotoFrame™” **[PLACEHOLDER: and logo if applicable]** **[PLACEHOLDER: e.g. may not be used without permission – see TRADEMARKS.md]** – independent of the open-source license for the code.
 
 ---
 

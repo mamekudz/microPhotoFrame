@@ -1,5 +1,5 @@
 // ===============================================================
-// µPhotoFrame - Build & Installer Gulp Script
+// µPhotoFrame™ - Build & Installer Gulp Script
 // © 2026 Meinolf Amekudzi (MIT License)
 // ===============================================================
 

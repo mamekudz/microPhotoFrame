@@ -1,4 +1,4 @@
-# µPhotoFrame Firmware
+# µPhotoFrame™ Firmware
 
 ESP32-S3 Firmware für WiFi-basierte E-Ink Bilderrahmen (reTerminal E1001 & E1002)
 

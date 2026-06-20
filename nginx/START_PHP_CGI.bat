@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Start PHP-CGI for µPhotoFrame (Nginx)
+REM Start PHP-CGI for µPhotoFrame™ (Nginx)
 REM =========================================
 
 echo Starting PHP-CGI on port 9000...

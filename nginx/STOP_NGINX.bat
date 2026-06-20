@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Stop Nginx for µPhotoFrame
+REM Stop Nginx for µPhotoFrame™
 REM =========================================
 
 echo Stopping Nginx...

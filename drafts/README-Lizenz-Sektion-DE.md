@@ -18,7 +18,7 @@ Die vollständigen Bedingungen siehe Datei `LICENSE` im Repository-Root.
 Anfragen an: **[PLATZHALTER: E-Mail oder Kontaktformular-URL]**  
 Bitte kurz beschreiben: Unternehmen, beabsichtigte Nutzung, Geräte/Plattformen, Volumen oder Zeitraum.
 
-**Marken:** Die Bezeichnung „microPhotoFrame“ / „µPhotoFrame“ **[PLATZHALTER: und ggf. Logo]** sind **[PLATZHALTER: z. B. nicht frei verwendbar ohne Zustimmung / siehe TRADEMARKS.md]** – unabhängig von der Open-Source-Lizenz des Codes.
+**Marken:** Die Bezeichnung „microPhotoFrame“ / „µPhotoFrame™“ **[PLATZHALTER: und ggf. Logo]** sind **[PLATZHALTER: z. B. nicht frei verwendbar ohne Zustimmung / siehe TRADEMARKS.md]** – unabhängig von der Open-Source-Lizenz des Codes.
 
 ---
 

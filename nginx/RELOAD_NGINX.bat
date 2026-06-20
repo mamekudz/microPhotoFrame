@@ -1,6 +1,6 @@
 @echo off
 REM =========================================
-REM Reload Nginx configuration for µPhotoFrame
+REM Reload Nginx configuration for µPhotoFrame™
 REM =========================================
 
 echo Reloading Nginx configuration...

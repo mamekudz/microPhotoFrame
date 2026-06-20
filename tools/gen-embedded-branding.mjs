@@ -63,7 +63,7 @@ async function buildPng800x480() {
   if (composites.length === 0) {
     const svg = `<svg width="${W}" height="${H}">
       <rect x="80" y="120" width="${W - 160}" height="200" fill="none" stroke="#000" stroke-width="4"/>
-      <text x="400" y="240" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#000">µPhotoFrame</text>
+      <text x="400" y="240" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#000">µPhotoFrame™</text>
     </svg>`;
     return sharp(Buffer.from(svg)).resize(W, H).png().toBuffer();
   }

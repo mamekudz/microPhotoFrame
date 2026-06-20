@@ -1,5 +1,5 @@
 /*
- * µPhotoFrame Firmware
+ * µPhotoFrame™ Firmware
  * Based on: https://github.com/pixelEDI/reterminal-e1002-epaper
  * 
  * Firmware für das Seeed Studio reTerminal E1002
@@ -21,11 +21,18 @@
 #include <time.h>
 #include <vector>
 #include <cstdlib>
+#if defined(__EXCEPTIONS) && __EXCEPTIONS
+#include <exception>
+#endif
 #include <Wire.h>
 #include <Update.h>
 #include <esp32s3/rom/miniz.h>
 #include <PNGdec.h>
 #include <esp_task_wdt.h>
+#include <sys/time.h>
+#include "esp_sleep.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 
 #define FIRMWARE_VERSION "1.0.0"
 
@@ -115,7 +122,7 @@ String hostChannelUrl = "";
 /** Wenn kein MPU6050: logische Ausrichtung für Bildfilter (0–3), siehe readOrientation(). */
 uint8_t configDefaultOrientation = 0;
 bool configMode = false;
-unsigned long configModeStartTime = 0;
+uint64_t configModeStartSessionMs = 0;
 const unsigned long CONFIG_MODE_TIMEOUT = 300000; // 5 minutes
 
 // === Show Management ===
@@ -123,13 +130,93 @@ String currentShowName = "";
 String currentShowMode = "forwardssequence"; // forwardssequence, reversesequence, random
 int currentShowTimer = 5; // minutes
 int currentImageIndex = 0;
-unsigned long lastImageChangeTime = 0;
+uint64_t lastImageChangeSessionMs = 0;
 std::vector<String> currentShowImages;
 
 // === WiFi Status ===
 bool wifiConnected = false;
-unsigned long lastServerCheck = 0;
+uint64_t lastServerCheckSessionMs = 0;
 const unsigned long SERVER_CHECK_INTERVAL = 60000; // 1 minute
+
+// === Laufzeit: Session-Zeit (esp_timer + gemessener Light-Sleep), Strom-Schätzung, Fehlerlog ===
+static uint64_t g_lightSleepMsTotal = 0;
+
+static uint64_t sessionMs() {
+  return esp_timer_get_time() / 1000ULL + g_lightSleepMsTotal;
+}
+
+// Geschätzte Stromaufnahme (mA) — Modell, keine Shunt-Messung; Werte für typisches ESP32+WiFi+E-Ink-Idle.
+static const float PWR_MA_LIGHT_SLEEP_EST = 18.0f;
+static const float PWR_MA_IDLE_AWAKE_WIFI = 95.0f;
+static const float PWR_MA_HIGH_WIFI_DECODE = 280.0f;
+
+static uint64_t g_pwrHighUs = 0;
+#define PWR_HIGH_STACK 8
+static uint64_t g_pwrHighStk[PWR_HIGH_STACK];
+static int g_pwrHighStkN = 0;
+
+static void pwrHighEnter() {
+  if (g_pwrHighStkN < PWR_HIGH_STACK)
+    g_pwrHighStk[g_pwrHighStkN++] = esp_timer_get_time();
+}
+static void pwrHighExit() {
+  if (g_pwrHighStkN <= 0) return;
+  uint64_t t0 = g_pwrHighStk[--g_pwrHighStkN];
+  g_pwrHighUs += (uint64_t)(esp_timer_get_time() - t0);
+}
+
+struct PowerHighScope {
+  PowerHighScope() { pwrHighEnter(); }
+  ~PowerHighScope() { pwrHighExit(); }
+};
+
+static float pwrEstimatedAvgMa() {
+  uint64_t totalMs = sessionMs();
+  if (totalMs < 1) totalMs = 1;
+  uint64_t awakeMs = esp_timer_get_time() / 1000ULL;
+  uint64_t sleepMs = g_lightSleepMsTotal;
+  uint64_t highMs = g_pwrHighUs / 1000ULL;
+  if (highMs > awakeMs) highMs = awakeMs;
+  uint64_t idleAwakeMs = awakeMs > highMs ? awakeMs - highMs : 0;
+  float num = (float)sleepMs * PWR_MA_LIGHT_SLEEP_EST
+            + (float)idleAwakeMs * PWR_MA_IDLE_AWAKE_WIFI
+            + (float)highMs * PWR_MA_HIGH_WIFI_DECODE;
+  return num / (float)totalMs;
+}
+
+static void doIdleLightSleepChunk(uint32_t maxSleepMs) {
+  if (maxSleepMs < 15) return;
+  if (maxSleepMs > 1950) maxSleepMs = 1950;
+
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  esp_sleep_enable_timer_wakeup((uint64_t)maxSleepMs * 1000ULL);
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+  uint64_t extMask = (1ULL << (uint8_t)BTN_ACTION) | (1ULL << (uint8_t)BTN_NEXT) | (1ULL << (uint8_t)BTN_PREV);
+  esp_sleep_enable_ext1_wakeup(extMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+
+  struct timeval tv0, tv1;
+  gettimeofday(&tv0, nullptr);
+  esp_light_sleep_start();
+  gettimeofday(&tv1, nullptr);
+
+  esp_sleep_wakeup_cause_t wc = esp_sleep_get_wakeup_cause();
+  int64_t deltaMs = (int64_t)(tv1.tv_sec - tv0.tv_sec) * 1000LL;
+  deltaMs += (tv1.tv_usec - tv0.tv_usec) / 1000;
+
+  if (deltaMs >= 1 && deltaMs <= (int64_t)maxSleepMs + 800)
+    g_lightSleepMsTotal += (uint64_t)deltaMs;
+  else if (wc == ESP_SLEEP_WAKEUP_TIMER)
+    g_lightSleepMsTotal += maxSleepMs;
+  else if (deltaMs < 1 && wc == ESP_SLEEP_WAKEUP_EXT1)
+    g_lightSleepMsTotal += 1;
+
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1);
+#endif
+}
 
 // === Server / letztes Bild (Offline-Hinweis) ===
 int g_lastHttpStatusCode = -1;
@@ -144,20 +231,94 @@ String lastGetShowError = "";
 
 // === Quick-Menu Mode ===
 bool quickMenuMode = false;
-unsigned long quickMenuStart = 0;
+uint64_t quickMenuStartSessionMs = 0;
 const unsigned long QUICK_MENU_TIMEOUT = 60000; // 60 seconds
 String cachedShowsJson = "";  // cached response from server for the menu
 
-/** >0 und millis() < deadline: Show nur lokal (Server-activeShows wird ignoriert). */
-unsigned long showTempOverrideUntilMs = 0;
+/** >0 und sessionMs() < deadline: Show nur lokal (Server-activeShows wird ignoriert). */
+uint64_t showTempOverrideUntilSessionMs = 0;
 /** Zuletzt vom Server gelesene aktive Show (für Quick-Menü-Hinweis bei lokalem Override). */
 String serverActiveShowCached = "";
 /** Standard „Minuten bis Server wieder gilt“ im Quick-Menü (NVS qRevMin). */
 uint16_t quickMenuRevertMinutes = 60;
 
+/** NVS dSleep: zwischen Slides Deep Sleep statt nur Light Sleep (braucht gültige Uhrzeit / NTP). */
+bool configSlideshowDeepSleep = false;
+static uint32_t g_lastImageUnix = 0;
+static uint32_t g_lastPollUnix = 0;
+static bool g_wDeepPoll = false;
+static bool g_wDeepImg = false;
+
+static void slideTimerMarkNow() {
+  lastImageChangeSessionMs = sessionMs();
+  time_t t = time(nullptr);
+  if (t > 1700000000) {
+    g_lastImageUnix = (uint32_t)t;
+    preferences.begin("microPhotoFrame", false);
+    preferences.putUInt("lstImgT", g_lastImageUnix);
+    preferences.end();
+  }
+}
+
+static void markServerPollWallClock() {
+  time_t t = time(nullptr);
+  if (t > 1700000000) {
+    g_lastPollUnix = (uint32_t)t;
+    preferences.begin("microPhotoFrame", false);
+    preferences.putUInt("lstPolT", g_lastPollUnix);
+    preferences.end();
+  }
+}
+
+/** Deep Sleep bis nächstem Bild-Timer oder Server-Poll; nur bei gültigem time() und lstImgT. */
+static bool trySlideshowDeepSleep() {
+  if (!configSlideshowDeepSleep || g_lastImageUnix == 0) return false;
+  time_t nowt = time(nullptr);
+  if (nowt <= 1700000000) return false;
+
+  uint32_t now = (uint32_t)nowt;
+  uint64_t imgDue64 = (uint64_t)g_lastImageUnix + (uint64_t)(unsigned)currentShowTimer * 60ULL;
+  if (imgDue64 > 0xFFFFFFFFULL) imgDue64 = 0xFFFFFFFFULL;
+  uint32_t imgDue = (uint32_t)imgDue64;
+
+  uint32_t polDue = (g_lastPollUnix == 0) ? (now + 60u) : (g_lastPollUnix + 60u);
+
+  uint32_t secImg = (imgDue > now) ? (imgDue - now) : 1u;
+  uint32_t secPol = (polDue > now) ? (polDue - now) : 1u;
+  uint32_t sec = secImg < secPol ? secImg : secPol;
+  if (sec < 15u) return false;
+  const uint32_t kMaxDeepSec = 8u * 3600u;
+  if (sec > kMaxDeepSec) sec = kMaxDeepSec;
+
+  uint8_t dsAct = (secImg <= secPol) ? 1u : 2u;
+
+  preferences.begin("microPhotoFrame", false);
+  preferences.putInt("sImgIx", currentImageIndex);
+  preferences.putUChar("dsAct", dsAct);
+  preferences.end();
+
+  Serial1.printf("Deep sleep %lu s (dsAct=%u, bis Bild=%lu, bis Poll=%lu)\n",
+                 (unsigned long)sec, (unsigned)dsAct, (unsigned long)secImg, (unsigned long)secPol);
+  Serial1.flush();
+
+  WiFi.disconnect(true);
+  delay(200);
+  WiFi.mode(WIFI_OFF);
+
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  esp_sleep_enable_timer_wakeup((uint64_t)sec * 1000000ULL);
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+  uint64_t extMask = (1ULL << (uint8_t)BTN_ACTION) | (1ULL << (uint8_t)BTN_NEXT) | (1ULL << (uint8_t)BTN_PREV);
+  esp_sleep_enable_ext1_wakeup(extMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+
+  esp_deep_sleep_start();
+  return true;
+}
+
 static bool isShowTempOverrideActive() {
-  if (showTempOverrideUntilMs == 0) return false;
-  return (long)(millis() - showTempOverrideUntilMs) < 0;
+  if (showTempOverrideUntilSessionMs == 0) return false;
+  return sessionMs() < showTempOverrideUntilSessionMs;
 }
 
 // Captive-Portal DNS only when Soft-AP aktiv (sonst kein dnsServer.processNextRequest)
@@ -168,10 +329,29 @@ bool sdCardMounted = false;
 /** Nach fehlgeschlagenem SD.begin (Karte meldet sich, Mount klappt nicht): kein SD.begin spam. */
 bool sdLazyMountFailed = false;
 
+static void appendRuntimeLog(const char* tag, const String& detail = String()) {
+  String line = String("[ses=") + String((unsigned long)(sessionMs() / 1000UL)) + "s] ";
+  line += tag;
+  line += " ";
+  if (detail.length()) line += detail;
+  if (line.length() > 220) line = line.substring(0, 220);
+  Serial1.println(line);
+  preferences.begin("mpfDiag", false);
+  preferences.putString("lastErr", line);
+  preferences.end();
+  if (sdCardMounted) {
+    File f = SD.open("/error_log.txt", FILE_APPEND);
+    if (f) {
+      f.println(line);
+      f.close();
+    }
+  }
+}
+
 // === MPU6050 Orientation Sensor ===
 bool mpu6050Available = false;
 int currentOrientation = 0; // 0=landscape, 1=portrait, 2=landscape_180, 3=portrait_180
-unsigned long lastOrientationCheck = 0;
+uint64_t lastOrientationCheckSessionMs = 0;
 const unsigned long ORIENTATION_CHECK_INTERVAL = 1000; // Check every second
 const float ORIENTATION_THRESHOLD = 0.5; // Threshold for orientation change (g-force)
 std::vector<String> allShowImages; // Store all images before filtering
@@ -258,7 +438,11 @@ void loadConfig() {
   if (rm < 1) rm = 60;
   if (rm > 1440) rm = 1440;
   quickMenuRevertMinutes = (uint16_t)rm;
-  showTempOverrideUntilMs = 0;
+  showTempOverrideUntilSessionMs = 0;
+  uint8_t ds = preferences.getUChar("dSleep", 0);
+  configSlideshowDeepSleep = (ds != 0);
+  g_lastImageUnix = preferences.getUInt("lstImgT", 0);
+  g_lastPollUnix = preferences.getUInt("lstPolT", 0);
   preferences.end();
   
   Serial1.print("Loaded config - SSID: ");
@@ -270,7 +454,9 @@ void loadConfig() {
   Serial1.print(", lastInk len: ");
   Serial1.print(lastDisplayedInkName.length());
   Serial1.print(", lastShow: ");
-  Serial1.println(currentShowName);
+  Serial1.print(currentShowName);
+  Serial1.print(", deepSleep: ");
+  Serial1.println(configSlideshowDeepSleep ? "on" : "off");
 }
 
 void saveConfig() {
@@ -465,7 +651,7 @@ void handleRoot() {
   html += ".status.warn{background:#fff3e0;color:#e65100;}</style></head><body>";
   html += "<div class='header-logo'>";
   html += "<img src='/logo' alt='Logo' onerror=\"this.style.display='none'\">";
-  html += "<img src='/logotext' alt='&micro;PhotoFrame' onerror=\"this.style.display='none'\">";
+  html += "<img src='/logotext' alt='&micro;PhotoFrame&trade;' onerror=\"this.style.display='none'\">";
   html += "</div>";
   html += "<h1>microPhotoFrame Konfiguration</h1>";
 
@@ -625,7 +811,7 @@ void startConfigAP() {
 
 void startConfigMode() {
   configMode = true;
-  configModeStartTime = millis();
+  configModeStartSessionMs = sessionMs();
   Serial1.println("Starting configuration mode...");
   
   startConfigAP();
@@ -965,6 +1151,7 @@ String doHttpPost(String url, String jsonPayload) {
 }
 
 String makeServerRequest(String action, String jsonPayload = "{}") {
+  PowerHighScope _pwrSrv;
   if (hostChannelUrl.length() == 0) {
     Serial1.println("No host channel URL configured");
     return "";
@@ -1043,6 +1230,7 @@ bool getActiveShow() {
   if (response.length() == 0) {
     lastGetShowError = "HTTP " + String(g_lastHttpStatusCode) + " empty resp";
     Serial1.println(lastGetShowError);
+    appendRuntimeLog("getShows", lastGetShowError);
     lastGetShowsSucceeded = false;
     return false;
   }
@@ -1132,8 +1320,8 @@ bool getActiveShow() {
 
   serverActiveShowCached = newShowName;
 
-  if (showTempOverrideUntilMs != 0 && (long)(millis() - showTempOverrideUntilMs) >= 0) {
-    showTempOverrideUntilMs = 0;
+  if (showTempOverrideUntilSessionMs != 0 && sessionMs() >= showTempOverrideUntilSessionMs) {
+    showTempOverrideUntilSessionMs = 0;
     Serial1.println("Show-Override war abgelaufen (Deadline in getActiveShow bereinigt).");
   }
 
@@ -1196,6 +1384,7 @@ bool loadShowData() {
   
   String response = makeServerRequest("getShow", requestJson);
   if (response.length() == 0) {
+    appendRuntimeLog("loadShow", String("empty getShow ") + currentShowName);
     return false;
   }
   
@@ -1676,7 +1865,7 @@ static bool tryBootOfflineLastImage() {
   if (isSDCardAvailable() && SD.exists("/" + lastDisplayedInkName)) {
     if (decodeAndDisplayInk(lastDisplayedInkName, true)) {
       offlineBadgeOnScreen = true;
-      lastImageChangeTime = millis();
+      slideTimerMarkNow();
       return true;
     }
   }
@@ -1684,7 +1873,7 @@ static bool tryBootOfflineLastImage() {
     String url = buildImageUrlForShow(lastDisplayedInkName);
     if (decodeAndDisplayInkFromHTTP(url, true)) {
       offlineBadgeOnScreen = true;
-      lastImageChangeTime = millis();
+      slideTimerMarkNow();
       return true;
     }
   }
@@ -1711,6 +1900,7 @@ bool isSDCardAvailable() {
 }
 
 bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
+  PowerHighScope _pwrInk;
   if (!isSDCardAvailable()) {
     Serial1.println("SD card not available for decodeAndDisplayInk");
     return false;
@@ -1726,6 +1916,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   if (!inkFile) {
     Serial1.print("Failed to open .ink file: ");
     Serial1.println(filename);
+    appendRuntimeLog("decodeSD", String("open ") + filename);
     return false;
   }
 
@@ -1733,7 +1924,12 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   if (fileSize < 4) { Serial1.println("File too small"); inkFile.close(); return false; }
 
   uint8_t* fileData = (uint8_t*)malloc(fileSize);
-  if (!fileData) { Serial1.println("Failed to allocate memory"); inkFile.close(); return false; }
+  if (!fileData) {
+    Serial1.println("Failed to allocate memory");
+    appendRuntimeLog("decodeSD", String("malloc body sz=") + String((unsigned)fileSize));
+    inkFile.close();
+    return false;
+  }
 
   inkFile.read(fileData, fileSize);
   inkFile.close();
@@ -1778,6 +1974,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
 
   if (resIdx != totalPixels) {
     Serial1.println("Decode size mismatch (SD) — abort display");
+    appendRuntimeLog("decodeSD", String("size ") + resIdx + "/" + totalPixels + " " + filename);
     free(result);
     return false;
   }
@@ -1791,6 +1988,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
 
 // Decode and display .ink file directly from HTTP stream (without SD card)
 bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
+  PowerHighScope _pwrHttpInk;
   Serial1.print("Loading .ink file from HTTP: ");
   Serial1.println(imageUrl);
   
@@ -1817,6 +2015,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   // Check WiFi connection first
   if (WiFi.status() != WL_CONNECTED) {
     Serial1.println("WiFi not connected!");
+    appendRuntimeLog("httpInk", "WiFi not connected");
     return false;
   }
   
@@ -1911,6 +2110,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
       default: Serial1.print("UNKNOWN"); break;
     }
     Serial1.println(")");
+    appendRuntimeLog("httpInk", String("HTTP ") + httpCode + " " + imageUrl);
     http.end();
     return false;
   }
@@ -2381,7 +2581,7 @@ void displayNextImage() {
   if (imageOnSD) {
     Serial1.println("Decoding and displaying image from SD...");
     if (decodeAndDisplayInk(imageName, false)) {
-      lastImageChangeTime = millis();
+      slideTimerMarkNow();
       rememberDisplayedInk(imageName);
       offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully");
@@ -2390,7 +2590,7 @@ void displayNextImage() {
       Serial1.println("SD decode failed — trying same file via HTTP");
       String imageUrl = buildImageUrlForShow(imageName);
       if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
-        lastImageChangeTime = millis();
+        slideTimerMarkNow();
         rememberDisplayedInk(imageName);
         offlineBadgeOnScreen = false;
         Serial1.println("Image displayed from server (SD file unusable)");
@@ -2398,7 +2598,7 @@ void displayNextImage() {
         Serial1.println("Failed to decode from SD and from server");
         currentImageIndex = prevIndex;
         tryRedisplayLastWithOfflineBadge();
-        lastImageChangeTime = millis();
+        slideTimerMarkNow();
       }
     }
   } else {
@@ -2407,7 +2607,7 @@ void displayNextImage() {
     Serial1.println(imageUrl);
 
     if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
-      lastImageChangeTime = millis();
+      slideTimerMarkNow();
       rememberDisplayedInk(imageName);
       offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully from server");
@@ -2417,7 +2617,7 @@ void displayNextImage() {
       if (!tryRedisplayLastWithOfflineBadge()) {
         Serial1.println("Kein lokales letztes Bild: E-Ink bleibt unverändert.");
       }
-      lastImageChangeTime = millis();
+      slideTimerMarkNow();
     }
   }
 }
@@ -2467,7 +2667,42 @@ void handleDeviceInfo() {
   json += ",\"sketchSize\":" + String(ESP.getSketchSize());
   json += ",\"freeSketchSpace\":" + String(ESP.getFreeSketchSpace());
   json += ",\"display\":\"" + String(DEVICE_DISPLAY_ID) + "\"";
+  json += ",\"deepSleep\":" + String(configSlideshowDeepSleep ? "true" : "false");
+  json += ",\"power\":{";
+  json += "\"avgEstMa\":" + String(pwrEstimatedAvgMa(), 1);
+  json += ",\"sessionMs\":" + String((unsigned long long)sessionMs());
+  json += ",\"lightSleepMs\":" + String((unsigned long long)g_lightSleepMsTotal);
+  json += ",\"highPowerMs\":" + String((unsigned long long)(g_pwrHighUs / 1000ULL));
+  json += ",\"awakeMs\":" + String((unsigned long long)(esp_timer_get_time() / 1000ULL));
   json += "}";
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+static String jsonEscapeInner(const String& s) {
+  String o;
+  o.reserve(s.length() + 8);
+  for (unsigned i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\' || c == '"') o += '\\';
+    if (c == '\r' || c == '\n') o += ' ';
+    else o += c;
+  }
+  return o;
+}
+
+void handleDiag() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  preferences.begin("mpfDiag", true);
+  String last = preferences.getString("lastErr", "");
+  preferences.end();
+  String json = "{\"lastErr\":\"" + jsonEscapeInner(last) + "\"";
+  json += ",\"power\":{";
+  json += "\"avgEstMa\":" + String(pwrEstimatedAvgMa(), 1);
+  json += ",\"sessionMs\":" + String((unsigned long long)sessionMs());
+  json += ",\"lightSleepMs\":" + String((unsigned long long)g_lightSleepMsTotal);
+  json += ",\"highPowerMs\":" + String((unsigned long long)(g_pwrHighUs / 1000ULL));
+  json += "}}";
   server.send(200, "application/json", json);
 }
 
@@ -2482,11 +2717,11 @@ void handleOtaCors() {
 
 void handleQuickMenu() {
   unsigned long remaining = 0;
-  if (quickMenuMode && millis() - quickMenuStart < QUICK_MENU_TIMEOUT)
-    remaining = (QUICK_MENU_TIMEOUT - (millis() - quickMenuStart)) / 1000;
+  if (quickMenuMode && sessionMs() - quickMenuStartSessionMs < QUICK_MENU_TIMEOUT)
+    remaining = (QUICK_MENU_TIMEOUT - (unsigned long)(sessionMs() - quickMenuStartSessionMs)) / 1000;
 
   String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
-  html += "<link rel='icon' href='/favicon.ico' type='image/x-icon'><title>&micro;PhotoFrame</title><style>";
+  html += "<link rel='icon' href='/favicon.ico' type='image/x-icon'><title>&micro;PhotoFrame&trade;</title><style>";
   html += "body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;margin:0;padding:20px;}";
   html += ".card{background:#16213e;border-radius:12px;padding:24px;max-width:420px;margin:0 auto;}";
   html += ".header-logo{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;margin:0 0 18px;}";
@@ -2508,7 +2743,7 @@ void handleQuickMenu() {
   html += "</style></head><body><div class='card'>";
   html += "<div class='header-logo'>";
   html += "<img src='/logo' alt='' onerror=\"this.style.display='none'\">";
-  html += "<img src='/logotext' alt='&micro;PhotoFrame' onerror=\"this.style.display='none'\">";
+  html += "<img src='/logotext' alt='&micro;PhotoFrame&trade;' onerror=\"this.style.display='none'\">";
   html += "</div>";
 
   html += "<label>Show-Quelle:</label>";
@@ -2524,6 +2759,10 @@ void handleQuickMenu() {
   html += "<option value='reversesequence'" + String(currentShowMode == "reversesequence" ? " selected" : "") + ">R&uuml;ckw&auml;rts</option>";
   html += "<option value='random'" + String(currentShowMode == "random" ? " selected" : "") + ">Zufall</option></select>";
   html += "<label>Bildwechsel (Minuten):</label><input type='number' id='timerIn' min='1' max='1440' value='" + String(currentShowTimer) + "'>";
+  html += "<label style='display:flex;align-items:flex-start;gap:10px;margin-top:14px;cursor:pointer;'>";
+  html += "<input type='checkbox' id='deepSleepIn' style='width:auto;margin-top:4px;' " + String(configSlideshowDeepSleep ? "checked" : "") + ">";
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern (max. Stromsparen). Erfordert <b>gültige Uhrzeit</b> (NTP nach WLAN). ";
+  html += "Ohne NTP bleibt nur Leichtschlaf aktiv.</span></label>";
   if (!mpu6050Available) {
     html += "<label>Standard-Ausrichtung (kein Lagesensor):</label><select id='orientSel'>";
     html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
@@ -2562,6 +2801,7 @@ void handleQuickMenu() {
   html += "else{hint.style.display='none';hint.textContent='';}}";
   html += "if(d.mode){let m=document.getElementById('modeSel');if(m)m.value=d.mode;}";
   html += "if(d.timer!=null&&d.timer!==undefined){let t=document.getElementById('timerIn');if(t)t.value=d.timer;}";
+  html += "let ds=document.getElementById('deepSleepIn');if(ds&&d.deepSleep!==undefined)ds.checked=!!d.deepSleep;";
   html += "let os=document.getElementById('orientSel');if(os&&d.defOrient!=null&&d.defOrient!==undefined){os.value=String(d.defOrient);}";
   html += "}";
   html += "document.getElementById('followSrv').addEventListener('change',syncRevertVisibility);";
@@ -2573,7 +2813,7 @@ void handleQuickMenu() {
   html += "okEl.style.display='none';errEl.style.display='none';errEl.textContent='';";
   html += "btn.disabled=true;btn.textContent='Speichern\u2026';";
   html += "let fs=document.getElementById('followSrv');";
-  html += "let b={show:document.getElementById('showSel').value,mode:document.getElementById('modeSel').value,timer:parseInt(document.getElementById('timerIn').value,10)||5,followServer:!!(fs&&fs.checked)};";
+  html += "let b={show:document.getElementById('showSel').value,mode:document.getElementById('modeSel').value,timer:parseInt(document.getElementById('timerIn').value,10)||5,followServer:!!(fs&&fs.checked),deepSleep:!!(document.getElementById('deepSleepIn')&&document.getElementById('deepSleepIn').checked)};";
   html += "if(!b.followServer){let rm=document.getElementById('revertMinIn');b.revertMinutes=parseInt((rm&&rm.value)||'60',10)||60;if(b.revertMinutes<1)b.revertMinutes=1;if(b.revertMinutes>1440)b.revertMinutes=1440;}";
   html += "let os=document.getElementById('orientSel');if(os)b.defOrient=parseInt(os.value,10)||0;";
   html += "fetch('/quickmenu/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})";
@@ -2645,8 +2885,8 @@ void handleQuickMenuShows() {
 
   bool ov = isShowTempOverrideActive();
   unsigned long leftMin = 0;
-  if (ov && showTempOverrideUntilMs > millis())
-    leftMin = (showTempOverrideUntilMs - millis()) / 60000UL;
+  if (ov && showTempOverrideUntilSessionMs > sessionMs())
+    leftMin = (unsigned long)((showTempOverrideUntilSessionMs - sessionMs()) / 60000ULL);
 
   String json = "{\"shows\":" + showsArr;
   json += ",\"active\":\"" + activeShow + "\"";
@@ -2661,7 +2901,8 @@ void handleQuickMenuShows() {
     json += ",\"serverActive\":\"" + srvAct + "\"";
   }
   json += ",\"revertMin\":" + String((unsigned)quickMenuRevertMinutes);
-  json += ",\"revertLeftMin\":" + String(leftMin) + "}";
+  json += ",\"revertLeftMin\":" + String(leftMin);
+  json += ",\"deepSleep\":" + String(configSlideshowDeepSleep ? "true" : "false") + "}";
   server.send(200, "application/json", json);
 }
 
@@ -2698,6 +2939,18 @@ void handleQuickMenuSave() {
   currentShowMode = newMode;
   currentShowTimer = newTimer;
 
+  {
+    bool deepSl = false;
+    if (doc["deepSleep"].is<bool>())
+      deepSl = doc["deepSleep"].as<bool>();
+    else if (doc["deepSleep"].is<int>())
+      deepSl = doc["deepSleep"].as<int>() != 0;
+    configSlideshowDeepSleep = deepSl;
+    preferences.begin("microPhotoFrame", false);
+    preferences.putUChar("dSleep", deepSl ? 1 : 0);
+    preferences.end();
+  }
+
   if (!mpu6050Available && doc["defOrient"].is<int>()) {
     int o = doc["defOrient"].as<int>();
     if (o >= 0 && o <= 3) {
@@ -2715,7 +2968,7 @@ void handleQuickMenuSave() {
   }
 
   if (followSrv) {
-    showTempOverrideUntilMs = 0;
+    showTempOverrideUntilSessionMs = 0;
     if (showChanged && wifiConnected) {
       String payload = "{\"action\":\"setActiveShow\",\"input\":{\"showName\":\"" + newShow + "\",\"displayId\":\"" + String(DEVICE_DISPLAY_ID) + "\"}}";
       makeServerRequest("setActiveShow", payload);
@@ -2738,7 +2991,7 @@ void handleQuickMenuSave() {
       server.send(400, "application/json", "{\"ok\":false,\"msg\":\"Show w\\u00e4hlen (tempor\\u00e4r)\"}");
       return;
     }
-    showTempOverrideUntilMs = millis() + (unsigned long)revMin * 60000UL;
+    showTempOverrideUntilSessionMs = sessionMs() + (uint64_t)revMin * 60000ULL;
     currentShowName = newShow;
     preferences.begin("microPhotoFrame", false);
     preferences.putString("lastShow", currentShowName);
@@ -2751,7 +3004,7 @@ void handleQuickMenuSave() {
 
   // Quick-Menü-Zeitfenster neu starten, damit Countdown nicht bei 0 stehen bleibt
   if (quickMenuMode)
-    quickMenuStart = millis();
+    quickMenuStartSessionMs = sessionMs();
   unsigned long remSec = QUICK_MENU_TIMEOUT / 1000;
 
   String respJson = "{\"ok\":true,\"remainingSec\":" + String(remSec) + "}";
@@ -2763,7 +3016,7 @@ void handleQuickMenuSave() {
 
 void enterQuickMenu() {
   quickMenuMode = true;
-  quickMenuStart = millis();
+  quickMenuStartSessionMs = sessionMs();
   cachedShowsJson = "";
 
   // Feedback beep
@@ -2835,6 +3088,7 @@ static void registerWebServerRoutes() {
   server.on("/ota", HTTP_POST, handleOtaResult, handleOtaUpdate);
   server.on("/ota", HTTP_OPTIONS, handleOtaCors);
   server.on("/info", HTTP_GET, handleDeviceInfo);
+  server.on("/diag", HTTP_GET, handleDiag);
   server.on("/quickmenu", HTTP_GET, handleQuickMenu);
   server.on("/quickmenu/shows", HTTP_GET, handleQuickMenuShows);
   server.on("/quickmenu/save", HTTP_POST, handleQuickMenuSave);
@@ -2849,6 +3103,10 @@ static void registerWebServerRoutes() {
   server.onNotFound(handleNotFound);
 }
 
+static void mpfShutdownHandler(void) {
+  Serial1.println("[mpf] esp_shutdown_handler");
+}
+
 // === Setup Function ===
 void setup() {
   Serial1.begin(115200, SERIAL_8N1, SERIAL_RX, SERIAL_TX);
@@ -2856,6 +3114,14 @@ void setup() {
     delay(10);
   delay(2000);
   Serial1.println("--- microPhotoFrame Firmware ---");
+
+  esp_register_shutdown_handler(mpfShutdownHandler);
+#if defined(__EXCEPTIONS) && __EXCEPTIONS
+  std::set_terminate([]() {
+    appendRuntimeLog("terminate", "std::terminate");
+    std::abort();
+  });
+#endif
 
   // Tasten: interne Pull-ups — verhindert „schwebendes LOW“ auf GPIO3 (sonst fälschlich
   // 5s „gedrückt“ → NVS wird jedes Mal gelöscht → nur noch Config-Modus).
@@ -2957,6 +3223,24 @@ void setup() {
   // Konfiguration vor MPU: Standard-Ausrichtung (defOrient) kommt aus NVS
   loadConfig();
 
+  g_wDeepPoll = false;
+  g_wDeepImg = false;
+  {
+    esp_sleep_wakeup_cause_t wc = esp_sleep_get_wakeup_cause();
+    preferences.begin("microPhotoFrame", false);
+    uint8_t dact = preferences.getUChar("dsAct", 0);
+    if (wc == ESP_SLEEP_WAKEUP_TIMER && dact != 0) {
+      preferences.putUChar("dsAct", 0);
+      if (dact == 1) g_wDeepImg = true;
+      else if (dact == 2) g_wDeepPoll = true;
+      Serial1.printf("Wake from deep sleep: TIMER dsAct was %u\n", (unsigned)dact);
+    } else if (wc == ESP_SLEEP_WAKEUP_EXT1) {
+      preferences.putUChar("dsAct", 0);
+      Serial1.println("Wake from deep sleep: GPIO — Timer-Aktion verworfen");
+    }
+    preferences.end();
+  }
+
   // Initialize MPU6050 for orientation detection
   initMPU6050();
   // Read initial orientation (Sensor oder configDefaultOrientation)
@@ -3027,9 +3311,31 @@ void setup() {
       }
       if (dataLoaded) {
         if (currentShowImages.size() > 0) {
-          Serial1.println("Displaying first image...");
-          currentImageIndex = -1;
-          displayNextImage();
+          if (g_wDeepImg) {
+            g_wDeepImg = false;
+            preferences.begin("microPhotoFrame", false);
+            int savedIx = preferences.getInt("sImgIx", -1);
+            preferences.end();
+            currentImageIndex = savedIx;
+            Serial1.println("Deep-Sleep-Wake: naechstes Bild");
+            displayNextImage();
+          } else if (g_wDeepPoll) {
+            g_wDeepPoll = false;
+            Serial1.println("Deep-Sleep-Wake: Server-Poll");
+            lastServerCheckSessionMs = sessionMs();
+            markServerPollWallClock();
+            {
+              bool su = getActiveShow();
+              if (su && loadShowData() && currentShowImages.size() > 0) {
+                currentImageIndex = -1;
+                displayNextImage();
+              }
+            }
+          } else {
+            Serial1.println("Displaying first image...");
+            currentImageIndex = -1;
+            displayNextImage();
+          }
         } else {
           Serial1.println("Show has no images");
           if (!tryBootOfflineLastImage()) {
@@ -3055,8 +3361,27 @@ void setup() {
         }
         if (dataLoaded && currentShowImages.size() > 0) {
           Serial1.println("Gespeicherte Show geladen!");
-          currentImageIndex = -1;
-          displayNextImage();
+          if (g_wDeepImg) {
+            g_wDeepImg = false;
+            preferences.begin("microPhotoFrame", false);
+            int savedIx = preferences.getInt("sImgIx", -1);
+            preferences.end();
+            currentImageIndex = savedIx;
+            Serial1.println("Deep-Sleep-Wake: naechstes Bild (NVS-Show)");
+            displayNextImage();
+          } else if (g_wDeepPoll) {
+            g_wDeepPoll = false;
+            lastServerCheckSessionMs = sessionMs();
+            markServerPollWallClock();
+            bool su = getActiveShow();
+            if (su && loadShowData() && currentShowImages.size() > 0) {
+              currentImageIndex = -1;
+              displayNextImage();
+            }
+          } else {
+            currentImageIndex = -1;
+            displayNextImage();
+          }
         } else if (!tryBootOfflineLastImage()) {
           showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
         }
@@ -3064,7 +3389,14 @@ void setup() {
         showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
       }
     }
+    if (g_wDeepPoll || g_wDeepImg) {
+      Serial1.println("Deep-Sleep-Wake: nicht verarbeitet — Flags zurueckgesetzt");
+      g_wDeepPoll = false;
+      g_wDeepImg = false;
+    }
   } else {
+    g_wDeepPoll = false;
+    g_wDeepImg = false;
     Serial1.println("WiFi connect failed — opening config AP for setup");
     WiFi.mode(WIFI_AP_STA);
     if (WiFi.softAP("microPhotoFrame")) {
@@ -3076,7 +3408,7 @@ void setup() {
       Serial1.println(apip);
     }
     configMode = true;
-    configModeStartTime = millis();
+    configModeStartSessionMs = sessionMs();
     String ssidInfo = "SSID: " + (wifiSSID.length() > 0 ? wifiSSID : String("not set"));
     String apInfo = "AP: microPhotoFrame  IP: " + WiFi.softAPIP().toString();
     showStatusScreen("WiFi Connection Failed", ssidInfo.c_str(), apInfo.c_str());
@@ -3092,7 +3424,7 @@ void loop() {
 
   // --- Config mode (WiFi setup) ---
   if (configMode) {
-    if (millis() - configModeStartTime > CONFIG_MODE_TIMEOUT) {
+    if (sessionMs() - configModeStartSessionMs > CONFIG_MODE_TIMEOUT) {
       Serial1.println("Config mode timeout, restarting...");
       ESP.restart();
     }
@@ -3101,7 +3433,7 @@ void loop() {
 
   // --- Quick-Menu timeout ---
   if (quickMenuMode) {
-    if (millis() - quickMenuStart > QUICK_MENU_TIMEOUT) {
+    if (sessionMs() - quickMenuStartSessionMs > QUICK_MENU_TIMEOUT) {
       exitQuickMenu();
     }
     // While in quick menu, still respond to buttons to exit early
@@ -3171,8 +3503,8 @@ void loop() {
   }
 
   // --- Orientation sensor (nur mit MPU6050) ---
-  if (mpu6050Available && millis() - lastOrientationCheck > ORIENTATION_CHECK_INTERVAL) {
-    lastOrientationCheck = millis();
+  if (mpu6050Available && sessionMs() - lastOrientationCheckSessionMs > ORIENTATION_CHECK_INTERVAL) {
+    lastOrientationCheckSessionMs = sessionMs();
     int newOrientation = readOrientation();
     if (newOrientation != currentOrientation) {
       const char* orientationNames[] = {"landscape (0)", "portrait (90)", "landscape inv (180)", "portrait inv (270)"};
@@ -3207,10 +3539,11 @@ void loop() {
   }
 
   // --- Temporäre Quick-Menü-Show: Frist abgelaufen -> wieder Server-Vorgabe ---
-  if (showTempOverrideUntilMs != 0 && millis() >= showTempOverrideUntilMs) {
-    showTempOverrideUntilMs = 0;
+  if (showTempOverrideUntilSessionMs != 0 && sessionMs() >= showTempOverrideUntilSessionMs) {
+    showTempOverrideUntilSessionMs = 0;
     Serial1.println("Temporäre Show abgelaufen -> Server-Vorgabe laden");
-    lastServerCheck = millis();
+    lastServerCheckSessionMs = sessionMs();
+    markServerPollWallClock();
     if (wifiConnected && WiFi.status() == WL_CONNECTED) {
       bool showUpdate = getActiveShow();
       if (showUpdate || currentShowImages.size() == 0) {
@@ -3229,8 +3562,9 @@ void loop() {
   }
 
   // --- Periodic server check for active show ---
-  if (wifiConnected && WiFi.status() == WL_CONNECTED && millis() - lastServerCheck > SERVER_CHECK_INTERVAL) {
-    lastServerCheck = millis();
+  if (wifiConnected && WiFi.status() == WL_CONNECTED && sessionMs() - lastServerCheckSessionMs > SERVER_CHECK_INTERVAL) {
+    lastServerCheckSessionMs = sessionMs();
+    markServerPollWallClock();
     Serial1.println("Checking for active show update...");
     bool showUpdate = getActiveShow();
     if (lastGetShowsSucceeded) {
@@ -3255,8 +3589,25 @@ void loop() {
   }
 
   // --- Auto image change ---
-  if (currentShowImages.size() > 0 && millis() - lastImageChangeTime > (currentShowTimer * 60000UL)) {
+  if (currentShowImages.size() > 0 && sessionMs() - lastImageChangeSessionMs > (uint64_t)currentShowTimer * 60000ULL) {
     displayNextImage();
+  }
+
+  // Deep Sleep (optional, NVS dSleep) oder Leichtschlaf zwischen Slides/Poll
+  if (!configMode && !quickMenuMode && wifiConnected && WiFi.status() == WL_CONNECTED
+      && currentShowImages.size() > 0) {
+    if (configSlideshowDeepSleep) {
+      trySlideshowDeepSleep();
+    }
+    uint64_t now = sessionMs();
+    uint64_t nextImg = lastImageChangeSessionMs + (uint64_t)currentShowTimer * 60000ULL;
+    uint64_t nextPoll = lastServerCheckSessionMs + (uint64_t)SERVER_CHECK_INTERVAL;
+    uint64_t nextEv = nextImg < nextPoll ? nextImg : nextPoll;
+    if (nextEv > now + 40) {
+      uint64_t wait = nextEv - now;
+      if (wait > 1950) wait = 1950;
+      doIdleLightSleepChunk((uint32_t)wait);
+    }
   }
 
   delay(100);

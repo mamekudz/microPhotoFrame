@@ -8,7 +8,7 @@
 
 ## Kurzabsatz (Landingpage / `COMMERCIAL.md` im Repo)
 
-µPhotoFrame / microPhotoFrame wird für **private und nicht-kommerzielle** Nutzung unter den Bedingungen der Lizenz in diesem Repository bereitgestellt.
+µPhotoFrame™ / microPhotoFrame wird für **private und nicht-kommerzielle** Nutzung unter den Bedingungen der Lizenz in diesem Repository bereitgestellt.
 
 Für **Unternehmen, Hersteller und kommerzielle Angebote** (Vertrieb, Vorinstallation, Support-Bündelung, Markennutzung) bieten wir **kommerzielle Lizenzen** an. Bitte kontaktieren Sie uns mit einer kurzen Projektbeschreibung.
 

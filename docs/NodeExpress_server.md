@@ -1,4 +1,4 @@
-# Node.js Express Server Setup für µPhotoFrame
+# Node.js Express Server Setup für µPhotoFrame™
 
 **Port: 891 | Status: ✅ Vollständig kompatibel mit ASP.NET Server**
 

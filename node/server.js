@@ -13,6 +13,26 @@ const PORT = 891;
 // Pfad-Logik: Sprung von /node/ ins Hauptverzeichnis
 const BASE_DIR = path.join(__dirname, '..'); 
 const SHOWS_DIR = path.join(BASE_DIR, 'shows');
+const LOGS_DIR = path.join(BASE_DIR, 'logs');
+const NODE_FATAL_LOG = path.join(LOGS_DIR, 'node_fatal.log');
+
+function logNodeFatal(scope, err) {
+    const msg = (err && err.stack) ? err.stack : String(err);
+    const line = new Date().toISOString() + ' ' + scope + '\n' + msg + '\n\n';
+    try {
+        if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+        fs.appendFileSync(NODE_FATAL_LOG, line, 'utf8');
+    } catch (_) { /* ignore */ }
+    console.error(line);
+}
+
+process.on('uncaughtException', (err) => {
+    logNodeFatal('uncaughtException', err);
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+    logNodeFatal('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)));
+});
 
 // Verzeichnisse sicherstellen
 if (!fs.existsSync(SHOWS_DIR)) {
@@ -779,7 +799,7 @@ app.use((req, res, next) => {
 // Server Start
 app.listen(PORT, () => {
     console.log(`\n=========================================`);
-    console.log(`µPhotoFrame Server LÄUFT!`);
+    console.log(`µPhotoFrame™ Server LÄUFT!`);
     console.log(`URL: http://localhost:${PORT}`);
     console.log(`=========================================\n`);
 });

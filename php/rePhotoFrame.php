@@ -1,6 +1,6 @@
 <?php
 // =========================================
-// µPhotoFrame.php
+// µPhotoFrame™.php
 // © 2026 Meinolf Amekudzi
 // (published under MIT license)
 // =========================================
@@ -18,6 +18,22 @@ ini_set('log_errors', 1);
 
 // Start output buffering to catch any accidental output
 ob_start();
+
+// Schwerwiegende Laufzeitfehler für spätere Analyse in logs/php_fatal.log (nicht im JSON-API-Output)
+$__mpfLogDir = __DIR__ . '/../logs';
+$__mpfFatalLog = $__mpfLogDir . '/php_fatal.log';
+if (!is_dir($__mpfLogDir)) {
+    @mkdir($__mpfLogDir, 0755, true);
+}
+set_exception_handler(function ($e) use ($__mpfFatalLog) {
+    @file_put_contents($__mpfFatalLog, date('c') . ' EX ' . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n\n", FILE_APPEND | LOCK_EX);
+});
+register_shutdown_function(function () use ($__mpfFatalLog) {
+    $e = error_get_last();
+    if ($e && in_array((int) $e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        @file_put_contents($__mpfFatalLog, date('c') . ' FATAL ' . $e['message'] . ' in ' . $e['file'] . ':' . $e['line'] . "\n\n", FILE_APPEND | LOCK_EX);
+    }
+});
 
 // Check if this is an API request
 // API request if:

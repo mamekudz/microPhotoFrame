@@ -5,7 +5,7 @@
 </center>
 <br><br>
 
-# µPhotoFrame - WiFi-based E-Ink Photo Frame for reTerminal
+# µPhotoFrame™ - WiFi-based E-Ink Photo Frame for reTerminal
 
 **An intelligent, remote-controlled photo frame firmware for reTerminal E1001 (Grayscale) & E1002 (Full Color)**
 
@@ -138,7 +138,7 @@ MIT License - see [LICENSE](LICENSE) for details
 <a name="deutsch"></a>
 ## 📖 Deutsch
 
-# µPhotoFrame - WiFi-basierter E-Ink-Fotorahmen für reTerminal
+# µPhotoFrame™ - WiFi-basierter E-Ink-Fotorahmen für reTerminal
 
 **Intelligente, ferngesteuerte Bilderrahmen-Firmware für reTerminal E1001 (Graustufen) und E1002 (Vollfarbe)**
 

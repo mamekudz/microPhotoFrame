@@ -17,6 +17,7 @@ yarn-error.log*
 dist/
 installers/
 tmp/
+logs/
 packages/
 
 # Python
