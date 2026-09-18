@@ -1,0 +1,54 @@
+{
+  "name": "ink-encoder",
+  "version": "2.0.0",
+  "description": "Node.js module for encoding/decoding .ink image files for E-Ink displays",
+  "type": "module",
+  "main": "src/inkEncoder.mjs",
+  "exports": {
+    ".": "./src/inkEncoder.mjs"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test test/test.mjs",
+    "preview": "node extensions/preview-server.mjs",
+    "thumbnail": "node extensions/thumbnail-cli.mjs",
+    "build:win-preview": "dotnet build \"extensions/win-preview-handler/InkPreviewHandler.csproj\" -c Release"
+  },
+  "keywords": [
+    "e-ink",
+    "epaper",
+    "ink",
+    "image",
+    "encoding",
+    "decoding",
+    "lzw",
+    "compression",
+    "spectra",
+    "display"
+  ],
+  "author": "Meinolf Amekudzi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mamekudz/microPhotoFrame.git",
+    "directory": "ink-encoder"
+  },
+  "homepage": "https://github.com/mamekudz/microPhotoFrame",
+  "bugs": {
+    "url": "https://github.com/mamekudz/microPhotoFrame/issues"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "pako": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

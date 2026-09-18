@@ -1,5 +1,5 @@
 <center>
-  <img src="assets/imgs/Logo.png" alt="microPhotoFrameLogo" width="200">
+  <img src="rawmedia/LogoPure.png" alt="microPhotoFrameLogo" width="200">
   <br>
   <img src="assets/imgs/LogoText.png" alt="microPhotoFrameLogoText" width="300">
 </center>
@@ -120,10 +120,37 @@ Add automatic orientation detection with 3D-printed case:
 ### 📚 Documentation
 
 - **[Firmware README](firmware/README.md)** - Detailed firmware documentation
-- **[ink-encoder Package](packages/ink-encoder/README.md)** - NPM package documentation
+- **[ink-encoder Package](ink-encoder/README.md)** - NPM package documentation
 - **[Technical Overview](docs/technical_overview.md)** - Architecture and design
 - **[.ink orientation on PC](docs/INK_ORIENTATION_PC.md)** - Portrait encode vs. Windows preview (no mirror)
 - **[Server Setup](docs/)** - IIS, Apache, NGINX, Node.js guides
+
+### 🛠️ Development Gulp tasks (µGulp™)
+
+These tasks are **repository development/build helpers**. They do not flash or certify the device firmware.
+
+The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParameters` forms (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), task-reported progress (`CreateProgress` / `ReportProgress`), a `LogTable` artifact listing after server packages, and `µWatch` on firmware sources, favicon PNGs and branding copies. Display names and groups are i18n’d via `i18x/gulp/`. **This is not an official µGulp™ certification.** PhotoFrame remains a Ready **candidate** without the badge (previous dashboard gaps such as µWatch arming and `LogTable` in the dashboard were not re-tested here).
+
+**Prerequisites:** Node.js 22+, `npm install` in the repo root (workspace package `ink-encoder/` 2.0.0 is linked automatically). Windows for `BACKUP_TO_NAS` (robocopy) and NSIS installer builds. PlatformIO (`pio`) for firmware tasks. `gulp-mu-gulp-api` is a devDependency. A neighbor checkout of `../ink-encoder` is **not** required. Config fallback `./config/ink-encode-config.json` is not in the repo — use `config/ink-encode-config.example.json` or a local copy.
+
+**CLI (plain Gulp does not apply `µParameters` defaults).** Set `MICROGULP_PARAM_<ID>` or `MICROGULP_PARAMS` JSON, or use the task-coded fallbacks below:
+
+| Command | Inputs / defaults | Result |
+| :--- | :--- | :--- |
+| `npx gulp --tasks` | — | Lists exported task names |
+| `npx gulp COPY_RAWMEDIA_WEBASSETS` | none | Copies `rawmedia/Logo.png` and `LogoText.png` to `webassets/` when present |
+| `npx gulp BUILD_SERVER_PACKAGES` | `MICROGULP_PARAM_SERVERTYPE=node\|iis\|apache\|nginx\|all`. Without it the CLI may prompt (`RequestSelectInput`, default `all` on that prompt). The `µParameters` default is **not** applied automatically. | Zip(s) in `dist/` |
+| `npx gulp BUILD_ALL_SERVER_PACKAGES` | none | All four zips in `dist/` |
+| `npx gulp ENCODE_INK` | **required** `MICROGULP_PARAM_INPUT` or `input`; optional `MICROGULP_PARAM_OUTPUT` / `MICROGULP_PARAM_CONFIG` (code fallback `./config/ink-encode-config.json`, not shipped; example: `./config/ink-encode-config.example.json`) | `.ink` files |
+| `npx gulp COMMIT_INK_ENCODER` | **required** `MICROGULP_PARAM_MESSAGE` and `MICROGULP_PARAM_CONFIRM=true` | git commit of `ink-encoder/` only (no push; other staged files are ignored via `git commit --only`) |
+| `npx gulp PUBLISH_INK_ENCODER` | CLI **dry-run by default**. Real upload: `MICROGULP_PARAM_DRYRUN=false` and `MICROGULP_PARAM_CONFIRM=true`. Optional `MICROGULP_PARAM_OTP`, `MICROGULP_PARAM_SKIPTESTS=true` | `npm publish` of the workspace package only (not PhotoFrame) |
+| `npx gulp BACKUP_TO_NAS` | Destination: `MICROGULP_PARAM_DESTINATION` or `MICROPHOTOFRAME_NAS_BACKUP`, else the **code** fallback `Z:\Projects\microPhotoFrame` (that folder must already exist) | robocopy `/MIR` mirror |
+
+**NAS backup is a mirror with deletions, not a versioned backup.** Extra files on the destination are removed. Regenerable trees (`node_modules`, `dist`, `tmp`, `.pio`, …) are not copied; leftovers with those names are deleted **inside the destination only**. `lib` / `build` are excluded only as project-root (and `firmware/lib`) paths so vendored `src/libs` is kept. Drive/share roots and destinations that are the project folder, a parent, or a child of it are refused. Junctions/symlinks that point outside the destination are not followed for deletion.
+
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO. `µWatch` is dashboard-only; on the CLI run the task again after edits.
+
+**Checked on 2026-09-18** (this workstation: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): CLI and HTTP-dashboard `ENCODE_INK` form/progress/error as previously recorded; `node --test tools/nas-backup.test.mjs`; isolated synthetic encode. **Workspace follow-up the same day:** `ink-encoder` 2.0.0 is a repo workspace (`file:ink-encoder`) after a compatibility audit against npm `1.0.0`; `npm test -w ink-encoder` and `ENCODE_INK` CLI were re-run after the move. **Not claimed as newly verified here:** µGulp dashboard, µWatch arming, `LogTable` after server packages in the dashboard, firmware flash, live NAS backup, `npm publish`.
 
 ### 🎁 Included Content
 
@@ -250,10 +277,37 @@ Fügen Sie automatische Orientierungserkennung mit 3D-gedrucktem Gehäuse hinzu:
 ### 📚 Dokumentation
 
 - **[Firmware README](firmware/README.md)** - Detaillierte Firmware-Dokumentation
-- **[ink-encoder Paket](packages/ink-encoder/README.md)** - NPM-Paket Dokumentation
+- **[ink-encoder Paket](ink-encoder/README.md)** - NPM-Paket Dokumentation
 - **[Technische Übersicht](docs/technical_overview.md)** - Architektur und Design
 - **[.ink Orientierung am PC](docs/INK_ORIENTATION_PC.md)** - Hochkant in Firmware vs. Vorschau (ohne Spiegelung)
 - **[Server-Setup](docs/)** - IIS, Apache, NGINX, Node.js Anleitungen
+
+### 🛠️ Entwicklungs-Gulp-Tasks (µGulp™)
+
+Diese Tasks sind **Entwicklungs-/Build-Helfer dieses Repositories**. Sie flashen die Gerätefirmware nicht und sind keine Gerätezertifizierung.
+
+Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: `µParameters`-Formulare (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), gemeldeter Fortschritt (`CreateProgress` / `ReportProgress`), `LogTable` nach Serverpaketen sowie `µWatch` für Firmware-Quellen, Favicon-PNGs und Branding-Kopien. Anzeigenamen liegen unter `i18x/gulp/`. **Das ist keine offizielle µGulp™-Zertifizierung.** PhotoFrame bleibt Ready-**Kandidat ohne Badge** (Dashboard-Lücken wie µWatch-Scharfschaltung und `LogTable` im Dashboard wurden hier nicht erneut geprüft).
+
+**Voraussetzungen:** Node.js 22+, `npm install` im Projektroot (Workspace-Paket `ink-encoder/` 2.0.0 wird automatisch verknüpft). Windows für `BACKUP_TO_NAS` (robocopy) und NSIS-Installer. PlatformIO (`pio`) für Firmware-Tasks. `gulp-mu-gulp-api` ist eine devDependency. Ein Nachbar-Checkout von `../ink-encoder` ist **nicht** nötig. Der Config-Fallback `./config/ink-encode-config.json` liegt nicht im Repo — `config/ink-encode-config.example.json` oder eine lokale Kopie verwenden.
+
+**CLI (gewöhnliches Gulp übernimmt `µParameters`-Defaults nicht automatisch).** `MICROGULP_PARAM_<ID>` bzw. `MICROGULP_PARAMS` setzen oder die im Task-Code hinterlegten Fallbacks nutzen:
+
+| Aufruf | Eingaben / Defaults | Ergebnis |
+| :--- | :--- | :--- |
+| `npx gulp --tasks` | — | Exportierte Tasknamen |
+| `npx gulp COPY_RAWMEDIA_WEBASSETS` | keine | Kopiert `rawmedia/Logo.png` und `LogoText.png` nach `webassets/`, sofern vorhanden |
+| `npx gulp BUILD_SERVER_PACKAGES` | `MICROGULP_PARAM_SERVERTYPE=node\|iis\|apache\|nginx\|all`. Ohne Wert kann die CLI nachfragen (`RequestSelectInput`, Prompt-Default `all`). Der `µParameters`-Default greift **nicht** von allein. | Zip(s) in `dist/` |
+| `npx gulp BUILD_ALL_SERVER_PACKAGES` | keine | Alle vier Zips in `dist/` |
+| `npx gulp ENCODE_INK` | **pflicht** `MICROGULP_PARAM_INPUT` oder `input`; optional Output/Config (Code-Fallback `./config/ink-encode-config.json`, nicht im Repo; Beispiel: `./config/ink-encode-config.example.json`) | `.ink`-Dateien |
+| `npx gulp COMMIT_INK_ENCODER` | **pflicht** `MICROGULP_PARAM_MESSAGE` und `MICROGULP_PARAM_CONFIRM=true` | Git-Commit nur von `ink-encoder/` (kein Push; andere gestagte Dateien über `git commit --only` ausgelassen) |
+| `npx gulp PUBLISH_INK_ENCODER` | CLI-**Standard ist Probelauf**. Echter Upload: `MICROGULP_PARAM_DRYRUN=false` und `MICROGULP_PARAM_CONFIRM=true`. Optional `MICROGULP_PARAM_OTP`, `MICROGULP_PARAM_SKIPTESTS=true` | `npm publish` nur des Workspace-Pakets (nicht PhotoFrame) |
+| `npx gulp BACKUP_TO_NAS` | Ziel: `MICROGULP_PARAM_DESTINATION` oder `MICROPHOTOFRAME_NAS_BACKUP`, sonst der **Code**-Fallback `Z:\Projects\microPhotoFrame` (Ordner muss existieren) | robocopy-`/MIR`-Spiegel |
+
+**Die NAS-Sicherung ist eine Spiegelung mit Löschungen, kein versioniertes Backup.** Überzählige Dateien am Ziel werden entfernt. Reproduzierbare Bäume (`node_modules`, `dist`, `tmp`, `.pio`, …) werden nicht kopiert; Reste dieser Namen nur **innerhalb des Ziels** gelöscht. `lib` / `build` gelten nur als Projektroot (plus `firmware/lib`), damit `src/libs` erhalten bleibt. Laufwerks-/Freigabewurzeln sowie Ziele, die dem Projekt, einem Vorfahren oder einem Unterordner entsprechen, werden verweigert. Junctions/Symlinks nach außerhalb des Ziels werden beim Löschen nicht gefolgt.
+
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO auf. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
+
+**Geprüft am 2026-09-18** (dieser Rechner: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): CLI- und HTTP-Dashboard-`ENCODE_INK` wie zuvor dokumentiert; NAS-Unit-Tests; isoliertes synthetisches Encoding. **Workspace-Nachzug am selben Tag:** `ink-encoder` 2.0.0 als Repo-Workspace (`file:ink-encoder`) nach Kompatibilitätsprüfung gegen npm `1.0.0`; `npm test -w ink-encoder` und `ENCODE_INK`-CLI nach dem Umzug erneut. **Hier nicht neu behauptet:** µGulp-Dashboard, µWatch-Scharfschaltung, `LogTable` nach Serverpaketen im Dashboard, Firmware-Flash, echtes NAS-Backup, `npm publish`.
 
 ### 🎁 Enthaltener Inhalt
 

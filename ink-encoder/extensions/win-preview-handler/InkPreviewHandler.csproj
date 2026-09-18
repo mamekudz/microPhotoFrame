@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <RegisterForComInterop>false</RegisterForComInterop>
+    <AssemblyName>InkPreviewHandler</AssemblyName>
+    <RootNamespace>InkPreviewHandler</RootNamespace>
+    <Description>Windows Explorer-Vorschau für .ink (microPhotoFrame / ink-encoder)</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpShell" Version="2.7.2" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="install.cmd" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="uninstall.cmd" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="INSTALL.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="diagnose-ink-core.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="diagnose-ink-shell.cmd" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="diagnose-ink-shell.bat" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="clear-thumbnail-cache.cmd" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

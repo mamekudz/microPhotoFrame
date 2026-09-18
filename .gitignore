@@ -4,6 +4,9 @@
 build/
 libdeps/
 lib/
+# Encoder Photoshop plugin ships a local lib/ (codec + pako); keep it.
+!ink-encoder/extensions/photoshop-ink/lib/
+!ink-encoder/extensions/photoshop-ink/lib/**
 *.elf
 *.bin
 *.hex
@@ -11,6 +14,7 @@ lib/
 
 # Node
 node_modules/
+.microgulp/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

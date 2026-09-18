@@ -5,6 +5,9 @@
   "author": "Meinolf Amekudzi",
   "license": "MIT",
   "type": "module",
+  "workspaces": [
+    "ink-encoder"
+  ],
   "scripts": {
     "build:packages": "gulp BUILD_ALL_SERVER_PACKAGES",
     "build:installer": "gulp BUILD_INSTALLER",
@@ -15,12 +18,18 @@
     "firmware:upload": "gulp FIRMWARE_UPLOAD",
     "firmware:monitor": "gulp FIRMWARE_MONITOR",
     "firmware:upload-monitor": "gulp FIRMWARE_UPLOAD_MONITOR",
+    "backup": "gulp BACKUP_TO_NAS",
+    "test:nas": "node --test tools/nas-backup.test.mjs",
+    "test:ink": "npm test -w ink-encoder",
+    "test:ink-release": "node --test tools/ink-encoder-release.test.mjs",
+    "commit:ink": "gulp COMMIT_INK_ENCODER",
+    "publish:ink": "gulp PUBLISH_INK_ENCODER",
     "gulp:tasks": "gulp --tasks",
     "gen:branding": "node tools/gen-embedded-branding.mjs"
   },
   "dependencies": {
     "fast-glob": "^3.3.3",
-    "ink-encoder": "file:../ink-encoder",
+    "ink-encoder": "file:ink-encoder",
     "jszip": "^3.10.1",
     "merge2": "^1.4.1",
     "png-to-ico": "^3.0.1",
@@ -31,7 +40,7 @@
     "gulp-clean": "^0.4.0",
     "gulp-cli": "^3.1.0",
     "gulp-concat": "^2.6.1",
-    "gulp-prompt": "^1.2.0",
+    "gulp-mu-gulp-api": "^0.4.0",
     "gulp-rename": "^2.1.0",
     "gulp-replace": "^1.1.4",
     "gulp-zip": "^6.1.0"

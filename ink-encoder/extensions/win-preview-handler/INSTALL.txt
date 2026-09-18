@@ -1,0 +1,105 @@
+Windows Explorer — Vorschau für .ink (E-Paper / microPhotoFrame)
+================================================================
+
+Eigenständig: keine Node.js-, kein ink-encoder-Repository nötig.
+Die Dekodierung läuft in der DLL (.NET Framework 4.8, 64-Bit).
+
+
+Schnellstart (Endanwender)
+--------------------------
+1. Ordner mit ALLEN Dateien aus dem Build behalten (siehe unten) — nicht nur eine DLL.
+
+2. Rechtsklick auf install.cmd → „Als Administrator ausführen“.
+   (Aus dem Repo: install.cmd liegt in win-preview-handler — sie sucht automatisch
+   bin\Release\net48 nach dem Build. Oder Sie starten install.cmd direkt aus
+   bin\Release\net48\. Wichtig: regasm muss im Ordner der DLL laufen, damit
+   SharpShell.dll und SharpZipLib.dll gefunden werden.)
+
+3. Windows Explorer neu starten (Task-Manager → Windows-Explorer → Neu starten)
+   oder ab- und wieder anmelden.
+
+4. Im Explorer: Ansicht → Vorschau einschalten, eine .ink-Datei anklicken.
+
+
+Ordnerinhalt (muss zusammen bleiben)
+------------------------------------
+  InkPreviewHandler.dll
+  SharpShell.dll
+  ICSharpCode.SharpZipLib.dll
+  System.*.dll  (weitere kleine Abhängigkeiten aus dem Build-Ordner)
+  install.cmd
+  uninstall.cmd
+  diagnose-ink-shell.cmd / .bat   (Diagnose; Doppelklick — umgeht PS-Richtlinie)
+  diagnose-ink-core.ps1           (wird von .cmd/.bat mit Bypass geladen)
+
+Tipp: Zum Verteilen den kompletten Ausgabeordner zippen (z. B. bin\Release\net48).
+
+
+Voraussetzungen
+---------------
+  • Windows 64-Bit
+  • .NET Framework 4.8 (Standard unter Windows 10/11)
+
+
+Build (Entwickler, aus dem Repo)
+--------------------------------
+  Im Projektroot ink-encoder:
+
+    npm run build:win-preview
+
+  Ausgabe: extensions\win-preview-handler\bin\Release\net48\
+
+  Dort install.cmd hineinkopieren (liegt im Ordner win-preview-handler), falls nicht
+  per IDE/PostBuild kopiert — oder install.cmd aus win-preview-handler manuell daneben legen.
+
+
+Abmelden
+--------
+  uninstall.cmd als Administrator ausführen.
+
+
+Technik
+-------
+  Zwei Shell-Erweiterungen in einer DLL:
+  • Vorschaufenster (IPreviewHandler)
+  • Miniaturansicht bei „Große Symbole“ / Kachelansicht (IThumbnailProvider)
+
+  Display-Tabelle und Dekodierung entsprechen ink-encoder / microPhotoFrame (.ink v1–v3,
+  Legacy-Header). Bei unbekanntem Display-Byte im Header: keine Miniatur / Fehltext.
+
+  v2/v3-Payload: raw deflate (RFC 1951), wie Browser CompressionStream('deflate-raw') —
+  kein zlib-Wrapper. Ältere Builds nutzten fälschlich zlib-Inflate → Explorer-Vorschau
+  „Header checksum illegal“. Aktuell: SharpZipLib Inflater(noHeader: true).
+
+  Vorschau: .ink wird mit FileShare.ReadWrite gelesen (sonst oft leer, wenn Explorer die
+  Datei gleichzeitig geöffnet hat). Miniatur: quadratische Kachel (Hintergrund dunkelgrau),
+  Bild proportional zentriert — einheitlich wie andere Shell-Thumbnails, nicht als hohes
+  Portrait-Rechteck bei Hochkant-.ink.
+
+  Hochkant (Header-Byte 3, Bit 0): GDI+ Rotate90FlipNone — Inverse zu microPhotoFrame
+  EInk.Convert rotate(-90°); keine Spiegelung. Abgleich: docs/INK_ORIENTATION_PC.md im microPhotoFrame-Repo.
+
+  install.cmd trägt die CLSIDs in „Shell Extensions\Approved“ ein (HKLM). Ohne diesen
+  Schritt zeigt Windows oft keine Miniatur in der Symbolansicht, obwohl die Vorschau geht.
+
+  Nach einem Update: zuerst uninstall.cmd, dann install.cmd (als Administrator), damit
+  RegistrationName/Registrierung sauber sind.
+  Konflikt mit anderer Software: z. B. Wacom „Ink“ oder andere Programme nutzen ebenfalls
+  die Endung .ink und registrieren einen eigenen Thumbnail-Handler. Dann überschreibt
+  nur EIN Handler den Schlüssel shellex\{E357FCCD-A995-4576-B01F-234630154E9D}.
+  Diagnose: diagnose-ink-shell.cmd oder .bat (Doppelklick). In PowerShell:
+    .\diagnose-ink-shell.cmd
+  (Nicht .\*.ps1 — unter „nur signierte Skripte“ schlägt das fehl.)
+  Alternativ manuell mit Bypass:
+    powershell -NoProfile -ExecutionPolicy Bypass -File diagnose-ink-core.ps1
+
+  Falls alte Kacheln bleiben: clear-thumbnail-cache.cmd ausführen (beendet Explorer
+  kurz, löscht %LocalAppData%\Microsoft\Windows\Explorer\thumbcache*.db, startet neu).
+  Manuell löschen geht oft nicht: die .db-Dateien sind von explorer.exe, Vorschau
+  (prevhost) oder der Suche geöffnet — Explorer beenden (Task-Manager), dann in
+  cmd löschen, Explorer wieder starten. Wenn einzelne Dateien hängen bleiben: neu
+  starten und clear-thumbnail-cache erneut.
+
+  Prüfen: Systemsteuerung (oder Win+R sysdm.cpl) → Erweitert → Leistung „Einstellungen“:
+  „Miniaturansichten statt Symbole anzeigen“ muss an sein — sonst bleiben nur
+  generische Dokument-Symbole, unabhängig vom Handler.

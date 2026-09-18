@@ -1,16 +1,16 @@
 Hier liegen Icons, Logos und Web-Grafiken (wie in `index.html`: `Logo.png`, `LogoText.png`).
 
-## Node: `ink-encoder` (lokal, nicht auf npm)
+## Node: `ink-encoder` (Workspace)
 
-Das Projekt bindet **`ink-encoder` per `file:../ink-encoder`** ein (Quelle z. B. `C:\Projects\ink-encoder`).  
-Beide Repositories sollten **nebeneinander** unter demselben übergeordneten Ordner liegen (`microPhotoFrame` und `ink-encoder`). Danach im **microPhotoFrame-Root**:
+Das Projekt bindet **`ink-encoder` als npm-Workspace** ein (`ink-encoder/` im PhotoFrame-Root, Abhängigkeit `file:ink-encoder`, Paket **2.0.0**). Ein Nachbar-Checkout ist nicht nötig. `packages/` bleibt den Firmware-/Serverpaketen vorbehalten.
+
+Im **microPhotoFrame-Root**:
 
 ```bash
 npm install
 ```
 
-So landet das aktuelle Modul in `node_modules/ink-encoder` (Symlink/Junction), inkl. Format-Änderungen — **kein manuelles Kopieren** nötig.  
-Liegt `ink-encoder` woanders, in `package.json` den Pfad in `"file:…"` anpassen.
+So landet das Workspace-Paket in `node_modules/ink-encoder` (Symlink/Junction auf `ink-encoder/`).
 
 Eingebettetes Rahmen-Branding (optional): `npm run gen:branding` erzeugt `firmware/include/embedded_branding_ink.h` mit derselben Codec-Logik.
 

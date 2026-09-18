@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>INK E-Paper</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 10px; font-size: 12px; color: #e8e8e8; background: #2a2a2a; }
+    label { display: block; margin-top: 8px; margin-bottom: 2px; }
+    select, button { width: 100%; box-sizing: border-box; padding: 6px; margin-top: 4px; }
+    button { cursor: pointer; background: #1473e6; color: #fff; border: none; border-radius: 4px; }
+    button.secondary { background: #444; }
+    .row { margin-top: 10px; }
+    #status { margin-top: 10px; white-space: pre-wrap; word-break: break-word; color: #aaa; font-size: 11px; }
+    h2 { font-size: 14px; margin: 0 0 8px 0; font-weight: 600; }
+    .hint { font-size: 10px; color: #888; margin: 8px 0 0 0; line-height: 1.35; }
+    .intro { font-size: 11px; color: #b0b0b0; line-height: 1.4; margin: 0 0 12px 0; padding: 8px; background: #333; border-radius: 4px; }
+    .intro strong { color: #e8e8e8; }
+  </style>
+</head>
+<body>
+  <h2>INK E-Paper</h2>
+  <p class="intro"><strong>Panel finden:</strong> Menü <strong>Plugins</strong> → <strong>INK E-Paper</strong>. Wenn dort nur andere Hersteller (z. B. Logitech) stehen: im Plugin-Ordner <strong>enable-uxp-developer-mode.cmd</strong> als <strong>Administrator</strong> ausführen, Photoshop neu starten — siehe INSTALL.txt.</p>
+  <label for="display">Display / Zielgröße</label>
+  <select id="display"></select>
+  <label for="dither">Dithering</label>
+  <select id="dither">
+    <option value="floyd" selected>Floyd–Steinberg</option>
+    <option value="bayer">Bayer</option>
+    <option value="none">Keines</option>
+  </select>
+  <label for="compression">Kompression (Firmware)</label>
+  <select id="compression">
+    <option value="deflatePaeth" selected>deflate + Paeth (v3)</option>
+    <option value="deflate">deflate (v2)</option>
+    <option value="lzw">LZW (v1)</option>
+  </select>
+  <div class="row">
+    <button id="btnExport" type="button">Aktives Dokument → .ink speichern…</button>
+  </div>
+  <div class="row">
+    <button id="btnImport" type="button" class="secondary">.ink importieren…</button>
+  </div>
+  <p class="hint"><strong>Warum nicht „Datei → Öffnen“?</strong> Photoshop kennt .ink nicht (kein natives Format). Nur dieses Plugin kann die Datei lesen und ein neues Bild anlegen.<br /><br />Nicht per Strg+V einfügen (Zwischenablage).</p>
+  <div id="status"></div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>.ink Vorschau</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #1e1e1e; color: #eee; min-height: 100vh; }
+    h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 12px 0; }
+    #drop {
+      border: 2px dashed #555; border-radius: 8px; padding: 24px; text-align: center; color: #888; margin-bottom: 16px;
+    }
+    #drop.drag { border-color: #1473e6; color: #ccc; }
+    canvas { max-width: 100%; height: auto; background: #111; border-radius: 4px; display: block; margin: 0 auto; image-rendering: pixelated; }
+    #meta { margin-top: 12px; font-size: 12px; color: #aaa; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>.ink Vorschau (E-Paper)</h1>
+  <div id="drop">Datei hierher ziehen oder über den Server mit <code>?file=…</code> laden</div>
+  <canvas id="cv"></canvas>
+  <div id="meta"></div>
+  <script type="module">
+    import { decodeInk, parseInkHeader, decodeOptionsFromInkFile, drawRgbaToCanvas } from "../photoshop-ink/lib/inkCodec.mjs";
+
+    const drop = document.getElementById("drop");
+    const cv = document.getElementById("cv");
+    const meta = document.getElementById("meta");
+
+    function showInk(buf) {
+      const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+      const h = parseInkHeader(u8);
+      let info;
+      try {
+        info = decodeOptionsFromInkFile(u8);
+      } catch (e) {
+        meta.textContent = `Header: v${h.version} · Display-Zeichen "${h.displayId}"\n${e.message}`;
+        return;
+      }
+      const { width, height, rgba } = decodeInk(u8, {
+        colors: info.colors,
+        width: info.width,
+        height: info.height,
+        isRound: info.isRound,
+        autoFromHeader: false
+      });
+      drawRgbaToCanvas(cv, rgba, width, height);
+      meta.textContent =
+        `Version ${h.version} · Display-ID "${h.displayId}" · ${info.width}×${info.height}` +
+        (info.isRound ? " · rund" : "") +
+        `\nDither-Byte ${h.dither} · Orientierung ${h.orientation}`;
+    }
+
+    window.addEventListener("message", (ev) => {
+      if (ev.data?.type === "ink-bytes" && ev.data.buffer) showInk(ev.data.buffer);
+    });
+
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("drag");
+      const f = e.dataTransfer.files[0];
+      if (!f) return;
+      f.arrayBuffer().then((ab) => showInk(ab));
+    });
+
+    fetch("/api/load-cli")
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => {
+        if (ab) showInk(ab);
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

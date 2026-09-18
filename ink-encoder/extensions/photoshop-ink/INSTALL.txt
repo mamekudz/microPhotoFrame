@@ -1,0 +1,101 @@
+INK E-Paper — Photoshop-Erweiterung (UXP)
+
+===========================================
+
+
+
+Installation (Windows), zuverlässig
+
+----------------------------------
+
+1. Ordner "photoshop-ink" unverändert lassen (manifest.json, lib\, …).
+
+
+
+2. Doppelklick: install.cmd
+
+   (kopiert nach %AppData%\Adobe\UXP\Plugins\External\com.inkencoder.photoshop)
+
+
+
+3. Wichtig — Entwicklermodus für UXP (ohne Signatur sonst oft unsichtbar):
+
+   Rechtsklick auf enable-uxp-developer-mode.cmd → Als Administrator ausführen.
+
+   (Legt die Datei an: %ProgramFiles%\Common Files\Adobe\UXP\Developer\settings.json)
+
+
+
+4. Photoshop und ggf. Creative Cloud komplett beenden, Photoshop neu starten.
+
+
+
+5. Menü "Plugins" → "INK E-Paper" wählen (Seitenpanel).
+
+   Unter "Plugins → Entwicklung" muss nichts Stehen — das Panel erscheint direkt
+
+   unter "Plugins", sobald es geladen ist.
+
+
+
+Nur Logitech unter "Plugins"?
+
+------------------------------
+
+Dann fehlt meist der UXP-Entwicklermodus (Schritt 3) oder install.cmd wurde nicht
+
+ausgeführt. Schritt 2–4 wiederholen.
+
+
+
+Alternative ohne Admin-Skript
+
+-----------------------------
+
+• Creative Cloud Desktop → App "UXP Developer Tools" installieren, starten,
+
+  beim ersten Mal Entwicklermodus aktivieren.
+
+• In den Developer Tools: Plugin hinzufügen → Ordner "photoshop-ink" (mit manifest.json)
+
+  wählen → für Photoshop laden.
+
+
+
+Zusätzlich (optional)
+
+---------------------
+
+Photoshop → Voreinstellungen → Plugins: "Entwicklermodus" / "Plug-in-Entwicklung"
+
+falls vorhanden — hilft manchmal zusätzlich, ersetzt aber nicht zuverlässig Schritt 3.
+
+
+
+Deinstallation
+
+--------------
+
+uninstall.cmd oder Ordner löschen:
+
+
+
+  %AppData%\Adobe\UXP\Plugins\External\com.inkencoder.photoshop
+
+
+
+„Zwischenablage konnte nicht importiert werden …“
+
+-----------------------------------------------
+
+Kein Strg+V für .ink — im Panel ".ink importieren…" nutzen.
+
+
+
+Voraussetzung
+
+-------------
+
+Photoshop ab ca. Version 24 (2023), siehe manifest.json → host.minVersion.
+
+

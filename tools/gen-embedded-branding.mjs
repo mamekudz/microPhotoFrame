@@ -6,7 +6,7 @@
  * Quellen (optional): webassets/Logo.png + webassets/LogoText.png
  * Fehlen die Dateien → SVG-Platzhalter (trotzdem gültig).
  *
- * Voraussetzung: npm install im Projektroot (ink-encoder per file:../ink-encoder).
+ * Voraussetzung: npm install im Projektroot (Workspace-Paket ink-encoder/).
  *
  * Ausführung: npm run gen:branding
  * Display-ID: Umgebungsvariable EMBED_DISPLAY_ID (Standard: I)
