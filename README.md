@@ -107,7 +107,7 @@ After first boot:
 **MPU6050 Acceleration Sensor (Optional)**
 
 Add automatic orientation detection with 3D-printed case:
-- 📐 [Build Instructions & 3D Files](https://makerworld.com/en/@amekudzi)
+- 📐 [Build Instructions & 3D Files](https://makerworld.com/en/models/2099919-reterminal-e1002-frame-and-stand#profileId-2270833)
 - 🎯 Automatic landscape/portrait detection
 - 🔄 Instant image switching on rotation
 
@@ -265,7 +265,7 @@ Nach dem ersten Start:
 **MPU6050 Beschleunigungssensor (Optional)**
 
 Fügen Sie automatische Orientierungserkennung mit 3D-gedrucktem Gehäuse hinzu:
-- 📐 [Bauanleitung & 3D-Dateien](https://makerworld.com/en/@amekudzi)
+- 📐 [Bauanleitung & 3D-Dateien](https://makerworld.com/de/models/2099919-reterminal-e1002-frame-and-stand#profileId-2270833)
 - 🎯 Automatische Quer-/Hochformat-Erkennung
 - 🔄 Sofortiger Bildwechsel bei Drehung
 
@@ -341,7 +341,7 @@ MIT License - siehe [LICENSE](LICENSE) für Details
 - **Issues:** https://github.com/mamekudz/microPhotoFrame/issues
 - **Releases:** https://github.com/mamekudz/microPhotoFrame/releases
 - **Web-Flasher:** https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html
-- **3D Files:** https://makerworld.com/en/@amekudzi
+- **3D Files:** https://makerworld.com/de/models/2099919-reterminal-e1002-frame-and-stand#profileId-2270833
 
 ---
 

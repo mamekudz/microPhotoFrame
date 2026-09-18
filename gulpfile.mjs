@@ -540,12 +540,41 @@ async function _loadInkEncoder() {
 	}
 }
 
+function _asPathList(value) {
+	if (value == null || value === '') return [];
+	if (Array.isArray(value)) return value.flatMap(_asPathList);
+	if (typeof value === 'object' && value.path) return _asPathList(value.path);
+	return String(value).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+async function _resolveInkInputs(inputPath) {
+	const files = [];
+	for (const pattern of _asPathList(inputPath)) {
+		const absolute = path.isAbsolute(pattern) ? pattern : path.resolve(PROJECT_ROOT, pattern);
+		try {
+			if (fs.existsSync(absolute) && fs.statSync(absolute).isFile()) {
+				files.push(absolute);
+				continue;
+			}
+		} catch {
+			// Fall through to glob for patterns that are not a single existing file.
+		}
+		const matches = await glob(pattern.replace(/\\/g, '/'), {
+			cwd: PROJECT_ROOT,
+			absolute: true,
+			onlyFiles: true,
+		});
+		files.push(...matches);
+	}
+	return [...new Set(files)];
+}
+
 async function _encodeInk(cb) {
 	const configPath = GetParameter('config', process.env.config || './config/ink-encode-config.json');
 	const inputPath = GetParameter('input', process.env.input);
 	const outputPath = GetParameter('output', process.env.output);
 
-	if (!inputPath) {
+	if (!_asPathList(inputPath).length) {
 		LogError('The input parameter is required.<context="task error"/>');
 		Log('Usage: gulp ENCODE_INK with input (optional output and config).<context="task log"/>');
 		cb(new Error('Missing input'));
@@ -560,7 +589,7 @@ async function _encodeInk(cb) {
 	}
 
 	try {
-		const files = await glob(inputPath);
+		const files = await _resolveInkInputs(inputPath);
 		if (files.length === 0) {
 			LogError('No files found: <path/><context="task error"/>', { path: inputPath });
 			cb(new Error('No files'));
@@ -568,6 +597,7 @@ async function _encodeInk(cb) {
 		}
 		const options = await loadConfigFromJSON(configPath);
 		const progress = CreateProgress(Translate('INK encoding<context="task log"/>'));
+		const converted = [];
 
 		for (let i = 0; i < files.length; i++) {
 			const file = files[i];
@@ -575,10 +605,19 @@ async function _encodeInk(cb) {
 			Log('<file/> → <out/><context="task log"/>', { file, out });
 			const data = await encodeInk(file, options);
 			fs.writeFileSync(out, data);
+			converted.push({ file, out, size: data.length });
 			Log('Converted: <path/><context="task log"/>', { path: out });
 			progress.Update((i + 1) / files.length);
 		}
 		progress.Done();
+		LogTable({
+			columns: [
+				Translate('Source<context="task log"/>'),
+				Translate('Encoded<context="task log"/>'),
+				Translate('Size<context="task log"/>'),
+			],
+			rows: converted.map((row) => [row.file, row.out, Number(row.size).Format('byteSize')]),
+		});
 		cb();
 	} catch (err) {
 		LogError('INK encoding failed: <message/><context="task error"/>', { message: err.message });
@@ -1006,27 +1045,29 @@ _firmwareMonitor.µAutoClose = -1;
 
 _encodeInk.µDisplayName = 'Encode INK<context="µDisplayName"/>'.i18xRegister();
 _encodeInk.µDescription = 'Encodes PNG/JPEG images to .ink using ink-encoder.<context="µDescription"/>'.i18xRegister();
-_encodeInk.µTooltip = 'Requires an input path (file or glob). Optional output and config.<context="µTooltip"/>'.i18xRegister();
+_encodeInk.µTooltip = 'File pickers for input, optional output and config; globs still work.<context="µTooltip"/>'.i18xRegister();
 _encodeInk.µGroup = 'Tools<context="µGroup"/>'.i18xRegister();
 _encodeInk.µIcon = '\uE906';
 _encodeInk.µOrder = 10;
-_encodeInk.µAutoClose = -1;
 _encodeInk.µParameters = [
 	{
 		id: 'input',
-		type: 'text',
+		type: 'file',
 		required: true,
+		accept: '.png,.jpg,.jpeg',
 		label: 'Input PNG/JPEG (file or glob)<context="task parameter"/>'.i18xRegister(),
 		placeholder: 'path/to/image.png<context="task parameter"/>'.i18xRegister(),
 	},
 	{
 		id: 'output',
-		type: 'text',
+		type: 'file',
+		accept: '.ink',
 		label: 'Output .ink path (optional)<context="task parameter"/>'.i18xRegister(),
 	},
 	{
 		id: 'config',
-		type: 'text',
+		type: 'file',
+		accept: '.json',
 		default: './config/ink-encode-config.json',
 		label: 'Encoder config JSON<context="task parameter"/>'.i18xRegister(),
 	},
