@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import { finished } from 'stream/promises';
+import { CreateProgress, Log, Warn, LogError } from 'gulp-mu-gulp-api';
 
 const MANIFEST_NAME = 'redistributables.json';
 
@@ -41,7 +42,7 @@ async function _downloadToFile(url, destPath) {
 		throw new Error(`HTTP ${res.status} ${res.statusText} — ${url}`);
 	}
 	if (!res.body) {
-		throw new Error('Leere Antwort: ' + url);
+		throw new Error('Empty response: ' + url);
 	}
 	const dir = path.dirname(destPath);
 	fs.mkdirSync(dir, { recursive: true });
@@ -71,19 +72,15 @@ async function _downloadToFile(url, destPath) {
  */
 export async function fetchInstallerRedistributables(opts) {
 	const root = opts.root;
-	const log = opts.log ?? console.log;
-	const ok = opts.ok ?? ((s) => console.log('OK ' + s));
-	const warn = opts.warn ?? console.warn;
-	const err = opts.err ?? console.error;
 
 	if (process.env.SKIP_FETCH_INSTALLER_ASSETS === '1') {
-		log('SKIP_FETCH_INSTALLER_ASSETS=1 — überspringe Redistributable-Downloads.');
+		Log('SKIP_FETCH_INSTALLER_ASSETS=1 — skipping redistributable downloads.<context="task log"/>');
 		return;
 	}
 
 	const manifestPath = path.join(root, 'installer', 'assets', MANIFEST_NAME);
 	if (!fs.existsSync(manifestPath)) {
-		warn(`Kein Manifest: ${manifestPath} — nichts zu laden.`);
+		Warn('No manifest: <path/> — nothing to fetch.<context="task warning"/>', { path: manifestPath });
 		return;
 	}
 
@@ -96,13 +93,18 @@ export async function fetchInstallerRedistributables(opts) {
 
 	const items = Array.isArray(manifest.items) ? manifest.items : [];
 	const assetsDir = path.join(root, 'installer', 'assets');
+	const enabled = items.filter((entry) => entry.enabled !== false);
+	const progress = enabled.length > 0 ? CreateProgress('Redistributables<context="task log"/>'.i18xTrans()) : null;
+	let done = 0;
 
 	for (const entry of items) {
 		if (entry.enabled === false) continue;
 		const name = entry.file;
 		const url = entry.url;
 		if (!name || !url) {
-			warn('Manifest-Eintrag ohne file/url übersprungen.');
+			Warn('Manifest entry without file/url skipped.<context="task warning"/>');
+			done++;
+			progress?.Update(done / enabled.length);
 			continue;
 		}
 
@@ -111,49 +113,63 @@ export async function fetchInstallerRedistributables(opts) {
 		let needDownload = false;
 		if (!fs.existsSync(dest)) {
 			needDownload = true;
-			log(`Fehlt: ${name} — lade von Originalquelle …`);
+			Log('Missing: <name/> — downloading from original source…<context="task log"/>', { name });
 		} else {
 			const match = await _hashMatches(dest, entry);
 			if (match === true) {
-				ok(`unverändert (Hash ok): ${name}`);
+				Log('Unchanged (hash ok): <name/><context="task log"/>', { name });
+				done++;
+				progress?.Update(done / enabled.length);
 				continue;
 			}
 			if (match === false) {
 				needDownload = true;
-				log(`Hash abweichend: ${name} — lade neu …`);
+				Log('Hash mismatch: <name/> — downloading again…<context="task log"/>', { name });
 			} else {
 				const min = typeof entry.minSizeBytes === 'number' ? entry.minSizeBytes : 0;
 				const st = fs.statSync(dest);
 				if (min > 0 && st.size >= min) {
-					ok(`unverändert (minSizeBytes): ${name}`);
+					Log('Unchanged (minSizeBytes): <name/><context="task log"/>', { name });
+					done++;
+					progress?.Update(done / enabled.length);
 					continue;
 				}
 				needDownload = true;
-				log(`Kein Hash / Größe unsicher: ${name} — lade (neu) …`);
+				Log('No hash / size uncertain: <name/> — downloading (again)…<context="task log"/>', { name });
 			}
 		}
 
-		await _downloadToFile(url, dest);
+		if (needDownload) {
+			await _downloadToFile(url, dest);
+		}
 
 		const matchAfter = await _hashMatches(dest, entry);
 		if (entry.sha512 || entry.sha256) {
 			if (matchAfter !== true) {
 				const sha256 = await _hexDigestFile(dest, 'sha256');
 				const sha512 = await _hexDigestFile(dest, 'sha512');
-				err(`Hash-Prüfung fehlgeschlagen: ${name}`);
-				log(`  sha256: ${sha256}`);
-				log(`  sha512: ${sha512}`);
+				LogError('Hash check failed: <name/><context="task error"/>', { name });
+				Log('sha256: <hash/><context="task log"/>', { hash: sha256 });
+				Log('sha512: <hash/><context="task log"/>', { hash: sha512 });
 				throw new Error(`Hash mismatch: ${name}`);
 			}
 		}
 
-		ok(`geladen: ${name} (${(fs.statSync(dest).size / (1024 * 1024)).toFixed(1)} MB)`);
+		Log('Downloaded: <name/> (<size format="byteSize"/>)<context="task log"/>', {
+			name,
+			size: fs.statSync(dest).size,
+		});
 
 		if (!entry.sha256 && !entry.sha512) {
 			const sha256 = await _hexDigestFile(dest, 'sha256');
 			const sha512 = await _hexDigestFile(dest, 'sha512');
-			log(`  (Manifest ergänzen) sha256: ${sha256}`);
-			log(`  (Manifest ergänzen) sha512: ${sha512}`);
+			Log('(Add to manifest) sha256: <hash/><context="task log"/>', { hash: sha256 });
+			Log('(Add to manifest) sha512: <hash/><context="task log"/>', { hash: sha512 });
 		}
+
+		done++;
+		progress?.Update(done / enabled.length);
 	}
+
+	progress?.Done();
 }

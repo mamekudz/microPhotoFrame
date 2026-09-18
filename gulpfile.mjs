@@ -104,9 +104,32 @@ const PKG_VERSION = JSON.parse(fs.readFileSync('./package.json', 'utf8')).versio
 const VERSION = _readVersionFromReleases() ?? PKG_VERSION;
 const VERSION_WIN = _semverToWinFourPart(VERSION);
 
+function _readInkEncoderVersion() {
+	try {
+		return ReadInkEncoderPackage(ResolveInkEncoderDir(PROJECT_ROOT)).version;
+	} catch {
+		return '';
+	}
+}
+
+function _readFirmwareVersion() {
+	try {
+		const src = fs.readFileSync(path.join(PROJECT_ROOT, 'firmware', 'src', 'main.cpp'), 'utf8');
+		const match = src.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/);
+		return match?.[1] || '';
+	} catch {
+		return '';
+	}
+}
+
+const INK_ENCODER_VERSION = _readInkEncoderVersion();
+const FIRMWARE_VERSION = _readFirmwareVersion();
+
 export const µI18xContext = {
 	version: VERSION,
 	project: PROJECT_NAME,
+	inkEncoder: INK_ENCODER_VERSION,
+	firmware: FIRMWARE_VERSION,
 };
 
 const SERVER_TYPE_PHRASES = {
@@ -937,7 +960,7 @@ _fetchInstallerRedistributables.µGroup = 'Build/Installer<context="µGroup"/>'.
 _fetchInstallerRedistributables.µIcon = '\uE902';
 _fetchInstallerRedistributables.µOrder = 40;
 
-_firmwareBuild.µDisplayName = 'Build Firmware<context="µDisplayName"/>'.i18xRegister();
+_firmwareBuild.µDisplayName = 'Build Firmware V<firmware/><context="µDisplayName"/>'.i18xRegister();
 _firmwareBuild.µDescription = 'Compiles the PlatformIO firmware (pio run).<context="µDescription"/>'.i18xRegister();
 _firmwareBuild.µTooltip = 'Requires PlatformIO CLI (pio) on PATH.<context="µTooltip"/>'.i18xRegister();
 _firmwareBuild.µGroup = 'Firmware<context="µGroup"/>'.i18xRegister();
@@ -951,7 +974,7 @@ _firmwareBuild.µWatch = {
 	autoStart: false,
 };
 
-_firmwareUpload.µDisplayName = 'Upload Firmware<context="µDisplayName"/>'.i18xRegister();
+_firmwareUpload.µDisplayName = 'Upload Firmware V<firmware/><context="µDisplayName"/>'.i18xRegister();
 _firmwareUpload.µDescription = 'Stops serial monitors, then uploads firmware (pio run -t upload).<context="µDescription"/>'.i18xRegister();
 _firmwareUpload.µTooltip = 'Kills lingering python/pio monitor processes first.<context="µTooltip"/>'.i18xRegister();
 _firmwareUpload.µGroup = 'Firmware<context="µGroup"/>'.i18xRegister();
@@ -961,7 +984,7 @@ _firmwareUpload.µExecutionConcurrency = false;
 _firmwareUpload.µExecutionRestrictions = { deny: FIRMWARE_IO_TASKS.filter((n) => n !== 'FIRMWARE_UPLOAD') };
 _firmwareUpload.µKeyBinding = { key: 'ctrl+shift+U', mac: 'cmd+shift+U' };
 
-_firmwareUploadMonitor.µDisplayName = 'Upload Firmware and Monitor<context="µDisplayName"/>'.i18xRegister();
+_firmwareUploadMonitor.µDisplayName = 'Upload Firmware V<firmware/> and Monitor<context="µDisplayName"/>'.i18xRegister();
 _firmwareUploadMonitor.µDescription = 'Uploads firmware and opens the serial monitor.<context="µDescription"/>'.i18xRegister();
 _firmwareUploadMonitor.µTooltip = 'Keeps the run sector open while the monitor is attached.<context="µTooltip"/>'.i18xRegister();
 _firmwareUploadMonitor.µGroup = 'Firmware<context="µGroup"/>'.i18xRegister();
@@ -1051,7 +1074,7 @@ _backupToNas.µParameters = [
 	},
 ];
 
-_commitInkEncoder.µDisplayName = 'Commit ink-encoder<context="µDisplayName"/>'.i18xRegister();
+_commitInkEncoder.µDisplayName = 'Commit ink-encoder V<inkEncoder/><context="µDisplayName"/>'.i18xRegister();
 _commitInkEncoder.µDescription = 'Stages and commits only the ink-encoder/ workspace package. Does not push.<context="µDescription"/>'.i18xRegister();
 _commitInkEncoder.µTooltip = 'CLI requires MICROGULP_PARAM_MESSAGE and MICROGULP_PARAM_CONFIRM=true. Other staged files are not included.<context="µTooltip"/>'.i18xRegister();
 _commitInkEncoder.µGroup = 'Publish<context="µGroup"/>'.i18xRegister();
@@ -1065,7 +1088,7 @@ _commitInkEncoder.µParameters = [
 		type: 'textarea',
 		required: true,
 		label: 'Commit message<context="task parameter"/>'.i18xRegister(),
-		placeholder: 'Release ink-encoder 2.0.0<context="task parameter"/>'.i18xRegister(),
+		placeholder: 'Release ink-encoder <inkEncoder/><context="task parameter"/>'.i18xRegister(),
 	},
 	{
 		id: 'confirm',
@@ -1075,7 +1098,7 @@ _commitInkEncoder.µParameters = [
 	},
 ];
 
-_publishInkEncoder.µDisplayName = 'Publish ink-encoder to npm<context="µDisplayName"/>'.i18xRegister();
+_publishInkEncoder.µDisplayName = 'Publish ink-encoder V<inkEncoder/> to npm<context="µDisplayName"/>'.i18xRegister();
 _publishInkEncoder.µDescription = 'Publishes only the ink-encoder workspace package. CLI defaults to a dry run; a real upload needs DRYRUN=false and confirmation. Does not publish PhotoFrame.<context="µDescription"/>'.i18xRegister();
 _publishInkEncoder.µTooltip = 'Log in once with npm login. Optional OTP via MICROGULP_PARAM_OTP. Dry run unless MICROGULP_PARAM_DRYRUN=false.<context="µTooltip"/>'.i18xRegister();
 _publishInkEncoder.µGroup = 'Publish<context="µGroup"/>'.i18xRegister();
