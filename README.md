@@ -127,9 +127,17 @@ Add automatic orientation detection with 3D-printed case:
 
 ### 🛠️ Development Gulp tasks (µGulp™)
 
+<p align="center">
+  <a href="https://microgulp.dev/en/ready/">
+    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
+  </a>
+</p>
+
+The badge applies to **this repository’s development/build Gulp tasks**, not to the device firmware.
+
 These tasks are **repository development/build helpers**. They do not flash or certify the device firmware.
 
-The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParameters` forms (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), task-reported progress (`CreateProgress` / `ReportProgress`), a `LogTable` artifact listing after server packages, and `µWatch` on firmware sources, favicon PNGs and branding copies. Display names and groups are i18n’d via `i18x/gulp/`. **This is not an official µGulp™ certification.** PhotoFrame remains a Ready **candidate** without the badge (previous dashboard gaps such as µWatch arming and `LogTable` in the dashboard were not re-tested here).
+The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParameters` forms (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), task-reported progress (`CreateProgress` / `ReportProgress`), a `LogTable` artifact listing after server packages, and `µWatch` on firmware sources, favicon PNGs and branding copies. Display names and groups are i18n’d via `i18x/gulp/`. This is maintainer self-certification against the published [µGulp™ Ready](https://microgulp.dev/en/ready/) requirements, not an independent audit.
 
 **Prerequisites:** Node.js 22+, `npm install` in the repo root (workspace package `ink-encoder/` 2.0.0 is linked automatically). Windows for `BACKUP_TO_NAS` (robocopy) and NSIS installer builds. PlatformIO (`pio`) for firmware tasks. `gulp-mu-gulp-api` is a devDependency. A neighbor checkout of `../ink-encoder` is **not** required. Config fallback `./config/ink-encode-config.json` is not in the repo — use `config/ink-encode-config.example.json` or a local copy.
 
@@ -150,7 +158,7 @@ The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParamete
 
 `npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO. `µWatch` is dashboard-only; on the CLI run the task again after edits.
 
-**Checked on 2026-09-18** (this workstation: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): CLI and HTTP-dashboard `ENCODE_INK` form/progress/error as previously recorded; `node --test tools/nas-backup.test.mjs`; isolated synthetic encode. **Workspace follow-up the same day:** `ink-encoder` 2.0.0 is a repo workspace (`file:ink-encoder`) after a compatibility audit against npm `1.0.0`; `npm test -w ink-encoder` and `ENCODE_INK` CLI were re-run after the move. **Not claimed as newly verified here:** µGulp dashboard, µWatch arming, `LogTable` after server packages in the dashboard, firmware flash, live NAS backup, `npm publish`.
+**Checked on 2026-09-18** (this workstation: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP dashboard (`microgulp-serve --http`) `ENCODE_INK` parameter form, successful synthetic PNG→`.ink` (`DONE 100%`, visible log), and a missing-file failure (`No files found`). CLI the same day: `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` success and missing-input abort. `node --test tools/nas-backup.test.mjs`. **Not claimed as tested here:** µWatch arming, `LogTable` after server packages, firmware flash, live NAS backup, `npm publish`.
 
 ### 🎁 Included Content
 
@@ -284,9 +292,17 @@ Fügen Sie automatische Orientierungserkennung mit 3D-gedrucktem Gehäuse hinzu:
 
 ### 🛠️ Entwicklungs-Gulp-Tasks (µGulp™)
 
+<p align="center">
+  <a href="https://microgulp.dev/en/ready/">
+    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
+  </a>
+</p>
+
+Das Badge gilt für die **Entwicklungs-/Build-Gulp-Tasks dieses Repositories**, nicht für die Gerätefirmware.
+
 Diese Tasks sind **Entwicklungs-/Build-Helfer dieses Repositories**. Sie flashen die Gerätefirmware nicht und sind keine Gerätezertifizierung.
 
-Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: `µParameters`-Formulare (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), gemeldeter Fortschritt (`CreateProgress` / `ReportProgress`), `LogTable` nach Serverpaketen sowie `µWatch` für Firmware-Quellen, Favicon-PNGs und Branding-Kopien. Anzeigenamen liegen unter `i18x/gulp/`. **Das ist keine offizielle µGulp™-Zertifizierung.** PhotoFrame bleibt Ready-**Kandidat ohne Badge** (Dashboard-Lücken wie µWatch-Scharfschaltung und `LogTable` im Dashboard wurden hier nicht erneut geprüft).
+Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: `µParameters`-Formulare (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), gemeldeter Fortschritt (`CreateProgress` / `ReportProgress`), `LogTable` nach Serverpaketen sowie `µWatch` für Firmware-Quellen, Favicon-PNGs und Branding-Kopien. Anzeigenamen liegen unter `i18x/gulp/`. Das ist Maintainer-Selbstdeklaration gemäß den veröffentlichten [µGulp™-Ready-Anforderungen](https://microgulp.dev/en/ready/), keine unabhängige Prüfung.
 
 **Voraussetzungen:** Node.js 22+, `npm install` im Projektroot (Workspace-Paket `ink-encoder/` 2.0.0 wird automatisch verknüpft). Windows für `BACKUP_TO_NAS` (robocopy) und NSIS-Installer. PlatformIO (`pio`) für Firmware-Tasks. `gulp-mu-gulp-api` ist eine devDependency. Ein Nachbar-Checkout von `../ink-encoder` ist **nicht** nötig. Der Config-Fallback `./config/ink-encode-config.json` liegt nicht im Repo — `config/ink-encode-config.example.json` oder eine lokale Kopie verwenden.
 
@@ -307,7 +323,7 @@ Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: 
 
 `npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO auf. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
 
-**Geprüft am 2026-09-18** (dieser Rechner: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): CLI- und HTTP-Dashboard-`ENCODE_INK` wie zuvor dokumentiert; NAS-Unit-Tests; isoliertes synthetisches Encoding. **Workspace-Nachzug am selben Tag:** `ink-encoder` 2.0.0 als Repo-Workspace (`file:ink-encoder`) nach Kompatibilitätsprüfung gegen npm `1.0.0`; `npm test -w ink-encoder` und `ENCODE_INK`-CLI nach dem Umzug erneut. **Hier nicht neu behauptet:** µGulp-Dashboard, µWatch-Scharfschaltung, `LogTable` nach Serverpaketen im Dashboard, Firmware-Flash, echtes NAS-Backup, `npm publish`.
+**Geprüft am 2026-09-18** (dieser Rechner: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP-Dashboard (`microgulp-serve --http`) `ENCODE_INK` mit Parameterformular, erfolgreichem synthetischem PNG→`.ink` (`DONE 100%`, sichtbares Log) und Fehlerfall fehlende Datei (`No files found`). CLI am selben Tag: Erfolg mit `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` und Abbruch ohne Input. NAS-Unit-Tests. **Hier nicht geprüft:** µWatch-Scharfschaltung, `LogTable` nach Serverpaketen, Firmware-Flash, echtes NAS-Backup, `npm publish`.
 
 ### 🎁 Enthaltener Inhalt
 
