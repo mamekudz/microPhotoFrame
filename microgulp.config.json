@@ -4,7 +4,7 @@
 	"watchGulpfiles": true,
 	"metadataWatchFiles": [
 		"package.json",
-		"releases.json",
+		"RELEASES.json",
 		"firmware/src/main.cpp",
 		"ink-encoder/package.json"
 	],

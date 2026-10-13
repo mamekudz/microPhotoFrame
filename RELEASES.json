@@ -1,0 +1,76 @@
+[
+	{
+		"main": 1,
+		"minor": 1,
+		"revision": 0,
+		"date": "2026-10-13 11:35",
+		"beta": false,
+		"info": [
+			"Optionally store only one aspect ratio.",
+			"Automatic per-photo optimization for the target display.",
+			"Firmware: deep sleep on by default, unpaired .ink files used in any orientation, version display.",
+			"µGulp product title and logo via microgulp.config.json.",
+			"Copyright 2025-2026."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 0,
+		"revision": 0,
+		"date": "2026-09-18 20:06",
+		"beta": false,
+		"info": [
+			"ink-encoder 2.0.0 as workspace package, NAS mirroring.",
+			"µGulp Ready after dashboard check.",
+			"File picker for Encode INK.",
+			"MakerWorld link corrected."
+		]
+	},
+	{
+		"main": 0,
+		"minor": 9,
+		"revision": 0,
+		"date": "2026-06-20 16:13",
+		"beta": false,
+		"info": [
+			"µPhotoFrame™ trademark.",
+			"Logo update.",
+			"Runtime and logging improvements."
+		]
+	},
+	{
+		"main": 0,
+		"minor": 8,
+		"revision": 0,
+		"date": "2026-04-17 16:38",
+		"beta": false,
+		"info": [
+			"Third-party libraries no longer embedded.",
+			"Installer documentation.",
+			"Firmware and stack fixes."
+		]
+	},
+	{
+		"main": 0,
+		"minor": 7,
+		"revision": 0,
+		"date": "2026-04-03 18:45",
+		"beta": false,
+		"info": [
+			"First product release.",
+			".ink format v3 (Paeth + Deflate).",
+			"Firmware, web app, NSIS installer, branding, e-ink portrait."
+		]
+	},
+	{
+		"main": 0,
+		"minor": 6,
+		"revision": 0,
+		"date": "2026-01-07 15:23",
+		"beta": false,
+		"info": [
+			"Public repository from the local workspace.",
+			"Web app and Gulp tasks."
+		]
+	}
+]

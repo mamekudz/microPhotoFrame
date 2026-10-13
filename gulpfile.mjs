@@ -63,16 +63,17 @@ InstallStringExtensions();
 const PROJECT_ROOT = path.dirname(fileURLToPath(import.meta.url));
 process.chdir(PROJECT_ROOT);
 
-const RELEASES_JSON = path.join(PROJECT_ROOT, 'releases.json');
+const RELEASES_JSON = path.join(PROJECT_ROOT, 'RELEASES.json');
 
-/** Semver-String (x.y.z[-beta]) aus releases.json; erstes Array-Element = aktuelle Version. */
+/** Semver-String (x.y.z[-beta]) aus RELEASES.json; erstes Array-Element = aktuelle Version.
+ *  info[]-Texte in RELEASES.json immer en-US (Quellsprache, nicht übersetzen). */
 function _readVersionFromReleases() {
 	if (!fs.existsSync(RELEASES_JSON)) return null;
 	let data;
 	try {
 		data = JSON.parse(fs.readFileSync(RELEASES_JSON, 'utf8'));
 	} catch (e) {
-		Warn('releases.json: <message/> — falling back to package.json<context="task warning"/>', { message: e.message });
+		Warn('RELEASES.json: <message/> — falling back to package.json<context="task warning"/>', { message: e.message });
 		return null;
 	}
 	const entry = Array.isArray(data) ? data[0] : data;
@@ -431,7 +432,7 @@ async function _buildInstaller(cb) {
 
 	const rel = _readVersionFromReleases();
 	if (rel) {
-		Log('Version from releases.json (first entry): <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
+		Log('Version from RELEASES.json (first entry): <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
 	} else {
 		Log('Version from package.json: <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
 	}
