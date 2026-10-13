@@ -1,6 +1,7 @@
 import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs";
 import EInk from "./microLib/EInk.mjs";
+import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs";
 import RESTX from "./microLib/RESTX.mjs";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
@@ -76,20 +77,58 @@ function saveSettingsToStorage() {
         cutSpotY: document.getElementById('cutSpotY').value,
         dither: document.getElementById('dither').value,
         orientation: document.getElementById('orientation').value,
+        saveAspect: getSaveAspect(),
+        autoOptimize: isAutoOptimizeEnabled(),
         bgrdColor: document.getElementById('bgrdColor').value,
         displayID: document.getElementById('displayID').value
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+function getSaveAspect() {
+    const el = document.getElementById('saveAspect') || document.getElementById('saveAspectAdd');
+    const v = el ? el.value : 'both';
+    return (v === 'landscape' || v === 'portrait') ? v : 'both';
+}
+
+window.SyncSaveAspect = function (fromId) {
+    const src = document.getElementById(fromId);
+    if (!src) return;
+    const other = document.getElementById(fromId === 'saveAspect' ? 'saveAspectAdd' : 'saveAspect');
+    if (other && other.value !== src.value) other.value = src.value;
+    saveSettingsToStorage();
+};
+
+function isAutoOptimizeEnabled() {
+    const el = document.getElementById('autoOptimize') || document.getElementById('autoOptimizeAdd');
+    return el ? !!el.checked : true;
+}
+
+window.SyncAutoOptimize = function (fromId) {
+    const src = document.getElementById(fromId);
+    if (!src) return;
+    const other = document.getElementById(fromId === 'autoOptimize' ? 'autoOptimizeAdd' : 'autoOptimize');
+    if (other && other.checked !== src.checked) other.checked = src.checked;
+    saveSettingsToStorage();
+};
+
 function loadSettingsFromStorage() {
     const saved = localStorage.getItem(SETTINGS_KEY);
     if (!saved) return;
     const settings = JSON.parse(saved);
     Object.keys(settings).forEach(id => {
+        if (id === 'autoOptimize') return;
         const el = document.getElementById(id);
         if (el) el.value = settings[id];
     });
+    const saveAspect = document.getElementById('saveAspect');
+    const saveAspectAdd = document.getElementById('saveAspectAdd');
+    if (saveAspect && saveAspectAdd) saveAspectAdd.value = saveAspect.value;
+    const autoOn = settings.autoOptimize !== false;
+    const autoEl = document.getElementById('autoOptimize');
+    const autoAddEl = document.getElementById('autoOptimizeAdd');
+    if (autoEl) autoEl.checked = autoOn;
+    if (autoAddEl) autoAddEl.checked = autoOn;
 }
 
 window.ShowPage = function (pageId) {
@@ -1116,6 +1155,14 @@ window.ResetToDefault = async function () {
     document.getElementById('cutSpotY').value = 0.5;
     document.getElementById('dither').value = 'floyd';
     document.getElementById('orientation').value = 0;
+    const saveAspect = document.getElementById('saveAspect');
+    const saveAspectAdd = document.getElementById('saveAspectAdd');
+    if (saveAspect) saveAspect.value = 'both';
+    if (saveAspectAdd) saveAspectAdd.value = 'both';
+    const autoEl = document.getElementById('autoOptimize');
+    const autoAddEl = document.getElementById('autoOptimizeAdd');
+    if (autoEl) autoEl.checked = true;
+    if (autoAddEl) autoAddEl.checked = true;
     document.getElementById('bgrdColor').value = "#ffffff";
     
     // Set displayID to the display type of the active show
@@ -1171,6 +1218,14 @@ window.ResetToDefault = async function () {
     }
 };
 
+async function previewAfterLoad() {
+    if (isAutoOptimizeEnabled() && currentFile) {
+        await window.AutoOptimizeCurrentImage({ silent: true });
+    } else {
+        window.UpdatePreview();
+    }
+}
+
 window.InputImageChange = function (ev) {
     if (ev.target.files.length > 0) {
         currentFile = ev.target.files[0];
@@ -1178,14 +1233,14 @@ window.InputImageChange = function (ev) {
         aiDetectedSpot = null; // Reset AI detection when new image is loaded
         // Enable all controls when a new image file is loaded
         window.SetPhotoSettingsControlsEnabled(true);
-        currentInk.Load().then(() => window.UpdatePreview());
+        currentInk.Load().then(() => previewAfterLoad());
     }
 };
 
 window.UpdateDisplay = function () {
     if (currentFile) {
         currentInk = new EInk(currentFile, document.getElementById('displayID').value);
-        currentInk.Load().then(() => window.UpdatePreview());
+        currentInk.Load().then(() => previewAfterLoad());
     } else {
         window.UpdatePreview();
     }
@@ -1245,63 +1300,21 @@ window.AutoDetectCenter = async function () {
         URL.revokeObjectURL(imgUrl);
 
         if (predictions.length > 0) {
-            // Sort by score (highest first)
-            const sorted = predictions.sort((a, b) => b.score - a.score);
-            
-            // Priority: Look for persons first, then use face area (upper portion of person box)
-            let best = null;
-            let centerX = 0;
-            let centerY = 0;
-            let detectedClass = '';
-            
-            // First, try to find persons (prioritize faces)
-            const persons = sorted.filter(p => p.class === 'person');
-            
-            if (persons.length > 0) {
-                // Use the person with the highest score
-                const person = persons[0];
-                
-                // For persons, prioritize the face area (upper portion of the person bounding box)
-                // This ensures faces are centered, not the middle of the body
-                // Face is typically in the upper 25-30% of a person's bounding box
-                const personCenterX = person.bbox[0] + (person.bbox[2] / 2);
-                // Use upper 25% of person box for Y (where face typically is)
-                // This is more aggressive than 1/3 to better prioritize faces
-                const faceY = person.bbox[1] + (person.bbox[3] * 0.25);
-                
-                centerX = personCenterX / originalImg.naturalWidth;
-                centerY = faceY / originalImg.naturalHeight;
-                
-                best = person;
-                detectedClass = 'person (face prioritized)';
-                
-                console.log(`Person detected - focusing on face area (upper 25% of person box)`);
-                console.log(`Person bbox: [${person.bbox[0].toFixed(0)}, ${person.bbox[1].toFixed(0)}, ${person.bbox[2].toFixed(0)}, ${person.bbox[3].toFixed(0)}]`);
-                console.log(`Face position: X=${(centerX * 100).toFixed(1)}%, Y=${(centerY * 100).toFixed(1)}%`);
-            } else {
-                // If no person found, use the best detection (highest score)
-                best = sorted[0];
-                const centerX_px = best.bbox[0] + (best.bbox[2] / 2);
-                const centerY_px = best.bbox[1] + (best.bbox[3] / 2);
-                
-                centerX = centerX_px / originalImg.naturalWidth;
-                centerY = centerY_px / originalImg.naturalHeight;
-                
-                detectedClass = best.class;
-            }
+            const focus = FocusSpotFromPredictions(predictions, originalImg.naturalWidth, originalImg.naturalHeight);
+            const best = [...predictions].sort((a, b) => b.score - a.score).find(p => p.class === 'person')
+                || [...predictions].sort((a, b) => b.score - a.score)[0];
 
-            // Clamp values to valid range (0-1)
-            centerX = Math.max(0, Math.min(1, centerX));
-            centerY = Math.max(0, Math.min(1, centerY));
+            aiDetectedSpot = {
+                x: focus.cutSpotX,
+                y: focus.cutSpotY,
+                originalWidth: originalImg.naturalWidth,
+                originalHeight: originalImg.naturalHeight
+            };
 
-            // Store AI-detected position for marker display (in original image coordinates 0-1)
-            aiDetectedSpot = { x: centerX, y: centerY, originalWidth: originalImg.naturalWidth, originalHeight: originalImg.naturalHeight };
+            document.getElementById('cutSpotX').value = focus.cutSpotX;
+            document.getElementById('cutSpotY').value = focus.cutSpotY;
 
-            // Update sliders
-            document.getElementById('cutSpotX').value = centerX;
-            document.getElementById('cutSpotY').value = centerY;
-
-            console.log(`Focus on ${detectedClass} (${(best.score * 100).toFixed(0)}%) at (${(centerX * 100).toFixed(1)}%, ${(centerY * 100).toFixed(1)}%)`);
+            console.log(`Focus on ${focus.label} (${(best.score * 100).toFixed(0)}%) at (${(focus.cutSpotX * 100).toFixed(1)}%, ${(focus.cutSpotY * 100).toFixed(1)}%)`);
             window.UpdatePreview();
         } else {
             alert("Nothing detected – try a different image.");
@@ -1312,6 +1325,98 @@ window.AutoDetectCenter = async function () {
     } finally {
         btn.innerText = "AI Auto-Center";
         btn.disabled = false;
+    }
+};
+
+function applyOptimizedSettingsToForm(opt) {
+    if (!opt) return;
+    const setVal = (id, value) => {
+        const el = document.getElementById(id);
+        if (el && value !== undefined && value !== null) el.value = value;
+    };
+    setVal('saturation', opt.colorSaturationAdjust);
+    setVal('contrast', opt.contrastAdjust);
+    setVal('blackpoint', opt.blackPointAdjust);
+    setVal('whitepoint', opt.whitePointAdjust);
+    setVal('zoom', opt.zoom);
+    setVal('dither', opt.ditherType);
+    setVal('cutSpotX', opt.cutSpotX);
+    setVal('cutSpotY', opt.cutSpotY);
+}
+
+async function loadImageFromFile(file) {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+    });
+    img._objectUrl = url;
+    return img;
+}
+
+function releaseLoadedImage(img) {
+    if (img && img._objectUrl) {
+        URL.revokeObjectURL(img._objectUrl);
+        img._objectUrl = null;
+    }
+}
+
+window.AutoOptimizeCurrentImage = async function (opts) {
+    const silent = !!(opts && opts.silent);
+    if (!currentInk || !currentFile) {
+        if (!silent) alert("Please select an image first!");
+        return;
+    }
+
+    const btn = document.getElementById('AutoOptimizeBtn');
+    const prevLabel = btn ? btn.innerText : '';
+    if (btn) {
+        btn.innerText = "⏳ Optimizing...";
+        btn.disabled = true;
+    }
+
+    try {
+        if (!detectorModel) {
+            try {
+                await LoadKIModel();
+            } catch (loadErr) {
+                if (!silent) console.warn("AI model unavailable, using histogram only:", loadErr);
+            }
+        }
+
+        const originalImg = await loadImageFromFile(currentFile);
+        const displayID = document.getElementById('displayID').value;
+        let result;
+        try {
+            result = await OptimizeImageForEink(originalImg, {
+                display: EInkDef.DISPLAYS[displayID],
+                detectorModel
+            });
+        } finally {
+            releaseLoadedImage(originalImg);
+        }
+
+        applyOptimizedSettingsToForm(result.settings);
+        if (result.focus && result.focus.label) {
+            aiDetectedSpot = {
+                x: result.settings.cutSpotX,
+                y: result.settings.cutSpotY,
+                originalWidth: originalImg.naturalWidth,
+                originalHeight: originalImg.naturalHeight
+            };
+        }
+        window.UpdatePreview();
+    } catch (err) {
+        console.error("Auto-optimize error:", err);
+        if (!silent) alert("Auto-optimize error: " + (err.message || err.toString()));
+        else window.UpdatePreview();
+    } finally {
+        if (btn) {
+            btn.innerText = prevLabel || "✨ Auto Optimize";
+            btn.disabled = false;
+        }
     }
 };
 
@@ -1639,6 +1744,7 @@ window.SetPhotoSettingsControlsEnabled = function(enabled) {
     
     const buttons = [
         'AutoSpotBtn',
+        'AutoOptimizeBtn',
         'ResetToDefault'
     ];
     
@@ -2156,86 +2262,68 @@ window.ProcessAndAddPhotos = async function () {
             
             const predictions = await detectorModel.detect(originalImg);
             URL.revokeObjectURL(imgUrl);
-            
+
+            let imageSettings = { ...settings };
             let spotX = 0.5;
             let spotY = 0.5;
+
+            if (isAutoOptimizeEnabled()) {
+                const opt = await OptimizeImageForEink(originalImg, {
+                    display: EInkDef.DISPLAYS[displayIDKey],
+                    predictions
+                });
+                imageSettings = {
+                    ...settings,
+                    ...opt.settings,
+                    displayID: displayIDKey
+                };
+                spotX = opt.settings.cutSpotX;
+                spotY = opt.settings.cutSpotY;
+            } else if (predictions.length > 0) {
+                const focus = FocusSpotFromPredictions(predictions, originalImg.naturalWidth, originalImg.naturalHeight);
+                spotX = focus.cutSpotX;
+                spotY = focus.cutSpotY;
+            }
             
-            if (predictions.length > 0) {
-                const sorted = predictions.sort((a, b) => b.score - a.score);
-                const persons = sorted.filter(p => p.class === 'person');
-                if (persons.length > 0) {
-                    const person = persons[0];
-                    const personCenterX = person.bbox[0] + (person.bbox[2] / 2);
-                    const faceY = person.bbox[1] + (person.bbox[3] * 0.25);
-                    spotX = personCenterX / originalImg.naturalWidth;
-                    spotY = faceY / originalImg.naturalHeight;
-                } else {
-                    const best = sorted[0];
-                    spotX = (best.bbox[0] + (best.bbox[2] / 2)) / originalImg.naturalWidth;
-                    spotY = (best.bbox[1] + (best.bbox[3] / 2)) / originalImg.naturalHeight;
+            const saveAspect = getSaveAspect();
+            const wantLandscape = saveAspect !== 'portrait';
+            const wantPortrait = saveAspect !== 'landscape';
+
+            const encodeAndSave = async (cutAspect, extraSave) => {
+                const ink = new EInk(file, displayIDKey);
+                await ink.Load();
+                ink.Convert(new EInkDef({
+                    ...imageSettings,
+                    cutAspect,
+                    cutSpotX: spotX,
+                    cutSpotY: spotY
+                }));
+                const encoded = await ink.Encode();
+                const dataUri = EInk.GetDataURIByBase64(encoded.toBase64());
+                const res = await new RESTX().promiseCall('saveShowImage', {
+                    show: showName,
+                    showName: showName,
+                    img: dataUri,
+                    ...(extraSave || {})
+                });
+                if (res && res.ok && res.output && res.output.imgName) {
+                    window.originalImages[res.output.imgName] = file;
+                    return res.output.imgName;
                 }
-            }
-            
-            // Step 2: Create Landscape Version (using displayId from show)
-            const landscapeInk = new EInk(file, displayIDKey);
-            await landscapeInk.Load();
-            const landscapeConvert = new EInkDef({
-                ...settings,
-                cutAspect: EInkDef.LANDSCAPE,
-                cutSpotX: spotX,
-                cutSpotY: spotY
-            });
-            landscapeInk.Convert(landscapeConvert);
-            const landscapeEncoded = await landscapeInk.Encode();
-            const landscapeB64 = landscapeEncoded.toBase64();
-            const landscapeDataUri = EInk.GetDataURIByBase64(landscapeB64);
-            
-            // Save landscape version
-            const landscapeRes = await new RESTX().promiseCall('saveShowImage', {
-                show: showName,
-                showName: showName,
-                img: landscapeDataUri
-            });
-            
-            // Get the saved landscape image name
-            let landscapeImageName = null;
-            if (landscapeRes && landscapeRes.ok && landscapeRes.output && landscapeRes.output.imgName) {
-                landscapeImageName = landscapeRes.output.imgName;
-                // Store original file for re-optimization (key: imageName, value: File)
-                window.originalImages[landscapeImageName] = file;
-            }
-            
-            // Step 3: Create Portrait Version
-            const portraitInk = new EInk(file, displayIDKey);
-            await portraitInk.Load();
-            const portraitConvert = new EInkDef({
-                ...settings,
-                cutAspect: EInkDef.PORTRAIT,
-                cutSpotX: spotX,
-                cutSpotY: spotY
-            });
-            portraitInk.Convert(portraitConvert);
-            const portraitEncoded = await portraitInk.Encode();
-            const portraitB64 = portraitEncoded.toBase64();
-            const portraitDataUri = EInk.GetDataURIByBase64(portraitB64);
-            
-            // Save portrait version with reference to landscape version
-            const savePortraitParams = {
-                show: showName,
-                showName: showName,
-                img: portraitDataUri
+                return null;
             };
-            if (landscapeImageName) {
-                savePortraitParams.referenceName = landscapeImageName;
+
+            let landscapeImageName = null;
+            if (wantLandscape) {
+                landscapeImageName = await encodeAndSave(EInkDef.LANDSCAPE);
+                if (landscapeImageName) successCount++;
             }
-            const portraitRes = await new RESTX().promiseCall('saveShowImage', savePortraitParams);
-            
-            // Store original file for portrait version too
-            if (portraitRes && portraitRes.ok && portraitRes.output && portraitRes.output.imgName) {
-                window.originalImages[portraitRes.output.imgName] = file;
+            if (wantPortrait) {
+                const extra = {};
+                if (landscapeImageName) extra.referenceName = landscapeImageName;
+                const portraitName = await encodeAndSave(EInkDef.PORTRAIT, extra);
+                if (portraitName) successCount++;
             }
-            
-            successCount += 2; // Both landscape and portrait
         } catch (err) {
             console.error(`Error processing ${file.name}:`, err);
             errorCount++;
@@ -2251,17 +2339,24 @@ window.ProcessAndAddPhotos = async function () {
     const stopBtnFinal = document.getElementById('addPhotosStopBtn');
     if (stopBtnFinal) stopBtnFinal.style.display = 'none';
     
+    const saveAspectDone = getSaveAspect();
+    const versionsHint = saveAspectDone === 'landscape'
+        ? 'landscape only'
+        : saveAspectDone === 'portrait'
+            ? 'portrait only'
+            : 'landscape + portrait';
+
     // Show final result
     progressDiv.style.display = 'none';
     if (window._stopAddPhotos) {
         messageDiv.style.background = '#f39c12';
-        messageDiv.innerText = `Processing stopped. Processed ${processedCount} of ${totalFiles} image(s). ${successCount} versions saved, ${errorCount} error(s).`;
+        messageDiv.innerText = `Processing stopped. Processed ${processedCount} of ${totalFiles} image(s). ${successCount} versions saved (${versionsHint}), ${errorCount} error(s).`;
     } else if (errorCount === 0) {
         messageDiv.style.background = '#27ae60';
-        messageDiv.innerText = `Successfully processed ${totalFiles} image(s)! ${successCount} versions saved (${totalFiles} landscape + ${totalFiles} portrait).`;
+        messageDiv.innerText = `Successfully processed ${totalFiles} image(s)! ${successCount} versions saved (${versionsHint}).`;
     } else {
         messageDiv.style.background = '#e74c3c';
-        messageDiv.innerText = `Processed ${processedCount} image(s). ${successCount} versions saved, ${errorCount} error(s).`;
+        messageDiv.innerText = `Processed ${processedCount} image(s). ${successCount} versions saved (${versionsHint}), ${errorCount} error(s).`;
     }
     
     setTimeout(() => {
@@ -3540,7 +3635,7 @@ window.QueryDeviceInfo = async function (ip) {
         const res = await new RESTX().promiseCall('getDeviceInfo', { deviceIp: ip });
         const info = res.output?.deviceInfo;
         if (info) {
-            let msg = `Device: ${info.name || '?'}\nFirmware: ${info.version || '?'}\nMAC: ${info.mac || '?'}\nDisplay: ${info.display || '?'}\nFree Heap: ${info.freeHeap ? (info.freeHeap / 1024).toFixed(1) + ' KB' : '?'}\nSketch: ${info.sketchSize ? (info.sketchSize / 1024).toFixed(0) + ' KB' : '?'}\nFree Space: ${info.freeSketchSpace ? (info.freeSketchSpace / 1024).toFixed(0) + ' KB' : '?'}`;
+            let msg = `Device: ${info.name || '?'}\nFirmware: ${info.version || '?'}${info.buildDate ? ' (' + info.buildDate + ')' : ''}\nMAC: ${info.mac || '?'}\nDisplay: ${info.display || '?'}\nFree Heap: ${info.freeHeap ? (info.freeHeap / 1024).toFixed(1) + ' KB' : '?'}\nSketch: ${info.sketchSize ? (info.sketchSize / 1024).toFixed(0) + ' KB' : '?'}\nFree Space: ${info.freeSketchSpace ? (info.freeSketchSpace / 1024).toFixed(0) + ' KB' : '?'}`;
             alert(msg);
         }
     } catch (err) {

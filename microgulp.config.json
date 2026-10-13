@@ -1,0 +1,16 @@
+{
+	"gulpfile": "gulpfile.mjs",
+	"preload": true,
+	"watchGulpfiles": true,
+	"metadataWatchFiles": [
+		"package.json",
+		"releases.json",
+		"firmware/src/main.cpp",
+		"ink-encoder/package.json"
+	],
+	"project": {
+		"title": "µPhotoFrame™",
+		"description": "WiFi-controlled E-Ink photo frame",
+		"logo": "./rawmedia/LogoPure.png"
+	}
+}

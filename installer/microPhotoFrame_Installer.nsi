@@ -1,6 +1,6 @@
 ; ===============================================================
 ; µPhotoFrame™ Installer
-; © 2026 Meinolf Amekudzi (MIT License)
+; © 2025-2026 Meinolf Amekudzi (MIT License)
 ; ===============================================================
 ;
 ; Creates a Windows installer with server type selection.

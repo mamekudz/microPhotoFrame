@@ -105,7 +105,7 @@
 	"Uploads firmware and opens the serial monitor.<context=\"µDescription\"/>": "Lädt die Firmware hoch und öffnet den seriellen Monitor.",
 	"Usage: gulp ENCODE_INK with input (optional output and config).<context=\"task log\"/>": "Aufruf: gulp ENCODE_INK mit input (optional output und config).",
 	"Version from package.json: <version/> (Win <win/>)<context=\"task log\"/>": "Version aus package.json: <version/> (Win <win/>)",
-	"Version from releases.json (last entry): <version/> (Win <win/>)<context=\"task log\"/>": "Version aus releases.json (letzter Eintrag): <version/> (Win <win/>)",
+	"Version from releases.json (first entry): <version/> (Win <win/>)<context=\"task log\"/>": "Version aus releases.json (erster Eintrag): <version/> (Win <win/>)",
 	"Which server package should be created?<context=\"task parameter\"/>": "Welches Serverpaket soll erstellt werden?",
 	"Writes favicon.ico and installer/assets/microPhotoFrame.ico.<context=\"µTooltip\"/>": "Schreibt favicon.ico und installer/assets/microPhotoFrame.ico.",
 	"Writes installers/microPhotoFrame_Setup_v<version/>.exe. Requires makensis on PATH.<context=\"µTooltip\"/>": "Schreibt installers/microPhotoFrame_Setup_v<version/>.exe. Erfordert makensis im PATH.",

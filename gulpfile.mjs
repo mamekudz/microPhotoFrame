@@ -65,7 +65,7 @@ process.chdir(PROJECT_ROOT);
 
 const RELEASES_JSON = path.join(PROJECT_ROOT, 'releases.json');
 
-/** Semver-String (x.y.z[-beta]) aus releases.json; letztes Array-Element = aktuelle Version. */
+/** Semver-String (x.y.z[-beta]) aus releases.json; erstes Array-Element = aktuelle Version. */
 function _readVersionFromReleases() {
 	if (!fs.existsSync(RELEASES_JSON)) return null;
 	let data;
@@ -75,7 +75,7 @@ function _readVersionFromReleases() {
 		Warn('releases.json: <message/> — falling back to package.json<context="task warning"/>', { message: e.message });
 		return null;
 	}
-	const entry = Array.isArray(data) ? data[data.length - 1] : data;
+	const entry = Array.isArray(data) ? data[0] : data;
 	if (!entry || typeof entry.main !== 'number') return null;
 	const minor = typeof entry.minor === 'number' ? entry.minor : 0;
 	const revision = typeof entry.revision === 'number' ? entry.revision : 0;
@@ -122,14 +122,21 @@ function _readFirmwareVersion() {
 	}
 }
 
-const INK_ENCODER_VERSION = _readInkEncoderVersion();
-const FIRMWARE_VERSION = _readFirmwareVersion();
+function _i18xValues() {
+	return {
+		version: _readVersionFromReleases() ?? PKG_VERSION,
+		project: 'µPhotoFrame™',
+		inkEncoder: _readInkEncoderVersion(),
+		firmware: _readFirmwareVersion(),
+	};
+}
 
+/** Dashboard-Platzhalter; GetValues() liefert bei jedem Scan frische Versionszahlen (µGulp 1.1). */
 export const µI18xContext = {
-	version: VERSION,
-	project: PROJECT_NAME,
-	inkEncoder: INK_ENCODER_VERSION,
-	firmware: FIRMWARE_VERSION,
+	..._i18xValues(),
+	GetValues() {
+		return _i18xValues();
+	},
 };
 
 const SERVER_TYPE_PHRASES = {
@@ -424,7 +431,7 @@ async function _buildInstaller(cb) {
 
 	const rel = _readVersionFromReleases();
 	if (rel) {
-		Log('Version from releases.json (last entry): <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
+		Log('Version from releases.json (first entry): <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
 	} else {
 		Log('Version from package.json: <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
 	}

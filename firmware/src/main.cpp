@@ -34,7 +34,11 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 
-#define FIRMWARE_VERSION "1.0.0"
+#define FIRMWARE_VERSION "1.1.0"
+
+static String firmwareVersionLabel() {
+  return String("Firmware ") + FIRMWARE_VERSION + " · " + __DATE__;
+}
 
 // MPU6050 I2C Address
 #define MPU6050_ADDR 0x68
@@ -86,6 +90,11 @@
 
 // Display ID for this device (Spectra 6 7.3" reTerminal E1002 = "I")
 #define DEVICE_DISPLAY_ID "I"
+
+// Native panel raster. Encoder (EInk.Convert/Encode) schreibt immer width×height;
+// Hochkant ist nur Inhalt um −90° auf diesem Raster, Header-Byte 3 = 1. Nicht 480×800.
+#define PANEL_NATIVE_WIDTH  800
+#define PANEL_NATIVE_HEIGHT 480
 
 // Default display rotation (0=landscape, 1=portrait, 2=landscape inverted, 3=portrait inverted)
 #define DEFAULT_DISPLAY_ROTATION 0
@@ -242,8 +251,8 @@ String serverActiveShowCached = "";
 /** Standard „Minuten bis Server wieder gilt“ im Quick-Menü (NVS qRevMin). */
 uint16_t quickMenuRevertMinutes = 60;
 
-/** NVS dSleep: zwischen Slides Deep Sleep statt nur Light Sleep (braucht gültige Uhrzeit / NTP). */
-bool configSlideshowDeepSleep = false;
+/** NVS dSleep: zwischen Slides Deep Sleep (Default an, Akku). Ohne NTP/Uhrzeit nur Leichtschlaf. */
+bool configSlideshowDeepSleep = true;
 static uint32_t g_lastImageUnix = 0;
 static uint32_t g_lastPollUnix = 0;
 static bool g_wDeepPoll = false;
@@ -439,8 +448,12 @@ void loadConfig() {
   if (rm > 1440) rm = 1440;
   quickMenuRevertMinutes = (uint16_t)rm;
   showTempOverrideUntilSessionMs = 0;
-  uint8_t ds = preferences.getUChar("dSleep", 0);
-  configSlideshowDeepSleep = (ds != 0);
+  if (!preferences.isKey("dSleep")) {
+    preferences.putUChar("dSleep", 1);
+    configSlideshowDeepSleep = true;
+  } else {
+    configSlideshowDeepSleep = (preferences.getUChar("dSleep", 1) != 0);
+  }
   g_lastImageUnix = preferences.getUInt("lstImgT", 0);
   g_lastPollUnix = preferences.getUInt("lstPolT", 0);
   preferences.end();
@@ -688,7 +701,7 @@ void handleRoot() {
   html += "<input type='password' name='password' id='password' value='" + htmlEscapeSsid(wifiPassword) + "'>";
   html += "<button type='button' class='password-toggle' onclick='togglePassword()' title='Passwort anzeigen/verbergen'>&#128065;</button>";
   html += "</div>";
-  html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://server.com:888'><br>";
+  html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://192.168.0.69:888/'><br>";
   html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888).</small><br>";
   html += "<label>Standard-Ausrichtung (ohne Lagesensor MPU6050):</label>";
   html += "<select name='def_orient' id='def_orient'>";
@@ -700,6 +713,7 @@ void handleRoot() {
   html += "<small style='color:#666;'>Bei verbautem Sensor wird die Lage automatisch erkannt; dieser Wert gilt nur ohne Sensor.</small><br>";
   html += "<button type='submit'>Speichern</button>";
   html += "</form>";
+  html += "<p style='color:#666;font-size:13px;margin-top:16px;'>" + firmwareVersionLabel() + "</p>";
   html += "<script>";
   html += "document.getElementById('ssid').addEventListener('change',function(e){";
   html += "if(e.target.value){document.getElementById('ssid_manual').value='';}";
@@ -743,6 +757,12 @@ void handleSave() {
   if (ssidIn.length() > 0 && urlIn.length() > 0) {
     wifiSSID = ssidIn;
     wifiPassword = server.hasArg("password") ? server.arg("password") : "";
+    // IIS/HTTP.sys returns 400 for "http://host:888?action=" (no path slash).
+    int _q = urlIn.indexOf('?');
+    if (_q >= 0) urlIn = urlIn.substring(0, _q);
+    int _scheme = urlIn.indexOf("://");
+    int _path = (_scheme >= 0) ? urlIn.indexOf('/', _scheme + 3) : urlIn.indexOf('/');
+    if (_path < 0) urlIn += "/";
     hostChannelUrl = urlIn;
     if (server.hasArg("def_orient")) {
       int o = server.arg("def_orient").toInt();
@@ -1057,10 +1077,17 @@ static int drawWebBrandingOnEpd(int startY) {
   return y + 12;
 }
 
+// Spectra 6 7.3" (GDEP073E01): Controller-RAM ist immer 800×480.
+// setRotation(1/2/3) dreht nur GFX-Koordinaten; der Treiber aktualisiert dann
+// unvollständig (halbes Panel Rauschen, Buchstaben wirken verdoppelt).
+static void useNativePanelRotation() {
+  display.setRotation(0);
+}
+
 // Statusmeldung auf dem E-Ink in lesbarer Größe (textSize 2, ~12 px/Zeichen)
 static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
   display.init(115200);
-  display.setRotation(currentOrientation);
+  useNativePanelRotation();
   display.setFullWindow();
   display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
@@ -1164,10 +1191,16 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
     Serial1.println(WiFi.localIP());
   }
 
-  // Primary URL (relies on server-side URL rewrite)
+  // Primary URL (relies on server-side URL rewrite).
+  // Always use a path ("/") before "?": IIS returns HTTP 400 empty for
+  // "http://host:888?action=getShows" as sent by ESP32 HTTPClient.
   String url = hostChannelUrl;
-  url += (url.indexOf('?') >= 0) ? "&" : "?";
-  url += "action=" + action;
+  int qpos = url.indexOf('?');
+  if (qpos >= 0) url = url.substring(0, qpos);
+  int scheme = url.indexOf("://");
+  int pathSlash = (scheme >= 0) ? url.indexOf('/', scheme + 3) : url.indexOf('/');
+  if (pathSlash < 0) url += "/";
+  url += "?action=" + action;
 
   Serial1.print("Requesting URL: ");
   Serial1.println(url);
@@ -1176,7 +1209,7 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
   if (response.length() > 0) return response;
 
   // Fallback: POST directly to ASPX handler (bypasses URL Rewrite)
-  if (g_lastHttpStatusCode == 405 || g_lastHttpStatusCode == 404) {
+  if (g_lastHttpStatusCode == 405 || g_lastHttpStatusCode == 404 || g_lastHttpStatusCode == 400) {
     String baseUrl = hostChannelUrl;
     if (!baseUrl.endsWith("/")) baseUrl += "/";
     String fallbackUrl = baseUrl + "aspx/microPhotoFrame.aspx?action=" + action;
@@ -1772,7 +1805,10 @@ static void displayPixels(uint8_t* result, int resIdx,
                           int displayWidth, int displayHeight, int fileOrientation,
                           bool offlineHint) {
   display.init(115200);
-  display.setRotation(fileOrientation);
+  // Pixel liegen im nativen 800×480; Hochkant steckt schon im Inhalt. setRotation(1)
+  // würde das logische Raster auf 480×800 drehen und drawPixel(x≥480) verwerfen.
+  display.setRotation(0);
+  (void)fileOrientation;
   display.fillScreen(GxEPD_WHITE);
   display.setFullWindow();
   display.firstPage();
@@ -1948,8 +1984,8 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
     return false;
   }
 
-  const int displayWidth = (orient == 0) ? 800 : 480;
-  const int displayHeight = (orient == 0) ? 480 : 800;
+  const int displayWidth = PANEL_NATIVE_WIDTH;
+  const int displayHeight = PANEL_NATIVE_HEIGHT;
   const int totalPixels = displayWidth * displayHeight;
 
   uint8_t* result = (uint8_t*)malloc(totalPixels);
@@ -2251,8 +2287,8 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
     return false;
   }
 
-  const int displayWidth = (orient == 0) ? 800 : 480;
-  const int displayHeight = (orient == 0) ? 480 : 800;
+  const int displayWidth = PANEL_NATIVE_WIDTH;
+  const int displayHeight = PANEL_NATIVE_HEIGHT;
   const int totalPixels = displayWidth * displayHeight;
 
   uint8_t* result = (uint8_t*)malloc(totalPixels);
@@ -2491,6 +2527,23 @@ int readOrientation() {
   return currentOrientation;
 }
 
+static bool inkHasOrientPrefix(const String& name) {
+  return name.length() > 1 && name.charAt(0) >= '0' && name.charAt(0) <= '3';
+}
+
+static String inkBaseName(const String& name) {
+  return inkHasOrientPrefix(name) ? name.substring(1) : name;
+}
+
+// 0 = exact orientation, 1 = same aspect family (0/2 landscape, 1/3 portrait), 2 = other
+static int inkOrientRank(char prefix, char exactWanted, char familyWanted) {
+  if (prefix == exactWanted) return 0;
+  const bool isLandscape = (prefix == '0' || prefix == '2');
+  const bool wantLandscape = (familyWanted == '0');
+  if (isLandscape == wantLandscape) return 1;
+  return 2;
+}
+
 void filterImagesByOrientation() {
   currentShowImages.clear();
   // Map orientation to image prefix character
@@ -2498,20 +2551,37 @@ void filterImagesByOrientation() {
   // 1 = portrait (90°) -> '1'
   // 2 = landscape inverted (180°) -> '2'
   // 3 = portrait inverted (270°) -> '3'
-  char orientationChar = '0' + currentOrientation;
-  
+  const char exactWanted = '0' + (currentOrientation >= 0 && currentOrientation <= 3 ? currentOrientation : 0);
+  const char familyWanted = (currentOrientation == 1 || currentOrientation == 3) ? '1' : '0';
+
   for (size_t i = 0; i < allShowImages.size(); i++) {
-    String imageName = allShowImages[i];
-    // Check if first character matches orientation
-    if (imageName.length() > 0 && imageName.charAt(0) == orientationChar) {
-      currentShowImages.push_back(imageName);
+    const String& name = allShowImages[i];
+    if (name.length() == 0) continue;
+
+    const String base = inkBaseName(name);
+    const char myPrefix = inkHasOrientPrefix(name) ? name.charAt(0) : exactWanted;
+    int bestRank = inkHasOrientPrefix(name) ? inkOrientRank(myPrefix, exactWanted, familyWanted) : 2;
+    size_t bestIndex = i;
+
+    for (size_t j = 0; j < allShowImages.size(); j++) {
+      const String& other = allShowImages[j];
+      if (other.length() == 0) continue;
+      if (inkBaseName(other) != base) continue;
+      const char op = inkHasOrientPrefix(other) ? other.charAt(0) : exactWanted;
+      const int rank = inkHasOrientPrefix(other) ? inkOrientRank(op, exactWanted, familyWanted) : 2;
+      if (rank < bestRank || (rank == bestRank && j < bestIndex)) {
+        bestRank = rank;
+        bestIndex = j;
+      }
+    }
+
+    if (bestIndex == i) {
+      currentShowImages.push_back(name);
     }
   }
 
-  // Wenn z. B. nur Hochformat-Dateien in der Show sind, das Gerät aber Quer meldet (oder umgekehrt),
-  // wäre die Liste leer obwohl Bilder existieren — dann alle Bilder verwenden (Dekodierung nutzt Dateiname/Header).
   if (currentShowImages.size() == 0 && allShowImages.size() > 0) {
-    Serial1.println("filterImagesByOrientation: keine Treffer für MPU-Ausrichtung — Fallback: alle Bilder der Show");
+    Serial1.println("filterImagesByOrientation: keine Treffer — Fallback: alle Bilder der Show");
     for (size_t i = 0; i < allShowImages.size(); i++) {
       currentShowImages.push_back(allShowImages[i]);
     }
@@ -2661,6 +2731,7 @@ void handleDeviceInfo() {
   String json = "{";
   json += "\"name\":\"microPhotoFrame\"";
   json += ",\"version\":\"" + String(FIRMWARE_VERSION) + "\"";
+  json += ",\"buildDate\":\"" + String(__DATE__) + "\"";
   json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   json += ",\"mac\":\"" + WiFi.macAddress() + "\"";
   json += ",\"freeHeap\":" + String(ESP.getFreeHeap());
@@ -2737,6 +2808,7 @@ void handleQuickMenu() {
   html += "#revertWrap{margin-top:4px;}";
   html += "#srvHint{font-size:13px;color:#9ab;margin-top:8px;line-height:1.5;display:none;}";
   html += ".timer{text-align:center;color:#e94560;font-size:13px;margin-top:12px;}";
+  html += ".ver{text-align:center;color:#8aa;font-size:12px;margin-top:14px;}";
   html += ".info{background:#0f3460;border-radius:8px;padding:12px;margin-top:16px;font-size:13px;color:#aaa;line-height:1.6;}";
   html += ".ok{background:#27ae60;border-radius:8px;padding:12px;margin-top:12px;text-align:center;display:none;line-height:1.5;}";
   html += ".err{background:#c0392b;border-radius:8px;padding:12px;margin-top:12px;text-align:center;display:none;line-height:1.5;}";
@@ -2761,8 +2833,8 @@ void handleQuickMenu() {
   html += "<label>Bildwechsel (Minuten):</label><input type='number' id='timerIn' min='1' max='1440' value='" + String(currentShowTimer) + "'>";
   html += "<label style='display:flex;align-items:flex-start;gap:10px;margin-top:14px;cursor:pointer;'>";
   html += "<input type='checkbox' id='deepSleepIn' style='width:auto;margin-top:4px;' " + String(configSlideshowDeepSleep ? "checked" : "") + ">";
-  html += "<span><b>Deep Sleep</b> zwischen den Bildern (max. Stromsparen). Erfordert <b>gültige Uhrzeit</b> (NTP nach WLAN). ";
-  html += "Ohne NTP bleibt nur Leichtschlaf aktiv.</span></label>";
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern (Standard, max. Stromsparen). Erfordert <b>gültige Uhrzeit</b> (NTP nach WLAN). ";
+  html += "Ohne NTP oder abgewählt: nur Leichtschlaf.</span></label>";
   if (!mpu6050Available) {
     html += "<label>Standard-Ausrichtung (kein Lagesensor):</label><select id='orientSel'>";
     html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
@@ -2778,7 +2850,9 @@ void handleQuickMenu() {
   html += "<div class='timer'>Dieses Men&uuml; schlie&szlig;t in <span id='cd'>" + String(remaining) + "</span>s</div>";
   html += "<div class='info'>";
   html += "<b>Tipp:</b> Roten Knopf <b>lang dr&uuml;cken</b> (5 s) = WiFi-Reset &amp; Neukonfiguration.";
-  html += "</div></div>";
+  html += "</div>";
+  html += "<div class='ver'>" + firmwareVersionLabel() + "</div>";
+  html += "</div>";
 
   html += "<script>";
   html += "let cd=" + String(remaining) + ";";
@@ -3027,7 +3101,7 @@ void enterQuickMenu() {
   Serial1.println("Quick-Menu mode active for 60 seconds");
 
   display.init(115200);
-  display.setRotation(currentOrientation);
+  useNativePanelRotation();
   display.setFullWindow();
   display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
@@ -3062,6 +3136,9 @@ void enterQuickMenu() {
   y += 18;
   display.setCursor(m, y);
   display.print("= WLAN-Reset & Neukonfiguration");
+  y += 28;
+  display.setCursor(m, y);
+  display.print(firmwareVersionLabel());
 
   display.display(false);
 }
@@ -3185,18 +3262,10 @@ void setup() {
           Serial1.println(startupFiles[i]);
           String filename = startupFiles[i];
           filename.replace("/", "");
-          if (i == 2) {
-            display.setRotation(1);
-            Serial1.println("Showing startup image (portrait)...");
-          } else {
-            display.setRotation(DEFAULT_DISPLAY_ROTATION);
-            Serial1.println("Showing startup image (landscape)...");
-          }
+          useNativePanelRotation();
+          Serial1.println(i == 2 ? "Showing startup image (portrait)..." : "Showing startup image (landscape)...");
           if (decodeAndDisplayInk(filename)) {
             startupShown = true;
-            if (i == 2) {
-              display.setRotation(DEFAULT_DISPLAY_ROTATION);
-            }
           }
         }
       }
@@ -3290,7 +3359,8 @@ void setup() {
   if (connectWiFi()) {
     wifiConnected = true;
     
-    showStatusScreen("Connected to WiFi", "Loading show...");
+    if (!g_wDeepImg && !g_wDeepPoll)
+      showStatusScreen("Connected to WiFi", "Loading show...");
     
     // Get active show (mit Retry falls Server beim ersten Versuch noch nicht antwortet)
     bool showFound = false;
@@ -3593,7 +3663,7 @@ void loop() {
     displayNextImage();
   }
 
-  // Deep Sleep (optional, NVS dSleep) oder Leichtschlaf zwischen Slides/Poll
+  // Deep Sleep (Default, NVS dSleep) oder Leichtschlaf zwischen Slides/Poll
   if (!configMode && !quickMenuMode && wifiConnected && WiFi.status() == WL_CONNECTED
       && currentShowImages.size() > 0) {
     if (configSlideshowDeepSleep) {

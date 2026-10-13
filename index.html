@@ -37,7 +37,7 @@
                 </select>
             </div>
         </div>
-        <span class="copyright">© 1986-2026 Meinolf Amekudzi</span>
+        <span class="copyright">© 2025-2026 Meinolf Amekudzi</span>
     </header>
 
     <div id="TopMenu" class="page">
@@ -75,7 +75,13 @@
             <div class="control-row"><label>Spot Y:</label><input type="range" id="cutSpotY" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotY">0.5</span></div>
 
             <button id="AutoSpotBtn" class="btn-action ai-btn" onclick="window.AutoDetectCenter()">AI Auto-Center</button>
+            <button id="AutoOptimizeBtn" class="btn-action ai-btn" onclick="window.AutoOptimizeCurrentImage()">✨ Auto Optimize</button>
             <button class="btn-action reset-btn" onclick="window.ResetToDefault()">🔄 Reset to Default</button>
+            <div class="control-row" style="align-items:center; margin-top:8px;">
+                <label for="autoOptimize">Auto-optimize:</label>
+                <input type="checkbox" id="autoOptimize" checked onchange="window.SyncAutoOptimize('autoOptimize')" />
+            </div>
+            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;">Per image, locally: histogram plus AI subject, tuned for the selected display. No cloud.</p>
 
             <hr>
             <div class="control-row"><label>Dithering:</label>
@@ -91,6 +97,14 @@
                     <option value="-1">Portrait</option>
                 </select>
             </div>
+            <div class="control-row"><label>Save versions:</label>
+                <select id="saveAspect" onchange="window.SyncSaveAspect('saveAspect')" style="flex:1">
+                    <option value="both">Landscape and portrait</option>
+                    <option value="landscape">Landscape only</option>
+                    <option value="portrait">Portrait only</option>
+                </select>
+            </div>
+            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;">When adding photos, only the chosen aspect is stored. The frame uses that one file in every orientation.</p>
         </div>
 
         <div class="preview-container">
@@ -191,8 +205,19 @@
         <div class="controls">
             <button class="btn-action ai-btn" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 Dateien auswählen</button>
             <input type="file" id="addPhotosInput" accept="image/*" multiple class="file-input-hidden" />
+            <div class="control-row"><label>Save versions:</label>
+                <select id="saveAspectAdd" onchange="window.SyncSaveAspect('saveAspectAdd')" style="flex:1">
+                    <option value="both">Landscape and portrait</option>
+                    <option value="landscape">Landscape only</option>
+                    <option value="portrait">Portrait only</option>
+                </select>
+            </div>
+            <div class="control-row" style="align-items:center;">
+                <label for="autoOptimizeAdd">Auto-optimize each image:</label>
+                <input type="checkbox" id="autoOptimizeAdd" checked onchange="window.SyncAutoOptimize('autoOptimizeAdd')" />
+            </div>
             <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Select multiple images. Each image will be processed with AI spot detection and converted to both landscape and portrait versions using current Photo Settings.
+                Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.
             </p>
             <button id="btnProcessAndAddPhotos" class="btn-action save-btn" onclick="window.ProcessAndAddPhotos()">📸 Process and Add Photos</button>
             <div id="addPhotosMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
