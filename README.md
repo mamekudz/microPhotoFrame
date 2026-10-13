@@ -9,6 +9,14 @@
 
 **An intelligent, remote-controlled photo frame firmware for reTerminal E1001 (Grayscale) & E1002 (Full Color)**
 
+<p align="center">
+  <a href="https://microgulp.dev/en/ready/">
+    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
+  </a>
+</p>
+
+<p align="center">Development/build Gulp tasks are <a href="https://microgulp.dev/en/ready/">µGulp™ Ready</a> — details under <a href="#-development-gulp-tasks-µgulptm">Development Gulp tasks</a>.</p>
+
 ---
 
 ## 🌍 Languages / Sprachen
@@ -176,6 +184,14 @@ MIT License - see [LICENSE](LICENSE) for details
 # µPhotoFrame™ - WiFi-basierter E-Ink-Fotorahmen für reTerminal
 
 **Intelligente, ferngesteuerte Bilderrahmen-Firmware für reTerminal E1001 (Graustufen) und E1002 (Vollfarbe)**
+
+<p align="center">
+  <a href="https://microgulp.dev/de/ready/">
+    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
+  </a>
+</p>
+
+<p align="center">Die Entwicklungs-/Build-Gulp-Tasks sind <a href="https://microgulp.dev/de/ready/">µGulp™ Ready</a> — Details unter <a href="#-entwicklungs-gulp-tasks-µgulptm">Entwicklungs-Gulp-Tasks</a>.</p>
 
 ---
 
