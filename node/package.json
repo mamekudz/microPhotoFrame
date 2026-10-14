@@ -1,6 +1,6 @@
 {
   "name": "microPhotoFrame-server",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "microPhotoFrame Node.js Express Server",
   "main": "server.js",
   "scripts": {
@@ -9,6 +9,11 @@
   },
   "keywords": [
     "microPhotoFrame",
+    "neoframe",
+    "goodisplay",
+    "reterminal",
+    "e1002",
+    "e-ink",
     "express",
     "server"
   ],

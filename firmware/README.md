@@ -1,6 +1,6 @@
 # µPhotoFrame™ Firmware
 
-ESP32-S3 Firmware für WiFi-basierte E-Ink Bilderrahmen (reTerminal E1001 & E1002)
+ESP32-S3 Firmware für WiFi-basierte E-Ink Bilderrahmen (reTerminal E1001/E1002 und GooDisplay NeoFrame)
 
 ## 🚀 Quick Start - Firmware Flashen
 
@@ -70,9 +70,20 @@ esptool.py --chip esp32s3 --port COM9 --baud 460800 \
 - **Auflösung:** 800×480
 - **Farben:** Schwarz, Weiß, Rot, Gelb, Blau, Grün
 - **Display ID:** `I`
+- **MCU:** Seeed XIAO ESP32-S3
+
+### NeoFrame (GooDisplay GDP073EW1)
+- **Display:** gleiches Spectra-6-7,3"-Panel GDEP073E01
+- **Auflösung:** 800×480
+- **Display ID:** `I` (gleiche Shows wie E1002)
+- **MCU:** ESP32-S3 (Herstellerangabe)
+- **Lagesensor:** keiner (kein MPU6050)
+- **Taster:** keine am Holzrahmen — Bedienung nur über WLAN/Web
+- **Pinmap:** ESP32E6-E01-Datenblatt (EPD 11/12/2/3/4/5, SD 48/47/13/21, Taster 42/41/46) — am Gerät prüfen
+- **Factory-Restore:** `firmware/factory/neoframe/` (`factory.bin` oder `GDEPE073E01.ino.merged.bin` nach `0x0`)
 
 ### ESP32-S3 MCU
-- **Board:** Seeed XIAO ESP32-S3
+- **Board (E1002):** Seeed XIAO ESP32-S3
 - **RAM:** 320KB
 - **Flash:** 8MB
 - **WiFi:** 802.11 b/g/n
@@ -145,12 +156,23 @@ pio device monitor --raw
 
 ### Build-Environments
 
-Die `platformio.ini` definiert verschiedene Build-Targets:
+Ziele wählt man im µGulp-Projektformular (**Target**): `reTerminal E1002` oder `NeoFrame`.  
+Gulp filtert `firmware/src` nach `firmware/.generated` (`gulp-mu-build-filter`, `BUILD_ONLY_AT_PLATFORMS`, `mode: remove`) und ruft `pio run -e …` auf.
+
+Board-Header: `firmware/src/board.h` plus `firmware/src/boards/<id>.h`.  
+E1002-Pins stehen nur im Block `reterminal-e1002`. NeoFrame nutzt die offizielle ESP32E6-E01-Pinmap (GDEP073E01, Display-ID `I`), 8 MB PSRAM und nach dem Einschalten 5 Minuten das offene Config-WLAN `microPhotoFrame`. Factory-Restore bleibt für das Hersteller-Image.
+
+Factory-Image bei fehlgeschlagenem Flash: `firmware/factory/<ziel>/factory.bin` (oder `GDEPE073E01.ino.merged.bin` / `*.ino.merged.bin`) und Task **Restore Factory Firmware**.
 
 ```ini
 [env:seeed_xiao_esp32s3]
 platform = espressif32
 board = seeed_xiao_esp32s3
+framework = arduino
+
+[env:neoframe]
+platform = espressif32
+board = esp32-s3-devkitc-1
 framework = arduino
 ```
 
@@ -160,7 +182,7 @@ Für verschiedene Displays die `DEVICE_DISPLAY_ID` in `main.cpp` ändern:
 
 ```cpp
 // Display ID for this device
-#define DEVICE_DISPLAY_ID "I"  // reTerminal E1002 (Spectra 6)
+#define DEVICE_DISPLAY_ID "I"  // Spectra 6 7.3" · E1002 / NeoFrame
 // #define DEVICE_DISPLAY_ID "D"  // reTerminal E1001 (Grayscale)
 ```
 

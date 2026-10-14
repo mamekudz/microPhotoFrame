@@ -55,7 +55,7 @@ export default class EInkDef {
     // ═══════════════════════════════════════════════════════════
     EINK_SPECTRA6_169_rd_400x400: { id: "G", name: 'Spectra 6 · 1.69" Round · 400×400', width: 400, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_ROUND, size: 1.69 },
     EINK_SPECTRA6_400_sq_600x400: { id: "H", name: 'Spectra 6 · 4.0" · 600×400', width: 600, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 4.0 },
-    EINK_SPECTRA6_730_sq_800x480: { id: "I", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002', width: 800, height: 480, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 7.3 },
+    EINK_SPECTRA6_730_sq_800x480: { id: "I", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame', width: 800, height: 480, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 7.3 },
     EINK_SPECTRA6_814_sq_1024x576: { id: "J", name: 'Spectra 6 · 8.14" · 1024×576', width: 1024, height: 576, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 8.14 },
     EINK_SPECTRA6_1330_sq_1600x1200: { id: "K", name: 'Spectra 6 · 13.3" · 1600×1200', width: 1600, height: 1200, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 13.3 },
     EINK_SPECTRA6_2530_sq_3200x1800: { id: "L", name: 'Spectra 6 · 25.3" · 3200×1800 · Signage', width: 3200, height: 1800, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 25.3 },

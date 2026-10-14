@@ -40,6 +40,7 @@ import {
 	ResolveInkEncoderDir,
 	SanitizeNpmOtp,
 } from './tools/ink-encoder-release.mjs';
+import { createRequire } from 'node:module';
 import {
 	ReportProgress,
 	CreateProgress,
@@ -55,6 +56,14 @@ import {
 	RequestSelectInput,
 	RequestForm,
 } from 'gulp-mu-gulp-api';
+import {
+	buildFilterPlatformOptions,
+	platformMeta,
+	resolveActivePlatform,
+	resolveFactoryFlashPlan,
+} from './tools/photoframe-platforms.mjs';
+
+const require = createRequire(import.meta.url);
 
 InstallStringExtensions();
 
@@ -129,6 +138,7 @@ function _i18xValues() {
 		project: 'µPhotoFrame™',
 		inkEncoder: _readInkEncoderVersion(),
 		firmware: _readFirmwareVersion(),
+		target: platformMeta(resolveActivePlatform()).shortName,
 	};
 }
 
@@ -152,7 +162,8 @@ const INSTALLERS_DIR = './installers';
 const TMP_DIR = './tmp';
 
 const PACKAGE_TASKS = ['BUILD_SERVER_PACKAGES', 'BUILD_ALL_SERVER_PACKAGES', 'BUILD_INSTALLER'];
-const FIRMWARE_IO_TASKS = ['FIRMWARE_UPLOAD', 'FIRMWARE_UPLOAD_MONITOR', 'FIRMWARE_MONITOR'];
+const FIRMWARE_IO_TASKS = ['FIRMWARE_UPLOAD', 'FIRMWARE_UPLOAD_MONITOR', 'FIRMWARE_MONITOR', 'FIRMWARE_RESTORE_FACTORY'];
+const FIRMWARE_DIR = path.join(PROJECT_ROOT, 'firmware');
 const INK_RELEASE_TASKS = ['COMMIT_INK_ENCODER', 'PUBLISH_INK_ENCODER'];
 
 const SERVER_TYPE_PARAMETERS = [
@@ -477,12 +488,45 @@ async function _buildInstaller(cb) {
 // FIRMWARE TASKS (PlatformIO)
 // ==============================================
 
+function _activeFirmwareMeta() {
+	const platform = resolveActivePlatform();
+	return { platform, ...platformMeta(platform) };
+}
+
+async function _prepareFirmwareSources() {
+	const meta = _activeFirmwareMeta();
+	const dest = path.join(FIRMWARE_DIR, '.generated');
+	fs.rmSync(dest, { recursive: true, force: true });
+	fs.mkdirSync(dest, { recursive: true });
+	const µBuildFilter = require('gulp-mu-build-filter');
+	await new Promise((resolve, reject) => {
+		gulp.src(['firmware/src/**/*'], { base: 'firmware/src' })
+			.pipe(µBuildFilter({ ...buildFilterPlatformOptions(meta.platform), protocol: false }))
+			.pipe(gulp.dest(dest))
+			.on('end', resolve)
+			.on('error', reject);
+	});
+	Log('Firmware sources prepared for <label/> (<id/>).<context="task log"/>', {
+		label: meta.label,
+		id: meta.platform,
+	});
+	return meta;
+}
+
+function _pioArgs(extra = []) {
+	const meta = _activeFirmwareMeta();
+	return ['run', '-e', meta.pioEnv, ...extra];
+}
+
 async function _firmwareBuild(cb) {
 	Log('Building firmware…<context="task section"/>');
 	const progress = CreateProgress(Translate('Firmware<context="task log"/>'));
-	progress.Update(0.15);
+	progress.Update(0.1);
 	try {
-		await _spawn('pio', ['run'], { cwd: path.resolve('.') });
+		const meta = await _prepareFirmwareSources();
+		progress.Update(0.35);
+		Log('Building <label/> (<env/>)…<context="task log"/>', { label: meta.label, env: meta.pioEnv });
+		await _spawn('pio', _pioArgs(), { cwd: FIRMWARE_DIR });
 		progress.Done();
 		Log('Firmware build successful.<context="task log"/>');
 		cb();
@@ -495,9 +539,11 @@ async function _firmwareBuild(cb) {
 async function _firmwareUpload(cb) {
 	Log('Uploading firmware…<context="task section"/>');
 	await _killSerialMonitors();
-	ReportProgress(0.2, Translate('Uploading firmware…<context="task log"/>'));
+	ReportProgress(0.1, Translate('Uploading firmware…<context="task log"/>'));
 	try {
-		await _spawn('pio', ['run', '-t', 'upload']);
+		await _prepareFirmwareSources();
+		ReportProgress(0.35);
+		await _spawn('pio', _pioArgs(['-t', 'upload']), { cwd: FIRMWARE_DIR });
 		ReportProgress(1);
 		Log('Firmware upload successful.<context="task log"/>');
 		cb();
@@ -511,10 +557,11 @@ async function _firmwareUploadMonitor(cb) {
 	Log('Uploading firmware and starting monitor…<context="task section"/>');
 	await _killSerialMonitors();
 	try {
-		await _spawn('pio', ['run', '-t', 'upload']);
+		await _prepareFirmwareSources();
+		await _spawn('pio', _pioArgs(['-t', 'upload']), { cwd: FIRMWARE_DIR });
 		Log('Upload successful. Starting monitor…<context="task log"/>');
 		await new Promise((r) => setTimeout(r, 2000));
-		await _spawn('pio', ['device', 'monitor']);
+		await _spawn('pio', ['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv], { cwd: FIRMWARE_DIR });
 		cb();
 	} catch (err) {
 		LogError('Firmware upload/monitor failed: <message/><context="task error"/>', { message: err.message });
@@ -525,10 +572,54 @@ async function _firmwareUploadMonitor(cb) {
 async function _firmwareMonitor(cb) {
 	Log('Starting serial monitor…<context="task section"/>');
 	try {
-		await _spawn('pio', ['device', 'monitor']);
+		await _spawn('pio', ['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv], { cwd: FIRMWARE_DIR });
 		cb();
 	} catch (err) {
 		LogError('Monitor failed: <message/><context="task error"/>', { message: err.message });
+		cb(err);
+	}
+}
+
+async function _firmwareRestoreFactory(cb) {
+	const meta = _activeFirmwareMeta();
+	Log('Restoring factory firmware for <label/>…<context="task section"/>', { label: meta.label });
+	const explicit = String(GetParameter('binary', '') || '').trim();
+	const port = String(GetParameter('port', '') || '').trim();
+	let plan;
+	try {
+		plan = resolveFactoryFlashPlan(PROJECT_ROOT, meta.platform, explicit || undefined);
+	} catch (err) {
+		LogError('Factory restore failed: <message/><context="task error"/>', { message: err.message });
+		cb(err);
+		return;
+	}
+	if (!plan) {
+		const hint = path.join('firmware', 'factory', meta.platform, 'factory.bin');
+		const err = new Error(`No factory image for ${meta.label}. Put a dump at ${hint} (or GDEPE073E01.ino.merged.bin) or pick a .bin in the task form.`);
+		LogError('Factory restore failed: <message/><context="task error"/>', { message: err.message });
+		cb(err);
+		return;
+	}
+
+	await _killSerialMonitors();
+	const args = ['--chip', plan.chip];
+	if (port) args.push('--port', port);
+	args.push('write_flash');
+	for (const part of plan.parts) {
+		args.push(part.offset, part.file);
+		Log('Flash <offset/> ← <file/><context="task log"/>', { offset: part.offset, file: part.file });
+	}
+
+	try {
+		try {
+			await _spawn('esptool.py', args);
+		} catch {
+			await _spawn('python', ['-m', 'esptool', ...args]);
+		}
+		Log('Factory firmware restored for <label/>.<context="task log"/>', { label: meta.label });
+		cb();
+	} catch (err) {
+		LogError('Factory restore failed: <message/><context="task error"/>', { message: err.message });
 		cb(err);
 	}
 }
@@ -962,6 +1053,7 @@ export {
 	_firmwareUpload            as FIRMWARE_UPLOAD,
 	_firmwareUploadMonitor     as FIRMWARE_UPLOAD_MONITOR,
 	_firmwareMonitor           as FIRMWARE_MONITOR,
+	_firmwareRestoreFactory    as FIRMWARE_RESTORE_FACTORY,
 	_encodeInk                 as ENCODE_INK,
 	_buildIco                  as BUILD_ICO,
 	_copyRawmediaToWebassets   as COPY_RAWMEDIA_WEBASSETS,
@@ -1007,9 +1099,9 @@ _fetchInstallerRedistributables.µGroup = 'Build/Installer<context="µGroup"/>'.
 _fetchInstallerRedistributables.µIcon = '\uE902';
 _fetchInstallerRedistributables.µOrder = 40;
 
-_firmwareBuild.µDisplayName = 'Build Firmware V<firmware/><context="µDisplayName"/>'.i18xRegister();
-_firmwareBuild.µDescription = 'Compiles the PlatformIO firmware (pio run).<context="µDescription"/>'.i18xRegister();
-_firmwareBuild.µTooltip = 'Requires PlatformIO CLI (pio) on PATH.<context="µTooltip"/>'.i18xRegister();
+_firmwareBuild.µDisplayName = 'Build Firmware V<firmware/> · <target/><context="µDisplayName"/>'.i18xRegister();
+_firmwareBuild.µDescription = 'Filters sources for the selected Target, then compiles with PlatformIO.<context="µDescription"/>'.i18xRegister();
+_firmwareBuild.µTooltip = 'Target comes from the µGulp project form (or PHOTOFRAME_PLATFORM). Requires pio on PATH.<context="µTooltip"/>'.i18xRegister();
 _firmwareBuild.µGroup = 'Firmware<context="µGroup"/>'.i18xRegister();
 _firmwareBuild.µIcon = '\uE916';
 _firmwareBuild.µOrder = 10;
@@ -1050,6 +1142,32 @@ _firmwareMonitor.µOrder = 40;
 _firmwareMonitor.µExecutionConcurrency = false;
 _firmwareMonitor.µExecutionRestrictions = { deny: FIRMWARE_IO_TASKS.filter((n) => n !== 'FIRMWARE_MONITOR') };
 _firmwareMonitor.µAutoClose = -1;
+
+_firmwareRestoreFactory.µDisplayName = 'Restore Factory Firmware · <target/><context="µDisplayName"/>'.i18xRegister();
+_firmwareRestoreFactory.µDescription = 'Writes the stock image for the selected Target if a custom flash fails.<context="µDescription"/>'.i18xRegister();
+_firmwareRestoreFactory.µTooltip = 'Uses firmware/factory/<target>/factory.bin, a manifest.json, or a .bin picked in the form.<context="µTooltip"/>'.i18xRegister();
+_firmwareRestoreFactory.µGroup = 'Firmware<context="µGroup"/>'.i18xRegister();
+_firmwareRestoreFactory.µIcon = '\uE917';
+_firmwareRestoreFactory.µOrder = 50;
+_firmwareRestoreFactory.µExecutionConcurrency = false;
+_firmwareRestoreFactory.µExecutionRestrictions = { deny: FIRMWARE_IO_TASKS.filter((n) => n !== 'FIRMWARE_RESTORE_FACTORY') };
+_firmwareRestoreFactory.µParameters = [
+	{
+		id: 'binary',
+		type: 'file',
+		required: false,
+		accept: '.bin',
+		label: 'Factory .bin (optional)<context="task parameter"/>'.i18xRegister(),
+		placeholder: 'firmware/factory/<target>/factory.bin<context="task parameter"/>'.i18xRegister(),
+	},
+	{
+		id: 'port',
+		type: 'text',
+		required: false,
+		label: 'Serial port (optional)<context="task parameter"/>'.i18xRegister(),
+		placeholder: 'COM14<context="task parameter"/>'.i18xRegister(),
+	},
+];
 
 _encodeInk.µDisplayName = 'Encode INK<context="µDisplayName"/>'.i18xRegister();
 _encodeInk.µDescription = 'Encodes PNG/JPEG images to .ink using ink-encoder.<context="µDescription"/>'.i18xRegister();

@@ -1,6 +1,19 @@
 [
 	{
 		"main": 1,
+		"minor": 2,
+		"revision": 0,
+		"date": "2026-10-14 17:30",
+		"beta": false,
+		"info": [
+			"NeoFrame (GooDisplay GDP073EW1 / GDEP073E01) is a first-class firmware target with the same Spectra 6 display ID I as the reTerminal E1002.",
+			"NeoFrame uses the official ESP32E6-E01 pin map, 8 MB PSRAM for 800×480 decode, and a 5-minute open config AP after power-on (no buttons).",
+			"Random slideshow plays every image once per cycle; very large shows fall back safely.",
+			"Factory restore for the vendor NeoFrame image."
+		]
+	},
+	{
+		"main": 1,
 		"minor": 1,
 		"revision": 0,
 		"date": "2026-10-13 11:35",

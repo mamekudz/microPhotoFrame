@@ -11,6 +11,28 @@
 	"project": {
 		"title": "µPhotoFrame™",
 		"description": "WiFi-controlled E-Ink photo frame",
-		"logo": "./rawmedia/LogoPure.png"
+		"logo": "./rawmedia/LogoPure.png",
+		"controls": [
+			{
+				"id": "platform",
+				"type": "radio",
+				"label": "Target",
+				"default": "reterminal-e1002",
+				"tooltip": "Hardware target for build, upload, and factory restore",
+				"icon": "build",
+				"options": [
+					{
+						"value": "reterminal-e1002",
+						"label": "reTerminal E1002",
+						"tooltip": "Seeed reTerminal E1002 · XIAO ESP32-S3 · Spectra 6 7.3\" 800×480"
+					},
+					{
+						"value": "neoframe",
+						"label": "NeoFrame",
+						"tooltip": "GooDisplay NeoFrame GDP073EW1 · ESP32-S3 · Spectra 6 7.3\" 800×480 (GDEP073E01)"
+					}
+				]
+			}
+		]
 	}
 }

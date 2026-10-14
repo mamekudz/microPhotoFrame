@@ -1,21 +1,19 @@
 <center>
   <img src="rawmedia/LogoPure.png" alt="microPhotoFrameLogo" width="200">
   <br>
+  <a href="https://microgulp.dev/en/ready/">
+    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
+  </a>
+  <br>
   <img src="assets/imgs/LogoText.png" alt="microPhotoFrameLogoText" width="300">
 </center>
 <br><br>
 
-# µPhotoFrame™ - WiFi-based E-Ink Photo Frame for reTerminal
+# µPhotoFrame™ - WiFi-based E-Ink Photo Frame
 
-**An intelligent, remote-controlled photo frame firmware for reTerminal E1001 (Grayscale) & E1002 (Full Color)**
+**An intelligent, remote-controlled photo frame firmware for reTerminal E1001/E1002 and GooDisplay NeoFrame (GDP073EW1)**
 
-<p align="center">
-  <a href="https://microgulp.dev/en/ready/">
-    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
-  </a>
-</p>
-
-<p align="center">Development/build Gulp tasks are <a href="https://microgulp.dev/en/ready/">µGulp™ Ready</a> — details under <a href="#-development-gulp-tasks-µgulptm">Development Gulp tasks</a>.</p>
+**Keywords:** NeoFrame, GDP073EW1, GDEP073E01, GooDisplay, reTerminal, E1002, E1001, Spectra 6, E-Ink, e-paper, ESP32-S3, photo frame, µPhotoFrame
 
 ---
 
@@ -34,12 +32,13 @@
 
 ### ✨ Features
 
-This project includes photo frame firmware for the reTerminal E1001/E1002, as well as a server application for managing and preparing photo albums with several special features:
+This project includes photo frame firmware for the reTerminal E1001/E1002 and GooDisplay NeoFrame (GDP073EW1), as well as a server application for managing and preparing photo albums with several special features:
 
 #### 🖼️ Display Support
 - ✅ **reTerminal E1001:** 7.5" Grayscale (4-Level)
 - ✅ **reTerminal E1002:** 7.3" Spectra 6 (Full Color)
-- ✅ **Auto-Rotation:** MPU6050 sensor support for automatic orientation detection
+- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7.3" 800×480 (GDEP073E01, display ID `I`, same shows as E1002)
+- ✅ **Auto-Rotation (E1002):** MPU6050 sensor support; NeoFrame has no accelerometer
 - ✅ **Low Power:** Optimized for E-Ink displays with configurable rest periods
 
 #### 📡 WiFi Management
@@ -67,9 +66,9 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, as we
 - ✅ No database server required (JSON-based)
 
 #### 🎛️ User Controls
-- ✅ Hardware buttons for next/previous image
-- ✅ Mode selection via buttons
-- ✅ WiFi reconfiguration (hold both buttons for 1 second)
+- ✅ Hardware buttons on reTerminal for next/previous image and mode
+- ✅ WiFi reconfiguration on reTerminal (hold both buttons for 1 second)
+- ✅ **NeoFrame (no buttons):** 5-minute open AP `microPhotoFrame` after power-on → `http://192.168.4.1/`, or the config page on the home-LAN IP
 - ✅ Low battery warning display
 
 ### 🚀 Quick Start
@@ -79,9 +78,9 @@ The easiest way for end users:
 
 **👉 [Open Web Flasher](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
-1. Connect reTerminal via USB
-2. Click "Firmware Installieren"
-3. Select COM port
+1. Connect **reTerminal** (native USB) or **NeoFrame** (USB-A / CH340) via USB
+2. In µGulp choose **Target** `reTerminal E1002` or `NeoFrame`, then upload
+3. Select the matching COM port
 4. Wait until complete (~2 minutes)
 
 More options: [Firmware README](firmware/README.md)
@@ -164,7 +163,7 @@ The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParamete
 
 **NAS backup is a mirror with deletions, not a versioned backup.** Extra files on the destination are removed. Regenerable trees (`node_modules`, `dist`, `tmp`, `.pio`, …) are not copied; leftovers with those names are deleted **inside the destination only**. `lib` / `build` are excluded only as project-root (and `firmware/lib`) paths so vendored `src/libs` is kept. Drive/share roots and destinations that are the project folder, a parent, or a child of it are refused. Junctions/symlinks that point outside the destination are not followed for deletion.
 
-`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO. `µWatch` is dashboard-only; on the CLI run the task again after edits.
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO for the µGulp **Target** (`reTerminal E1002` or `NeoFrame`). `FIRMWARE_RESTORE_FACTORY` writes a stock image at `0x0` when one is present under `firmware/factory/<target>/`. `µWatch` is dashboard-only; on the CLI run the task again after edits.
 
 **Checked on 2026-09-18** (this workstation: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP dashboard (`microgulp-serve --http`) `ENCODE_INK` parameter form, successful synthetic PNG→`.ink` (`DONE 100%`, visible log), and a missing-file failure (`No files found`). CLI the same day: `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` success and missing-input abort. `node --test tools/nas-backup.test.mjs`. **Not claimed as tested here:** µWatch arming, `LogTable` after server packages, firmware flash, live NAS backup, `npm publish`.
 
@@ -181,17 +180,11 @@ MIT License - see [LICENSE](LICENSE) for details
 <a name="deutsch"></a>
 ## 📖 Deutsch
 
-# µPhotoFrame™ - WiFi-basierter E-Ink-Fotorahmen für reTerminal
+# µPhotoFrame™ - WiFi-basierter E-Ink-Fotorahmen
 
-**Intelligente, ferngesteuerte Bilderrahmen-Firmware für reTerminal E1001 (Graustufen) und E1002 (Vollfarbe)**
+**Intelligente, ferngesteuerte Bilderrahmen-Firmware für reTerminal E1001/E1002 und GooDisplay NeoFrame (GDP073EW1)**
 
-<p align="center">
-  <a href="https://microgulp.dev/de/ready/">
-    <img src="https://microgulp.dev/assets/media/microgulp-ready.png" alt="µGulp Ready" width="110">
-  </a>
-</p>
-
-<p align="center">Die Entwicklungs-/Build-Gulp-Tasks sind <a href="https://microgulp.dev/de/ready/">µGulp™ Ready</a> — Details unter <a href="#-entwicklungs-gulp-tasks-µgulptm">Entwicklungs-Gulp-Tasks</a>.</p>
+**Suchbegriffe:** NeoFrame, GDP073EW1, GDEP073E01, GooDisplay, reTerminal, E1002, E1001, Spectra 6, E-Ink, E-Paper, ESP32-S3, Fotorahmen, µPhotoFrame
 
 ---
 
@@ -200,12 +193,13 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ### ✨ Funktionen
 
-Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002, sowie eine Server-Applikation für die Verwaltung und Aufbereitung von Fotoalben mit einigen Besonderheiten:
+Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002 und GooDisplay NeoFrame (GDP073EW1), sowie eine Server-Applikation für die Verwaltung und Aufbereitung von Fotoalben mit einigen Besonderheiten:
 
 #### 🖼️ Display-Unterstützung
 - ✅ **reTerminal E1001:** 7,5" Graustufen (4-Level)
 - ✅ **reTerminal E1002:** 7,3" Spectra 6 (Vollfarbe)
-- ✅ **Auto-Rotation:** MPU6050 Sensor für automatische Orientierungserkennung
+- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7,3" 800×480 (GDEP073E01, Display-ID `I`, dieselben Shows wie E1002)
+- ✅ **Auto-Rotation (E1002):** MPU6050; NeoFrame hat keinen Beschleunigungssensor
 - ✅ **Stromsparend:** Optimiert für E-Ink Displays mit konfigurierbaren Ruhezeiten
 
 #### 📡 WiFi-Verwaltung
@@ -233,9 +227,9 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 - ✅ Kein Datenbank-Server erforderlich (JSON-basiert)
 
 #### 🎛️ Bedienelemente
-- ✅ Hardware-Tasten für nächstes/vorheriges Bild
-- ✅ Modus-Auswahl über Tasten
-- ✅ WiFi-Neukonfiguration (beide Tasten 1 Sekunde halten)
+- ✅ Hardware-Tasten am reTerminal für nächstes/vorheriges Bild und Modus
+- ✅ WiFi-Neukonfiguration am reTerminal (beide Tasten 1 Sekunde halten)
+- ✅ **NeoFrame (ohne Taster):** 5 Minuten offenes WLAN `microPhotoFrame` nach dem Einschalten → `http://192.168.4.1/`, sonst die Config-Seite unter der Heimnetz-IP
 - ✅ Akkustand-Warnung bei niedrigem Ladestand
 
 ### 🚀 Schnellstart
@@ -245,9 +239,9 @@ Der einfachste Weg für Endanwender:
 
 **👉 [Web-Flasher öffnen](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
-1. reTerminal via USB verbinden
-2. "Firmware Installieren" klicken
-3. COM-Port auswählen
+1. **reTerminal** (natives USB) oder **NeoFrame** (USB-A / CH340) per USB verbinden
+2. In µGulp **Target** `reTerminal E1002` oder `NeoFrame` wählen, dann hochladen
+3. Passenden COM-Port auswählen
 4. Warten bis fertig (~2 Minuten)
 
 Weitere Optionen: [Firmware README](firmware/README.md)
@@ -337,7 +331,7 @@ Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: 
 
 **Die NAS-Sicherung ist eine Spiegelung mit Löschungen, kein versioniertes Backup.** Überzählige Dateien am Ziel werden entfernt. Reproduzierbare Bäume (`node_modules`, `dist`, `tmp`, `.pio`, …) werden nicht kopiert; Reste dieser Namen nur **innerhalb des Ziels** gelöscht. `lib` / `build` gelten nur als Projektroot (plus `firmware/lib`), damit `src/libs` erhalten bleibt. Laufwerks-/Freigabewurzeln sowie Ziele, die dem Projekt, einem Vorfahren oder einem Unterordner entsprechen, werden verweigert. Junctions/Symlinks nach außerhalb des Ziels werden beim Löschen nicht gefolgt.
 
-`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO auf. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO für das µGulp-**Target** (`reTerminal E1002` oder `NeoFrame`) auf. `FIRMWARE_RESTORE_FACTORY` schreibt ein Stock-Image nach `0x0`, wenn eines unter `firmware/factory/<ziel>/` liegt. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
 
 **Geprüft am 2026-09-18** (dieser Rechner: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP-Dashboard (`microgulp-serve --http`) `ENCODE_INK` mit Parameterformular, erfolgreichem synthetischem PNG→`.ink` (`DONE 100%`, sichtbares Log) und Fehlerfall fehlende Datei (`No files found`). CLI am selben Tag: Erfolg mit `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` und Abbruch ohne Input. NAS-Unit-Tests. **Hier nicht geprüft:** µWatch-Scharfschaltung, `LogTable` nach Serverpaketen, Firmware-Flash, echtes NAS-Backup, `npm publish`.
 

@@ -1,11 +1,9 @@
 /*
  * µPhotoFrame™ Firmware
  * Based on: https://github.com/pixelEDI/reterminal-e1002-epaper
- * 
- * Firmware für das Seeed Studio reTerminal E1002
- * Zeigt Bilder auf dem E-Ink Display an
- * 
- * Display ID: "9" (Spectra 6 7,3" 800x480)
+ *
+ * Board/platform: firmware/src/board.h + boards/*.h
+ * (gulp-mu-build-filter BUILD_ONLY_AT_PLATFORMS, exact Project Control id).
  */
 
 #include <GxEPD2_7C.h>
@@ -33,79 +31,54 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.1.0"
+#define FIRMWARE_VERSION "1.2.0"
 
-static String firmwareVersionLabel() {
-  return String("Firmware ") + FIRMWARE_VERSION + " · " + __DATE__;
+#include "board.h"
+#if !PHOTOFRAME_HAS_HW_SERIAL1
+#define Serial1 Serial
+#endif
+
+// Large .ink bodies + 800×480 result (~384 KB) need PSRAM on NeoFrame
+// (ESP32-S3R8, 8 MB). Internal SRAM is already taken by WiFi/HTTP/GxEPD2.
+static void* pfAlloc(size_t n) {
+  if (n == 0) return nullptr;
+#if defined(BOARD_HAS_PSRAM)
+  if (psramFound()) {
+    void* p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+  }
+#endif
+  return malloc(n);
 }
 
-// MPU6050 I2C Address
-#define MPU6050_ADDR 0x68
-#define MPU6050_PWR_MGMT_1 0x6B
-#define MPU6050_ACCEL_XOUT_H 0x3B
-
-// === Pin Definitions ===
-// ePaper Display
-#define EPD_SCK_PIN 7
-#define EPD_MOSI_PIN 9
-#define EPD_CS_PIN 10
-#define EPD_DC_PIN 11
-#define EPD_RES_PIN 12
-#define EPD_BUSY_PIN 13
-
-// SD Card
-#define SD_EN_PIN 16
-#define SD_DET_PIN 15
-#define SD_CS_PIN 14
-#define SD_MISO_PIN 8
-
-// Buttons (reTerminal E1002 – active-low, hardware pull-ups)
-// KEY0 = GPIO3 (green/red action button), KEY1 = GPIO4, KEY2 = GPIO5
-#define BTN_ACTION 3  // Red button (KEY0) – Quick-Menu / long-press = Reset
-#define BTN_NEXT   4  // Right  button (KEY1) – next image
-#define BTN_PREV   5  // Left   button (KEY2) – previous image
-
-// LED & Buzzer
-#define LED_PIN    6  // On-board LED (inverted: LOW=on)
-#define BUZZER_PIN 45 // On-board buzzer
-
-// Serial Port
-#define SERIAL_RX 44
-#define SERIAL_TX 43
-
-// MPU6050 I2C via Expansion Header (J2)
-// Header wiring:
-//   Pin 1  HEADER_3V3 → VCC
-//   Pin 2  GND        → GND
-//   Pin 7  GPIO20     → SCL  (+ 4.7 kΩ pull-up to 3.3 V)
-//   Pin 8  GPIO19     → SDA  (+ 4.7 kΩ pull-up to 3.3 V)
-#define MPU6050_SDA_PIN 19 // Expansion header Pin 8
-#define MPU6050_SCL_PIN 20 // Expansion header Pin 7
-
-// === ePaper Driver Selection ===
-// 0: reTerminal E1001 (7.5'' B&W)
-// 1: reTerminal E1002 (7.3'' Color)
-#define EPD_SELECT 1
-
-// Display ID for this device (Spectra 6 7.3" reTerminal E1002 = "I")
-#define DEVICE_DISPLAY_ID "I"
-
-// Native panel raster. Encoder (EInk.Convert/Encode) schreibt immer width×height;
-// Hochkant ist nur Inhalt um −90° auf diesem Raster, Header-Byte 3 = 1. Nicht 480×800.
-#define PANEL_NATIVE_WIDTH  800
-#define PANEL_NATIVE_HEIGHT 480
-
-// Default display rotation (0=landscape, 1=portrait, 2=landscape inverted, 3=portrait inverted)
-#define DEFAULT_DISPLAY_ROTATION 0
-
-#if (EPD_SELECT == 0)
-#define GxEPD2_DISPLAY_CLASS GxEPD2_BW
-#define GxEPD2_DRIVER_CLASS GxEPD2_750_GDEY075T7
-#elif (EPD_SELECT == 1)
-#define GxEPD2_DISPLAY_CLASS GxEPD2_7C
-#define GxEPD2_DRIVER_CLASS GxEPD2_730c_GDEP073E01
+static void* pfRealloc(void* p, size_t n) {
+#if defined(BOARD_HAS_PSRAM)
+  if (psramFound()) {
+    void* q = heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (q || n == 0) return q;
+  }
 #endif
+  return realloc(p, n);
+}
+
+static void logHeap(const char* where) {
+  Serial1.print(where);
+  Serial1.print(": heap=");
+  Serial1.print(ESP.getFreeHeap());
+#if defined(BOARD_HAS_PSRAM)
+  Serial1.print(" psram=");
+  Serial1.print(ESP.getFreePsram());
+  Serial1.print(" found=");
+  Serial1.print(psramFound() ? 1 : 0);
+#endif
+  Serial1.println();
+}
+
+static String firmwareVersionLabel() {
+  return String(PHOTOFRAME_TARGET_NAME) + " · " + FIRMWARE_VERSION + " · " + __DATE__;
+}
 
 // For displays with RAM limitations
 #define MAX_DISPLAY_BUFFER_SIZE 16000
@@ -116,6 +89,59 @@ static String firmwareVersionLabel() {
 
 // === Global Objects ===
 SPIClass hspi(HSPI);
+#if PHOTOFRAME_SD_SEPARATE_SPI
+SPIClass sdSpi(FSPI);
+#endif
+
+static SPIClass& sdSpiBus() {
+#if PHOTOFRAME_SD_SEPARATE_SPI
+  return sdSpi;
+#else
+  return hspi;
+#endif
+}
+
+static void initSpiBuses() {
+#if PHOTOFRAME_SD_SEPARATE_SPI
+  hspi.begin(EPD_SCK_PIN, -1, EPD_MOSI_PIN, -1);
+  sdSpi.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+#else
+  hspi.begin(EPD_SCK_PIN, SD_MISO_PIN, EPD_MOSI_PIN, -1);
+#endif
+}
+
+static void sdPowerOn() {
+#if PHOTOFRAME_HAS_SD_EN
+  pinMode(SD_EN_PIN, OUTPUT);
+  digitalWrite(SD_EN_PIN, HIGH);
+#endif
+#if PHOTOFRAME_HAS_SD_DET
+  pinMode(SD_DET_PIN, INPUT_PULLUP);
+#endif
+}
+
+static bool sdCardPresent() {
+#if PHOTOFRAME_HAS_SD_DET
+  return digitalRead(SD_DET_PIN) == LOW;
+#else
+  return true;
+#endif
+}
+
+static bool sdMount() {
+  sdPowerOn();
+  if (!sdCardPresent()) return false;
+  return SD.begin(SD_CS_PIN, sdSpiBus());
+}
+
+static void pfTone(unsigned freq, unsigned ms) {
+#if PHOTOFRAME_HAS_BUZZER
+  tone(BUZZER_PIN, freq, ms);
+#else
+  (void)freq;
+  (void)ms;
+#endif
+}
 Preferences preferences;
 WebServer server(80);
 DNSServer dnsServer;
@@ -133,6 +159,10 @@ uint8_t configDefaultOrientation = 0;
 bool configMode = false;
 uint64_t configModeStartSessionMs = 0;
 const unsigned long CONFIG_MODE_TIMEOUT = 300000; // 5 minutes
+// Buttonless boards (NeoFrame): open Soft-AP after cold boot so WLAN/URL
+// can be changed without the STA IP. Not used after deep-sleep timer wake.
+static bool bootConfigApActive = false;
+static uint64_t bootConfigApUntilSessionMs = 0;
 
 // === Show Management ===
 String currentShowName = "";
@@ -141,6 +171,17 @@ int currentShowTimer = 5; // minutes
 int currentImageIndex = 0;
 uint64_t lastImageChangeSessionMs = 0;
 std::vector<String> currentShowImages;
+
+// Random mode: 1 bit per image so each file appears once per cycle.
+// RAM cap keeps huge shows from allocating; NVS persist is smaller so
+// Deep Sleep does not blow the partition. Above the cap: uniform pick
+// without the "every image once" guarantee (still no immediate repeat).
+static const size_t kRandomCycleMaxImages = 8192;
+static const size_t kRandomCycleNvsMaxBytes = 400;
+static std::vector<uint8_t> g_rndSeen;
+static bool g_rndCycleOn = false;
+static bool g_rndPersist = false;
+static uint32_t g_rndListFp = 0;
 
 // === WiFi Status ===
 bool wifiConnected = false;
@@ -200,7 +241,7 @@ static void doIdleLightSleepChunk(uint32_t maxSleepMs) {
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
   esp_sleep_enable_timer_wakeup((uint64_t)maxSleepMs * 1000ULL);
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+#if PHOTOFRAME_HAS_BUTTONS && (defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2))
   uint64_t extMask = (1ULL << (uint8_t)BTN_ACTION) | (1ULL << (uint8_t)BTN_NEXT) | (1ULL << (uint8_t)BTN_PREV);
   esp_sleep_enable_ext1_wakeup(extMask, ESP_EXT1_WAKEUP_ANY_LOW);
 #endif
@@ -222,7 +263,7 @@ static void doIdleLightSleepChunk(uint32_t maxSleepMs) {
     g_lightSleepMsTotal += 1;
 
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+#if PHOTOFRAME_HAS_BUTTONS && (defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2))
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1);
 #endif
 }
@@ -281,6 +322,7 @@ static void markServerPollWallClock() {
 
 /** Deep Sleep bis nächstem Bild-Timer oder Server-Poll; nur bei gültigem time() und lstImgT. */
 static bool trySlideshowDeepSleep() {
+  if (bootConfigApActive) return false;
   if (!configSlideshowDeepSleep || g_lastImageUnix == 0) return false;
   time_t nowt = time(nullptr);
   if (nowt <= 1700000000) return false;
@@ -316,7 +358,7 @@ static bool trySlideshowDeepSleep() {
 
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
   esp_sleep_enable_timer_wakeup((uint64_t)sec * 1000000ULL);
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2)
+#if PHOTOFRAME_HAS_BUTTONS && (defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2))
   uint64_t extMask = (1ULL << (uint8_t)BTN_ACTION) | (1ULL << (uint8_t)BTN_NEXT) | (1ULL << (uint8_t)BTN_PREV);
   esp_sleep_enable_ext1_wakeup(extMask, ESP_EXT1_WAKEUP_ANY_LOW);
 #endif
@@ -332,6 +374,47 @@ static bool isShowTempOverrideActive() {
 
 // Captive-Portal DNS only when Soft-AP aktiv (sonst kein dnsServer.processNextRequest)
 bool dnsServerActive = false;
+
+#if !PHOTOFRAME_HAS_BUTTONS
+static bool shouldOfferBootConfigAp() {
+  return !g_wDeepImg && !g_wDeepPoll;
+}
+#else
+static bool shouldOfferBootConfigAp() {
+  return false;
+}
+#endif
+
+static bool startBootConfigAp() {
+  WiFi.mode(WIFI_AP_STA);
+  if (!WiFi.softAP("microPhotoFrame")) {
+    Serial1.println("Boot config AP failed");
+    return false;
+  }
+  delay(200);
+  IPAddress apip = WiFi.softAPIP();
+  dnsServer.stop();
+  dnsServer.start(53, "*", apip);
+  dnsServerActive = true;
+  bootConfigApActive = true;
+  bootConfigApUntilSessionMs = sessionMs() + CONFIG_MODE_TIMEOUT;
+  Serial1.print("Boot config AP 5 min: microPhotoFrame ");
+  Serial1.println(apip);
+  return true;
+}
+
+static void stopBootConfigAp() {
+  if (!bootConfigApActive) return;
+  dnsServer.stop();
+  dnsServerActive = false;
+  WiFi.softAPdisconnect(true);
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.mode(WIFI_STA);
+  }
+  bootConfigApActive = false;
+  bootConfigApUntilSessionMs = 0;
+  Serial1.println("Boot config AP closed");
+}
 
 // === SD Card Status ===
 bool sdCardMounted = false;
@@ -367,7 +450,7 @@ std::vector<String> allShowImages; // Store all images before filtering
 /** Hash der Server-„imgs“-Liste der zuletzt erfolgreich geladenen Show (gleicher Show-Name, neue Bilder). */
 static uint32_t loadedShowImagesFingerprint = 0;
 
-// MPU6050 Helper Functions
+#if PHOTOFRAME_HAS_MPU6050
 int16_t readMPU6050Register(uint8_t reg) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(reg);
@@ -375,6 +458,7 @@ int16_t readMPU6050Register(uint8_t reg) {
   Wire.requestFrom(static_cast<uint8_t>(MPU6050_ADDR), static_cast<size_t>(2), true);
   return (Wire.read() << 8) | Wire.read();
 }
+#endif
 
 // Forward declarations
 void filterImagesByOrientation();
@@ -595,11 +679,9 @@ static int doWiFiScan() {
 // --- SD-Assets für Web (gleiche Dateinamen wie Website: webassets/Logo.png + LogoText.png) ---
 static bool ensureSdForWebAsset() {
   if (sdCardMounted) return true;
-  pinMode(SD_EN_PIN, OUTPUT);
-  digitalWrite(SD_EN_PIN, HIGH);
-  if (digitalRead(SD_DET_PIN) != LOW) return false;
+  if (!sdCardPresent()) return false;
   if (sdLazyMountFailed) return false;
-  if (SD.begin(SD_CS_PIN, hspi)) {
+  if (sdMount()) {
     sdCardMounted = true;
     sdLazyMountFailed = false;
     return true;
@@ -667,6 +749,28 @@ void handleRoot() {
   html += "<img src='/logotext' alt='&micro;PhotoFrame&trade;' onerror=\"this.style.display='none'\">";
   html += "</div>";
   html += "<h1>microPhotoFrame Konfiguration</h1>";
+  if (WiFi.status() == WL_CONNECTED) {
+    html += "<div class='status ok'>Heimnetz ";
+    html += htmlEscapeSsid(wifiSSID);
+    html += " &middot; ";
+    html += WiFi.localIP().toString();
+    html += "</div>";
+  }
+  if (bootConfigApActive) {
+    unsigned long leftSec = 0;
+    if (bootConfigApUntilSessionMs > sessionMs())
+      leftSec = (unsigned long)((bootConfigApUntilSessionMs - sessionMs()) / 1000ULL);
+    html += "<div class='status ok'>Direkt-WLAN <b>microPhotoFrame</b> (offen) &middot; http://";
+    html += WiFi.softAPIP().toString();
+    html += "/ &middot; noch ";
+    html += String(leftSec / 60);
+    html += ":";
+    if ((leftSec % 60) < 10) html += "0";
+    html += String(leftSec % 60);
+    html += " min</div>";
+  } else if (WiFi.status() == WL_CONNECTED) {
+    html += "<div class='status warn'>Ohne Taster: nach dem Einschalten 5 min WLAN <b>microPhotoFrame</b>, sonst diese Seite im Heimnetz.</div>";
+  }
 
   if (numNetworks > 0) {
     html += "<div class='status ok'>" + String(numNetworks) + " WLAN-Netzwerk(e) gefunden</div>";
@@ -703,14 +807,18 @@ void handleRoot() {
   html += "</div>";
   html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://192.168.0.69:888/'><br>";
   html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888).</small><br>";
-  html += "<label>Standard-Ausrichtung (ohne Lagesensor MPU6050):</label>";
+  html += "<label>Standard-Ausrichtung:</label>";
   html += "<select name='def_orient' id='def_orient'>";
   html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
   html += "<option value='1'" + String(configDefaultOrientation == 1 ? " selected" : "") + ">Hochkant (90&deg;)</option>";
   html += "<option value='2'" + String(configDefaultOrientation == 2 ? " selected" : "") + ">Querformat gedreht (180&deg;)</option>";
   html += "<option value='3'" + String(configDefaultOrientation == 3 ? " selected" : "") + ">Hochkant gedreht (270&deg;)</option>";
   html += "</select>";
+#if PHOTOFRAME_HAS_MPU6050
   html += "<small style='color:#666;'>Bei verbautem Sensor wird die Lage automatisch erkannt; dieser Wert gilt nur ohne Sensor.</small><br>";
+#else
+  html += "<small style='color:#666;'>Dieses Gerät hat keinen Lagesensor. Die gewählte Ausrichtung gilt fest.</small><br>";
+#endif
   html += "<button type='submit'>Speichern</button>";
   html += "</form>";
   html += "<p style='color:#666;font-size:13px;margin-top:16px;'>" + firmwareVersionLabel() + "</p>";
@@ -754,9 +862,11 @@ void handleSave() {
   }
   String urlIn = server.hasArg("url") ? server.arg("url") : "";
   urlIn.trim();
-  if (ssidIn.length() > 0 && urlIn.length() > 0) {
-    wifiSSID = ssidIn;
-    wifiPassword = server.hasArg("password") ? server.arg("password") : "";
+  if (urlIn.length() > 0 && (ssidIn.length() > 0 || wifiSSID.length() > 0)) {
+    if (ssidIn.length() > 0) {
+      wifiSSID = ssidIn;
+      wifiPassword = server.hasArg("password") ? server.arg("password") : "";
+    }
     // IIS/HTTP.sys returns 400 for "http://host:888?action=" (no path slash).
     int _q = urlIn.indexOf('?');
     if (_q >= 0) urlIn = urlIn.substring(0, _q);
@@ -1085,8 +1195,25 @@ static void useNativePanelRotation() {
 }
 
 // Statusmeldung auf dem E-Ink in lesbarer Größe (textSize 2, ~12 px/Zeichen)
-static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+static bool g_epdInited = false;
+
+static void ensureEpdInited() {
+  if (g_epdInited) return;
   display.init(115200);
+  g_epdInited = true;
+}
+
+static void pumpWeb(uint32_t ms) {
+  uint32_t t0 = millis();
+  while (millis() - t0 < ms) {
+    if (dnsServerActive) dnsServer.processNextRequest();
+    server.handleClient();
+    delay(10);
+  }
+}
+
+static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+  ensureEpdInited();
   useNativePanelRotation();
   display.setFullWindow();
   display.fillScreen(GxEPD_WHITE);
@@ -1223,6 +1350,141 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
 }
 
 // --- Fingerprint der Bildliste (getShow): Reload wenn Server imgs sich ändern, Show-Name gleich ---
+static uint32_t hashShowNameList(uint32_t h, const String& name) {
+  for (unsigned int i = 0; i < name.length(); i++) {
+    h = ((h << 5) + h) + (uint8_t)name.charAt(i);
+  }
+  return h;
+}
+
+static uint32_t computeFilteredImagesFingerprint() {
+  uint32_t h = 5381;
+  h = hashShowNameList(h, currentShowName);
+  h = ((h << 5) + h) + (uint8_t)currentOrientation;
+  for (size_t i = 0; i < currentShowImages.size(); i++) {
+    h = hashShowNameList(h, currentShowImages[i]);
+  }
+  const size_t n = currentShowImages.size();
+  h ^= (uint32_t)(n ^ (n << 16)) ^ 0xA5A5A5A5u;
+  return h;
+}
+
+static size_t randomCycleByteCount(size_t n) {
+  return (n + 7) / 8;
+}
+
+static bool randomCycleBit(size_t i) {
+  if ((i >> 3) >= g_rndSeen.size()) return true;
+  return (g_rndSeen[i >> 3] >> (i & 7)) & 1;
+}
+
+static void randomCycleSetBit(size_t i) {
+  if ((i >> 3) >= g_rndSeen.size()) return;
+  g_rndSeen[i >> 3] |= (uint8_t)(1u << (i & 7));
+}
+
+static void randomCycleClearBits() {
+  for (size_t i = 0; i < g_rndSeen.size(); i++) g_rndSeen[i] = 0;
+}
+
+static int randomCycleUnseenCount(size_t n) {
+  int c = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (!randomCycleBit(i)) c++;
+  }
+  return c;
+}
+
+static void randomCyclePersist() {
+  if (!g_rndPersist || !g_rndCycleOn) return;
+  preferences.begin("microPhotoFrame", false);
+  preferences.putUInt("rndFp", g_rndListFp);
+  preferences.putUShort("rndN", (uint16_t)currentShowImages.size());
+  if (!g_rndSeen.empty()) {
+    preferences.putBytes("rndBits", g_rndSeen.data(), g_rndSeen.size());
+  }
+  preferences.end();
+}
+
+static void randomCyclePrepare() {
+  g_rndCycleOn = false;
+  g_rndPersist = false;
+  g_rndSeen.clear();
+  g_rndListFp = 0;
+  if (currentShowMode != "random") return;
+
+  const size_t n = currentShowImages.size();
+  if (n == 0 || n > kRandomCycleMaxImages) {
+    Serial1.printf("random cycle off (n=%u, max=%u)\n",
+                   (unsigned)n, (unsigned)kRandomCycleMaxImages);
+    return;
+  }
+
+  const size_t bytes = randomCycleByteCount(n);
+  g_rndSeen.assign(bytes, 0);
+  g_rndCycleOn = true;
+  g_rndPersist = (bytes <= kRandomCycleNvsMaxBytes);
+  g_rndListFp = computeFilteredImagesFingerprint();
+
+  if (g_rndPersist) {
+    preferences.begin("microPhotoFrame", false);
+    const uint32_t savedFp = preferences.getUInt("rndFp", 0);
+    const uint16_t savedN = preferences.getUShort("rndN", 0);
+    if (savedFp == g_rndListFp && savedN == (uint16_t)n &&
+        preferences.getBytesLength("rndBits") == bytes) {
+      preferences.getBytes("rndBits", g_rndSeen.data(), bytes);
+      Serial1.printf("random cycle restored unseen=%d/%u\n",
+                     randomCycleUnseenCount(n), (unsigned)n);
+    } else {
+      preferences.putUInt("rndFp", g_rndListFp);
+      preferences.putUShort("rndN", (uint16_t)n);
+      preferences.putBytes("rndBits", g_rndSeen.data(), bytes);
+      Serial1.printf("random cycle new n=%u persist=1\n", (unsigned)n);
+    }
+    preferences.end();
+  } else {
+    Serial1.printf("random cycle RAM-only n=%u (no NVS, bits=%u)\n",
+                   (unsigned)n, (unsigned)bytes);
+  }
+}
+
+static int pickRandomImageIndex(int prevIndex) {
+  const size_t n = currentShowImages.size();
+  if (n == 0) return 0;
+  if (n == 1) return 0;
+
+  if (g_rndCycleOn && g_rndSeen.size() == randomCycleByteCount(n)) {
+    int unseen = randomCycleUnseenCount(n);
+    if (unseen <= 0) {
+      Serial1.println("random cycle complete — new cycle");
+      randomCycleClearBits();
+      unseen = (int)n;
+    }
+    const bool skipPrev =
+        prevIndex >= 0 && (size_t)prevIndex < n && unseen > 1 && !randomCycleBit((size_t)prevIndex);
+    int pool = skipPrev ? unseen - 1 : unseen;
+    uint32_t k = esp_random() % (uint32_t)pool;
+    for (size_t i = 0; i < n; i++) {
+      if (skipPrev && (int)i == prevIndex) continue;
+      if (randomCycleBit(i)) continue;
+      if (k == 0) return (int)i;
+      k--;
+    }
+  }
+
+  uint32_t r = esp_random() % (uint32_t)(n - 1);
+  int next = (int)r;
+  if (prevIndex >= 0 && next >= prevIndex) next++;
+  return next;
+}
+
+static void randomCycleMarkShown(int index) {
+  if (!g_rndCycleOn || index < 0) return;
+  if ((size_t)index >= currentShowImages.size()) return;
+  randomCycleSetBit((size_t)index);
+  randomCyclePersist();
+}
+
 static uint32_t computeShowImagesFingerprint(JsonArray imgs) {
   uint32_t h = 5381;
   size_t n = 0;
@@ -1491,6 +1753,7 @@ bool loadShowData() {
   }
 
   loadedShowImagesFingerprint = computeShowImagesFingerprint(imgs);
+  randomCyclePrepare();
 
   return true;
 }
@@ -1918,16 +2181,14 @@ static bool tryBootOfflineLastImage() {
 
 // SD optional: Slot leer → schnell false; einmal gemountet → sdCardMounted; sonst lazy mount
 bool isSDCardAvailable() {
-  pinMode(SD_EN_PIN, OUTPUT);
-  digitalWrite(SD_EN_PIN, HIGH);
-  if (digitalRead(SD_DET_PIN) == HIGH) {
+  if (!sdCardPresent()) {
     sdCardMounted = false;
     sdLazyMountFailed = false;
     return false;
   }
   if (sdCardMounted) return true;
   if (sdLazyMountFailed) return false;
-  if (SD.begin(SD_CS_PIN, hspi)) {
+  if (sdMount()) {
     sdCardMounted = true;
     return true;
   }
@@ -1959,7 +2220,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   size_t fileSize = inkFile.size();
   if (fileSize < 4) { Serial1.println("File too small"); inkFile.close(); return false; }
 
-  uint8_t* fileData = (uint8_t*)malloc(fileSize);
+  uint8_t* fileData = (uint8_t*)pfAlloc(fileSize);
   if (!fileData) {
     Serial1.println("Failed to allocate memory");
     appendRuntimeLog("decodeSD", String("malloc body sz=") + String((unsigned)fileSize));
@@ -1988,7 +2249,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   const int displayHeight = PANEL_NATIVE_HEIGHT;
   const int totalPixels = displayWidth * displayHeight;
 
-  uint8_t* result = (uint8_t*)malloc(totalPixels);
+  uint8_t* result = (uint8_t*)pfAlloc(totalPixels);
   if (!result) { Serial1.println("Failed to allocate result buffer"); free(fileData); return false; }
 
   int resIdx = 0;
@@ -2027,6 +2288,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   PowerHighScope _pwrHttpInk;
   Serial1.print("Loading .ink file from HTTP: ");
   Serial1.println(imageUrl);
+  logHeap("httpInk start");
   
   // Extract orientation from filename (first character: '0', '1', '2', or '3')
   int fileOrientation = 0; // Default to landscape
@@ -2177,9 +2439,10 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
       http.end();
       return false;
     }
-    fileData = (uint8_t*)malloc((size_t)announcedSize);
+    fileData = (uint8_t*)pfAlloc((size_t)announcedSize);
     if (!fileData) {
       Serial1.println("Failed to allocate memory");
+      logHeap("httpInk malloc body");
       http.end();
       return false;
     }
@@ -2220,9 +2483,10 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   } else {
     Serial1.println("No Content-Length (chunked/unknown) — read until connection closes");
     size_t cap = 32768;
-    fileData = (uint8_t*)malloc(cap);
+    fileData = (uint8_t*)pfAlloc(cap);
     if (!fileData) {
       Serial1.println("Failed to allocate memory");
+      logHeap("httpInk malloc cap");
       http.end();
       return false;
     }
@@ -2241,7 +2505,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
             http.end();
             return false;
           }
-          void* p = realloc(fileData, ncap);
+          void* p = pfRealloc(fileData, ncap);
           if (!p) {
             free(fileData);
             http.end();
@@ -2291,9 +2555,10 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   const int displayHeight = PANEL_NATIVE_HEIGHT;
   const int totalPixels = displayWidth * displayHeight;
 
-  uint8_t* result = (uint8_t*)malloc(totalPixels);
+  uint8_t* result = (uint8_t*)pfAlloc(totalPixels);
   if (!result) {
     Serial1.println("Failed to allocate result buffer");
+    logHeap("httpInk malloc result");
     free(fileData);
     return false;
   }
@@ -2330,7 +2595,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   return true;
 }
 
-// I2C Scanner function
+#if PHOTOFRAME_HAS_MPU6050
 void scanI2C() {
   Serial1.println("Scanning I2C bus...");
   int devicesFound = 0;
@@ -2398,7 +2663,6 @@ void scanI2C() {
   }
 }
 
-// === MPU6050 Orientation Functions ===
 bool initMPU6050() {
   Serial1.print("Initializing MPU6050 on SDA=");
   Serial1.print(MPU6050_SDA_PIN);
@@ -2475,12 +2739,16 @@ bool initMPU6050() {
   Serial1.println("  4. Power supply issue");
   return false;
 }
+#endif
 
 int readOrientation() {
+#if !PHOTOFRAME_HAS_MPU6050
+  return (int)configDefaultOrientation;
+#else
   if (!mpu6050Available) {
     return (int)configDefaultOrientation; // NVS / Erstkonfiguration (ohne Sensor)
   }
-  
+
   // Read accelerometer data (16-bit values, need to divide by 16384 for ±2g range)
   int16_t accelX = readMPU6050Register(MPU6050_ACCEL_XOUT_H);
   int16_t accelY = readMPU6050Register(MPU6050_ACCEL_XOUT_H + 2);
@@ -2525,6 +2793,7 @@ int readOrientation() {
   
   // Default to current orientation if unclear
   return currentOrientation;
+#endif
 }
 
 static bool inkHasOrientPrefix(const String& name) {
@@ -2617,7 +2886,7 @@ void displayNextImage() {
   int nextIndex = prevIndex;
 
   if (currentShowMode == "random") {
-    nextIndex = random(0, currentShowImages.size());
+    nextIndex = pickRandomImageIndex(prevIndex);
   } else if (currentShowMode == "reversesequence") {
     nextIndex = prevIndex - 1;
     if (nextIndex < 0) {
@@ -2653,6 +2922,7 @@ void displayNextImage() {
     if (decodeAndDisplayInk(imageName, false)) {
       slideTimerMarkNow();
       rememberDisplayedInk(imageName);
+      randomCycleMarkShown(currentImageIndex);
       offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully");
     } else {
@@ -2662,6 +2932,7 @@ void displayNextImage() {
       if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
         slideTimerMarkNow();
         rememberDisplayedInk(imageName);
+        randomCycleMarkShown(currentImageIndex);
         offlineBadgeOnScreen = false;
         Serial1.println("Image displayed from server (SD file unusable)");
       } else {
@@ -2679,6 +2950,7 @@ void displayNextImage() {
     if (decodeAndDisplayInkFromHTTP(imageUrl, false)) {
       slideTimerMarkNow();
       rememberDisplayedInk(imageName);
+      randomCycleMarkShown(currentImageIndex);
       offlineBadgeOnScreen = false;
       Serial1.println("Image displayed successfully from server");
     } else {
@@ -2686,6 +2958,8 @@ void displayNextImage() {
       currentImageIndex = prevIndex;
       if (!tryRedisplayLastWithOfflineBadge()) {
         Serial1.println("Kein lokales letztes Bild: E-Ink bleibt unverändert.");
+        String ipLine = WiFi.localIP().toString();
+        showStatusScreen("Bild nicht geladen", ipLine.c_str(), hostChannelUrl.c_str());
       }
       slideTimerMarkNow();
     }
@@ -3034,6 +3308,7 @@ void handleQuickMenuSave() {
       preferences.end();
       currentOrientation = (int)configDefaultOrientation;
       filterImagesByOrientation();
+      randomCyclePrepare();
       if (currentShowImages.size() > 0) {
         currentImageIndex = -1;
         displayNextImage();
@@ -3085,7 +3360,7 @@ void handleQuickMenuSave() {
   server.send(200, "application/json", respJson);
 
   // Short feedback beep
-  tone(BUZZER_PIN, 1500, 80);
+  pfTone( 1500, 80);
 }
 
 void enterQuickMenu() {
@@ -3094,9 +3369,9 @@ void enterQuickMenu() {
   cachedShowsJson = "";
 
   // Feedback beep
-  tone(BUZZER_PIN, 1000, 100);
+  pfTone( 1000, 100);
   delay(120);
-  tone(BUZZER_PIN, 1500, 100);
+  pfTone( 1500, 100);
 
   Serial1.println("Quick-Menu mode active for 60 seconds");
 
@@ -3147,7 +3422,7 @@ void exitQuickMenu() {
   if (!quickMenuMode) return;
   quickMenuMode = false;
   Serial1.println("Quick-Menu mode ended");
-  tone(BUZZER_PIN, 800, 150);
+  pfTone( 800, 150);
 
   // Redisplay current image
   if (currentShowImages.size() > 0) {
@@ -3186,11 +3461,17 @@ static void mpfShutdownHandler(void) {
 
 // === Setup Function ===
 void setup() {
+#if PHOTOFRAME_HAS_HW_SERIAL1
   Serial1.begin(115200, SERIAL_8N1, SERIAL_RX, SERIAL_TX);
   while (!Serial1)
     delay(10);
+#else
+  Serial.begin(115200);
+#endif
   delay(2000);
   Serial1.println("--- microPhotoFrame Firmware ---");
+  Serial1.println(firmwareVersionLabel());
+  logHeap("boot");
 
   esp_register_shutdown_handler(mpfShutdownHandler);
 #if defined(__EXCEPTIONS) && __EXCEPTIONS
@@ -3200,15 +3481,20 @@ void setup() {
   });
 #endif
 
+#if PHOTOFRAME_HAS_BUTTONS
   // Tasten: interne Pull-ups — verhindert „schwebendes LOW“ auf GPIO3 (sonst fälschlich
   // 5s „gedrückt“ → NVS wird jedes Mal gelöscht → nur noch Config-Modus).
   pinMode(BTN_ACTION, INPUT_PULLUP);
   pinMode(BTN_NEXT, INPUT_PULLUP);
   pinMode(BTN_PREV, INPUT_PULLUP);
+#endif
+#if PHOTOFRAME_HAS_BUZZER
   pinMode(BUZZER_PIN, OUTPUT);
+#endif
 
   delay(100);
   bool resetRequested = false;
+#if PHOTOFRAME_HAS_BUTTONS
   if (digitalRead(BTN_ACTION) == LOW) {
     // Nur wenn Taste beim Einschalten wirklich gedrückt: bis 5s warten
     unsigned long t0 = millis();
@@ -3221,30 +3507,27 @@ void setup() {
       preferences.clear();
       preferences.end();
       Serial1.println("Config cleared: red button held 5s at boot");
-      tone(BUZZER_PIN, 800, 300);
+      pfTone( 800, 300);
       delay(350);
-      tone(BUZZER_PIN, 600, 500);
+      pfTone( 600, 500);
     }
   }
-  
-  // Initialize shared SPI bus
-  hspi.begin(EPD_SCK_PIN, SD_MISO_PIN, EPD_MOSI_PIN, -1);
-  
+#endif
+
+  initSpiBuses();
+
   // Initialize Display
   display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  display.init(115200);
+  ensureEpdInited();
   display.setRotation(DEFAULT_DISPLAY_ROTATION);
-  
-  // Initialize SD Card
-  pinMode(SD_EN_PIN, OUTPUT);
-  digitalWrite(SD_EN_PIN, HIGH);
-  pinMode(SD_DET_PIN, INPUT_PULLUP);
+
+  sdPowerOn();
   delay(100);
-  
+
   sdLazyMountFailed = false;
-  if (digitalRead(SD_DET_PIN) == LOW) {
+  if (sdCardPresent()) {
     Serial1.println("SD slot: Karte erkannt, Mount wird versucht…");
-    if (SD.begin(SD_CS_PIN, hspi)) {
+    if (sdMount()) {
       Serial1.println("SD-Karte gemountet (optional, für Cache/Logos/Offline).");
       sdCardMounted = true;
 
@@ -3310,9 +3593,9 @@ void setup() {
     preferences.end();
   }
 
-  // Initialize MPU6050 for orientation detection
+#if PHOTOFRAME_HAS_MPU6050
   initMPU6050();
-  // Read initial orientation (Sensor oder configDefaultOrientation)
+#endif
   currentOrientation = readOrientation();
   Serial1.print("Initial orientation: ");
   const char* orientationNames[] = {"Landscape (0°)", "Portrait (90°)", "Landscape inverted (180°)", "Portrait inverted (270°)"};
@@ -3349,7 +3632,7 @@ void setup() {
     return;
   }
 
-  // Normalbetrieb: kein offenes Gast-WLAN, nur Heim-WLAN
+  // Normalbetrieb: Heim-WLAN. Ohne Taster nach Kaltstart zusätzlich 5 min Soft-AP.
   Serial1.println("Starting STA mode (slideshow)...");
   WiFi.mode(WIFI_STA);
   registerWebServerRoutes();
@@ -3358,25 +3641,36 @@ void setup() {
 
   if (connectWiFi()) {
     wifiConnected = true;
-    
-    if (!g_wDeepImg && !g_wDeepPoll)
-      showStatusScreen("Connected to WiFi", "Loading show...");
-    
-    // Get active show (mit Retry falls Server beim ersten Versuch noch nicht antwortet)
+
+    if (shouldOfferBootConfigAp()) {
+      startBootConfigAp();
+    }
+
+    if (!g_wDeepImg && !g_wDeepPoll) {
+      String ipLine = WiFi.localIP().toString();
+      if (bootConfigApActive) {
+        String apLine = String("5 min AP microPhotoFrame http://") + WiFi.softAPIP().toString() + "/";
+        showStatusScreen("WLAN verbunden", ipLine.c_str(), apLine.c_str());
+      } else {
+        showStatusScreen("WLAN verbunden", ipLine.c_str(), "http://<IP>/ = Config, auch ohne Taster");
+      }
+    }
+
     bool showFound = false;
     for (int attempt = 0; attempt < 3 && !showFound; attempt++) {
       if (attempt > 0) {
         Serial1.printf("getActiveShow Retry %d/2 nach 2s...\n", attempt);
-        delay(2000);
+        pumpWeb(2000);
       }
       showFound = getActiveShow();
+      pumpWeb(50);
     }
 
     if (showFound) {
       bool dataLoaded = loadShowData();
       if (!dataLoaded) {
         Serial1.println("loadShowData failed, Retry nach 2s...");
-        delay(2000);
+        pumpWeb(2000);
         dataLoaded = loadShowData();
       }
       if (dataLoaded) {
@@ -3426,7 +3720,7 @@ void setup() {
         Serial1.println(currentShowName);
         bool dataLoaded = loadShowData();
         if (!dataLoaded) {
-          delay(2000);
+          pumpWeb(2000);
           dataLoaded = loadShowData();
         }
         if (dataLoaded && currentShowImages.size() > 0) {
@@ -3492,6 +3786,10 @@ void loop() {
   }
   server.handleClient();
 
+  if (bootConfigApActive && sessionMs() >= bootConfigApUntilSessionMs) {
+    stopBootConfigAp();
+  }
+
   // --- Config mode (WiFi setup) ---
   if (configMode) {
     if (sessionMs() - configModeStartSessionMs > CONFIG_MODE_TIMEOUT) {
@@ -3506,7 +3804,7 @@ void loop() {
     if (sessionMs() - quickMenuStartSessionMs > QUICK_MENU_TIMEOUT) {
       exitQuickMenu();
     }
-    // While in quick menu, still respond to buttons to exit early
+#if PHOTOFRAME_HAS_BUTTONS
     if (digitalRead(BTN_ACTION) == LOW) {
       delay(200);
       if (digitalRead(BTN_ACTION) == LOW) {
@@ -3514,10 +3812,12 @@ void loop() {
         delay(300);
       }
     }
+#endif
     delay(50);
     return;
   }
 
+#if PHOTOFRAME_HAS_BUTTONS
   // --- Red button: short press = Quick Menu, long press handled at boot ---
   if (digitalRead(BTN_ACTION) == LOW) {
     delay(200); // debounce
@@ -3533,7 +3833,7 @@ void loop() {
         preferences.begin("microPhotoFrame", false);
         preferences.clear();
         preferences.end();
-        tone(BUZZER_PIN, 600, 500);
+        pfTone( 600, 500);
         delay(600);
         ESP.restart();
       } else {
@@ -3541,7 +3841,7 @@ void loop() {
         if (wifiConnected) {
           enterQuickMenu();
         } else {
-          tone(BUZZER_PIN, 300, 200); // error beep: no WiFi
+          pfTone( 300, 200); // error beep: no WiFi
         }
       }
     }
@@ -3571,6 +3871,7 @@ void loop() {
       displayNextImage();
     }
   }
+#endif
 
   // --- Orientation sensor (nur mit MPU6050) ---
   if (mpu6050Available && sessionMs() - lastOrientationCheckSessionMs > ORIENTATION_CHECK_INTERVAL) {
@@ -3583,6 +3884,7 @@ void loop() {
         (newOrientation >= 0 && newOrientation < 4) ? orientationNames[newOrientation] : "?");
       currentOrientation = newOrientation;
       filterImagesByOrientation();
+      randomCyclePrepare();
       if (currentShowImages.size() > 0) {
         currentImageIndex = -1;
         displayNextImage();
@@ -3664,7 +3966,7 @@ void loop() {
   }
 
   // Deep Sleep (Default, NVS dSleep) oder Leichtschlaf zwischen Slides/Poll
-  if (!configMode && !quickMenuMode && wifiConnected && WiFi.status() == WL_CONNECTED
+  if (!configMode && !quickMenuMode && !bootConfigApActive && wifiConnected && WiFi.status() == WL_CONNECTED
       && currentShowImages.size() > 0) {
     if (configSlideshowDeepSleep) {
       trySlideshowDeepSleep();
