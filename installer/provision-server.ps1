@@ -164,7 +164,7 @@ try {
         Run-Installer "$runtime/vc_redist.x64.exe" '/install /quiet /norestart'
         $php = if ($Server -eq 'apache') { "$runtime/php-ts" } else { "$runtime/php-nts" }
         Expand-Template 'php.ini' "$php/php.ini" $php
-        Run-Exe "$php/php.exe" @('-c',"$php/php.ini",'-r','exit(class_exists("ZipArchive") ? 0 : 1);')
+        Run-Exe "$php/php.exe" @('-c',"$php/php.ini",'-r',"exit(class_exists('ZipArchive') ? 0 : 1);")
     }
     if ($Server -eq 'iis') {
         $framework = Get-ItemProperty 'HKLM:/SOFTWARE/Microsoft/NET Framework Setup/NDP/v4/Full' -ErrorAction SilentlyContinue
@@ -225,3 +225,4 @@ try {
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
+

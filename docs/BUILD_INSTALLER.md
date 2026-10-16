@@ -1,32 +1,15 @@
-# Windows-Installer bauen
+# Vollständige Windows-Installer bauen
 
-Große Drittanbieter-Artefakte liegen **nicht** im Git-Repository. Vor `npm run build:installer`:
+NSIS installieren und `MAKENSIS` auf makensis.exe setzen. Dann:
 
-## 1. NSIS (makensis)
-
-- [NSIS](https://nsis.sourceforge.io/Download) installieren (z. B. nach `C:\Program Files (x86)\NSIS\`).
-- Entweder `makensis` im **PATH**, oder Umgebungsvariable **`MAKENSIS`** auf die volle Pfadangabe zu `makensis.exe` setzen, optional **`NSISDIR`** auf das NSIS-Installationsverzeichnis.
-
-Gulp ruft `makensis /V3` mit `installer/microPhotoFrame_Installer.nsi` vom **Projektroot** auf.
-
-## 2. Redistributables (Microsoft & Co.)
-
-```bash
-npm run fetch:installer-assets
-```
-
-Lädt fehlende Dateien laut `installer/assets/redistributables.json` nach `installer/assets/` (lokal, nicht versioniert außer Manifest + Icon).
-
-Optional: `SKIP_FETCH_INSTALLER_ASSETS=1` überspringt den Download.
-
-## 3. Installer bauen
-
-```bash
+```powershell
+npm ci
+$env:PHOTOFRAME_INSTALLER_SERVER = 'node' # iis, apache, nginx; leer fuer Auswahl-Installer
 npm run build:installer
 ```
 
-Ausgabe: `installers/microPhotoFrame_Setup_v*.exe`
+Der Build lädt die benötigten Laufzeiten anhand von `installer/assets/server-runtimes.json`, prüft ihre SHA256-Hashes und integriert sie in die EXE. Node-Abhängigkeiten werden beim Build installiert und mitgeliefert. Download-Cache: `installer/assets/runtime-cache`; vorbereitete Dateien: `tmp/runtime`. Beide sind nicht versioniert. Die früheren SQL-Server- und Desktop-.NET-Downloads werden nicht mehr verwendet.
 
-## Web-UI: TensorFlow / COCO-SSD
+Die EXE installiert und konfiguriert den Server einschließlich Autostart, Rechten und lokaler Firewall-Freigabe. Ein Neustart für Windows-Komponenten wird erkannt; die Einrichtung wird danach automatisch fortgesetzt. Details und Tests: [RELEASES.md](RELEASES.md).
 
-Die Skripte werden in `index.html` per **CDN (jsDelivr)** eingebunden. Die Funktion **AI Auto-Center** benötigt damit **Internetzugriff** im Browser. Ohne Netzwerk siehe [TensorFlow.js](https://www.tensorflow.org/js) zur Selbst-Hosting-Variante.
+Ausgabe: `installers/microPhotoFrame_<server>_Setup_v<version>.exe`.

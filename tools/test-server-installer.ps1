@@ -30,7 +30,8 @@ try {
     Install # upgrade the same installation with existing user data
     if ((Get-Content "$target/shows/installer-test.txt") -ne 'preserve-me' -or (Get-FileHash "$target/config.json").Hash -ne $configHash) { throw 'Update modified user data' }
     $owned = @(Get-Service 'microPhotoFrame*' -ErrorAction SilentlyContinue)
-    foreach ($svc in $owned) { if ($svc.StartType -ne 'Automatic') { throw 'Service is not automatic' }; Restart-Service $svc.Name -Force }
+    foreach ($svc in $owned) { if ($svc.StartType -ne 'Automatic') { throw 'Service is not automatic' }; Stop-Service $svc.Name -Force }
+    foreach ($svc in $owned) { Start-Service $svc.Name }
     & "$target/.installer/provision-server.ps1" -Action Test -Server $Server -InstallDir $target
     if ($LASTEXITCODE -ne 0) { throw 'Restart health check failed' }
     $p = Start-Process -FilePath "$target/uninstall.exe" -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
@@ -53,3 +54,4 @@ try {
         Copy-Item "$target/logs/*" "$root/tmp/test-logs/$Server" -Recurse -Force
     }
 }
+
