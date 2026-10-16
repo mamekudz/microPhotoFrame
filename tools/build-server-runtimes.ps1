@@ -1,5 +1,6 @@
 [CmdletBinding()]
 param([ValidateSet('node','iis','apache','nginx','all')][string]$Server = 'all')
+$env:PSModulePath = "$PSHOME\Modules;${env:ProgramFiles}\WindowsPowerShell\Modules;$env:WINDIR\System32\WindowsPowerShell\v1.0\Modules"
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $manifest = Get-Content "$root/installer/assets/server-runtimes.json" -Raw | ConvertFrom-Json

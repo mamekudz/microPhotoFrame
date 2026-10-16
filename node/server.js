@@ -783,7 +783,9 @@ app.post('/', async (req, res) => {
 // Bedient index.html, CSS, JS aus C:\Projects\microPhotoFrame
 // Keep bundled service executables, setup scripts and logs outside the public surface.
 app.use((req, res, next) => {
-    if (/^\/(?:runtime|\.installer|logs|temp|node|aspx|bin|php)(?:\/|$)/i.test(req.path) || /^\/(?:config\.json|web\.config)$/i.test(req.path)) return res.sendStatus(404);
+    let requestPath;
+    try { requestPath = decodeURIComponent(req.path).replace(/\\/g, '/'); } catch { return res.sendStatus(400); }
+    if (/^\/(?:runtime|\.installer|logs|temp|node|aspx|bin|php)(?:\/|$)/i.test(requestPath) || /^\/(?:config\.json|web\.config)$/i.test(requestPath)) return res.sendStatus(404);
     next();
 });
 app.use(express.static(BASE_DIR));

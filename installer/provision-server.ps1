@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][string]$InstallDir,
     [ValidateSet('node','iis','apache','nginx','none')][string]$Server = 'node'
 )
+$env:PSModulePath = "$PSHOME\Modules;${env:ProgramFiles}\WindowsPowerShell\Modules;$env:WINDIR\System32\WindowsPowerShell\v1.0\Modules"
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $InstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')

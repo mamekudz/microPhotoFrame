@@ -1,6 +1,7 @@
 # Runs only on a disposable Windows CI runner, never on a developer workstation.
 [CmdletBinding()]
 param([Parameter(Mandatory)][ValidateSet('node','iis','apache','nginx')][string]$Server)
+$env:PSModulePath = "$PSHOME\Modules;${env:ProgramFiles}\WindowsPowerShell\Modules;$env:WINDIR\System32\WindowsPowerShell\v1.0\Modules"
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This integration test requires a disposable GitHub Actions runner' }
 $root = Split-Path $PSScriptRoot
@@ -22,7 +23,7 @@ try {
     if (!$created.ok) { throw ('Cannot create a show: ' + ($created | ConvertTo-Json -Depth 8)) }
     'preserve-me' | Set-Content "$target/shows/installer-test.txt"
     $configHash = (Get-FileHash "$target/config.json").Hash
-    foreach ($private in @('runtime/server-runtimes.json','.installer/provision-server.ps1','logs/setup.log')) {
+    foreach ($private in @('runtime/server-runtimes.json','%72untime/server-runtimes.json','.installer/provision-server.ps1','logs/setup.log')) {
         try { $r = Invoke-WebRequest ($url + $private) -UseBasicParsing; throw "Private file exposed: $private ($($r.StatusCode))" }
         catch { if (!$_.Exception.Response -or [int]$_.Exception.Response.StatusCode -notin @(403,404)) { throw } }
     }
