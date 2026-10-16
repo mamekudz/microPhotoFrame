@@ -87,3 +87,5 @@ installer/assets/*.msi
 installer/assets/*.phar
 !installer/assets/microPhotoFrame.ico
 !installer/assets/redistributables.json
+
+release-assets/

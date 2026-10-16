@@ -25,7 +25,11 @@ RequestExecutionLevel admin
 !define PRODUCT_WEB_SITE "https://github.com/mamekudz/microPhotoFrame"
 
 Name "${PRODUCT_NAME} ${VERSION}"
+!ifdef FIXED_SERVER
+OutFile "${INSTALLER_OUTDIR}\${PRODUCT_NAME}_${FIXED_SERVER}_Setup_v${VERSION}.exe"
+!else
 OutFile "${INSTALLER_OUTDIR}\${PRODUCT_NAME}_Setup_v${VERSION}.exe"
+!endif
 InstallDir "C:\${PRODUCT_NAME}"
 InstallDirRegKey HKLM "Software\${PRODUCT_NAME}" "InstallDir"
 ShowInstDetails show
@@ -59,7 +63,9 @@ See the README.md and INSTALLATION.md for further setup instructions."
 
 ; ---- Pages ----
 !insertmacro MUI_PAGE_WELCOME
+!ifndef FIXED_SERVER
 Page custom ServerTypePage ServerTypePageLeave
+!endif
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -85,6 +91,14 @@ Var LabelInfo
 ; ===============================================================
 ; Custom Page: Server Type Selection
 ; ===============================================================
+
+Function .onInit
+!ifdef FIXED_SERVER
+	StrCpy $SelectedServer "${FIXED_SERVER}"
+!else
+	StrCpy $SelectedServer "node"
+!endif
+FunctionEnd
 
 Function ServerTypePage
 	!insertmacro MUI_HEADER_TEXT "Server Type" "Select which server backend to install."
@@ -170,13 +184,20 @@ Section "Install" SecInstall
 	File "..\favicon.ico"
 	File "..\welcome2microPhotoFrame.html"
 	File "..\welcome2microPhotoFrame_config.js"
+	SetOverwrite off
 	File "..\config.json"
+	SetOverwrite on
 	File "..\LICENSE"
 	File "..\README.md"
 	File "..\INSTALLATION.md"
 
 	SetOutPath "$INSTDIR\src"
 	File /r "..\src\*.*"
+
+	SetOutPath "$INSTDIR\styles"
+	File /r "..\styles\*.*"
+	SetOutPath "$INSTDIR\docs"
+	File "..\docs\*server.md"
 
 	SetOutPath "$INSTDIR\assets"
 	File /r /x ".gitignore" "..\assets\*.*"
@@ -185,7 +206,6 @@ Section "Install" SecInstall
 	CreateDirectory "$INSTDIR\shows"
 
 	; Ready-to-go shows (sample content)
-	IfFileExists "..\readyToGoShows\*.*" 0 +3
 		SetOutPath "$INSTDIR\readyToGoShows"
 		File /nonfatal /r "..\readyToGoShows\*.*"
 
@@ -197,6 +217,7 @@ Section "Install" SecInstall
 		SetOutPath "$INSTDIR\node"
 		File "..\node\server.js"
 		File "..\node\package.json"
+		File "..\node\package-lock.json"
 	${EndIf}
 
 	; -- IIS / ASP.NET --
@@ -207,6 +228,8 @@ Section "Install" SecInstall
 		SetOutPath "$INSTDIR\aspx"
 		File "..\aspx\microPhotoFrame.aspx"
 		File "..\aspx\microPhotoFrame.cs"
+		SetOutPath "$INSTDIR\bin"
+		File "..\bin\Newtonsoft.Json.dll"
 	${EndIf}
 
 	; -- Apache + PHP --
@@ -248,9 +271,12 @@ Section "Install" SecInstall
 		SetOutPath "$INSTDIR\node"
 		File "..\node\server.js"
 		File "..\node\package.json"
+		File "..\node\package-lock.json"
 		SetOutPath "$INSTDIR\aspx"
 		File "..\aspx\microPhotoFrame.aspx"
 		File "..\aspx\microPhotoFrame.cs"
+		SetOutPath "$INSTDIR\bin"
+		File "..\bin\Newtonsoft.Json.dll"
 		SetOutPath "$INSTDIR\php"
 		File /r "..\php\*.*"
 		SetOutPath "$INSTDIR\apache"
@@ -265,10 +291,14 @@ Section "Install" SecInstall
 
 	; ---- Node.js: run npm install ----
 	${If} $SelectedServer == "node"
-		IfFileExists "$INSTDIR\node\package.json" 0 +4
-			DetailPrint "Running npm install for Node.js server..."
-			SetOutPath "$INSTDIR\node"
-			nsExec::ExecToLog 'cmd /c "cd /d "$INSTDIR\node" && npm install --production 2>&1"'
+		DetailPrint "Installing Node.js dependencies..."
+		SetOutPath "$INSTDIR\node"
+		nsExec::ExecToLog 'cmd /c npm ci --omit=dev'
+		Pop $0
+		${If} $0 != 0
+			MessageBox MB_OK|MB_ICONEXCLAMATION "Node.js dependencies could not be installed. Install Node.js, then run npm ci --omit=dev in $INSTDIR\node."
+			SetErrorLevel 1
+		${EndIf}
 	${EndIf}
 
 	; ---- Registry & Uninstaller ----
@@ -308,6 +338,9 @@ Section "Uninstall"
 	; Remove files and directories
 	RMDir /r "$INSTDIR\src"
 	RMDir /r "$INSTDIR\assets"
+	RMDir /r "$INSTDIR\styles"
+	Delete "$INSTDIR\bin\Newtonsoft.Json.dll"
+	RMDir "$INSTDIR\bin"
 	RMDir /r "$INSTDIR\node"
 	RMDir /r "$INSTDIR\aspx"
 	RMDir /r "$INSTDIR\php"
@@ -318,7 +351,7 @@ Section "Uninstall"
 	Delete "$INSTDIR\favicon.ico"
 	Delete "$INSTDIR\welcome2microPhotoFrame.html"
 	Delete "$INSTDIR\welcome2microPhotoFrame_config.js"
-	Delete "$INSTDIR\config.json"
+	; Preserve user configuration on uninstall.
 	Delete "$INSTDIR\web.config"
 	Delete "$INSTDIR\.htaccess"
 	Delete "$INSTDIR\LICENSE"

@@ -180,13 +180,13 @@
         <div class="header">
             <div class="logo">🖼️</div>
             <h1>microPhotoFrame Firmware</h1>
-            <p>Flashen Sie die neueste Firmware auf Ihr reTerminal</p>
+            <p>Wählen Sie Firmware für Ihr genaues Gerätemodell</p>
         </div>
         
         <div class="device-info">
             <h3>📱 Unterstützte Geräte</h3>
             <ul>
-                <li><strong>reTerminal E1001:</strong> 7.5" Grayscale (4-Level)</li>
+                <li><strong>NeoFrame:</strong> GooDisplay GDP073EW1</li>
                 <li><strong>reTerminal E1002:</strong> 7.3" Spectra 6 (Full Color)</li>
                 <li><strong>Hardware:</strong> Seeed XIAO ESP32-S3</li>
             </ul>
@@ -212,28 +212,17 @@
         </div>
         
         <div class="flash-section">
-            <esp-web-install-button manifest="./manifest.json">
-                <button slot="activate" style="
-                    background: #667eea;
-                    color: white;
-                    border: none;
-                    padding: 15px 40px;
-                    font-size: 1.1rem;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-                    transition: all 0.3s;
-                ">
-                    ⚡ Firmware Installieren
-                </button>
-            </esp-web-install-button>
+            <h2>Gerät auswählen</h2>
+<p><a href="https://github.com/mamekudz/microPhotoFrame/releases/download/v1.2.0/microPhotoFrame_firmware_reterminal-e1002_v1.2.0.zip">reTerminal E1002 Firmwarepaket 1.2.0</a></p>
+<p><a href="https://github.com/mamekudz/microPhotoFrame/releases/download/v1.2.0/microPhotoFrame_firmware_neoframe_v1.2.0.zip">NeoFrame Firmwarepaket 1.2.0</a></p>
+<p>Für neuere Versionen die <a href="https://github.com/mamekudz/microPhotoFrame/releases">Release-Seite</a> öffnen. Paket entpacken und README.txt folgen. Es enthält einen lokalen Web-Flasher und einen Python-Installer. E1001 ist kein eigenes Build-Ziel.</p>
         </div>
         
         <div class="instructions">
             <h3>📋 Anleitung:</h3>
             <ol>
                 <li>Verbinden Sie Ihr reTerminal via USB mit dem Computer</li>
-                <li>Klicken Sie auf "Firmware Installieren"</li>
+                <li>Entpacken Sie das passende Paket und folgen Sie README.txt</li>
                 <li>Wählen Sie im Dialog den COM-Port Ihres Geräts</li>
                 <li>Warten Sie bis der Flash-Vorgang abgeschlossen ist</li>
                 <li>Nach dem Neustart erscheint ein WiFi-Access-Point "microPhotoFrame"</li>

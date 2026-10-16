@@ -289,6 +289,8 @@ const COMMON_GLOBS = [
 	'welcome2microPhotoFrame_config.js',
 	'config.json',
 	'src/**/*',
+	'styles/**/*',
+	'docs/*server.md',
 	'assets/**/*',
 	'readyToGoShows/**/*',
 	'LICENSE',
@@ -300,11 +302,13 @@ const SERVER_GLOBS = {
 	node: [
 		'node/server.js',
 		'node/package.json',
+		'node/package-lock.json',
 	],
 	iis: [
 		'web.config',
 		'aspx/microPhotoFrame.aspx',
 		'aspx/microPhotoFrame.cs',
+		'bin/Newtonsoft.Json.dll',
 	],
 	apache: [
 		'.htaccess',
@@ -448,9 +452,12 @@ async function _buildInstaller(cb) {
 		Log('Version from package.json: <version/> (Win <win/>)<context="task log"/>', { version: VERSION, win: VERSION_WIN });
 	}
 
+	const installerServer = process.env.PHOTOFRAME_INSTALLER_SERVER || '';
+	if (installerServer && !['node', 'iis', 'apache', 'nginx'].includes(installerServer)) throw new Error('Invalid installer server');
 	const outDir = path.resolve(INSTALLERS_DIR).replace(/\\/g, '/');
 	const versionNsh =
 		`!define VERSION "${VERSION}"\n` +
+		(installerServer ? `!define FIXED_SERVER "${installerServer}"\n` : '') +
 		`!define VERSION_WIN "${VERSION_WIN}"\n` +
 		`!define INSTALLER_OUTDIR "${outDir}"\n`;
 	fs.writeFileSync(path.join(TMP_DIR, 'version.nsh'), versionNsh);

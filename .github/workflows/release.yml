@@ -1,0 +1,113 @@
+name: Release packages
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  servers:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node tools/release.mjs check
+      - run: node --test tools/release.test.mjs
+      - run: npm run build:packages
+      - run: choco install nsis --yes --no-progress
+      - name: Build installers for each server
+        shell: pwsh
+        env:
+          SKIP_FETCH_INSTALLER_ASSETS: '1'
+          MAKENSIS: C:\Program Files (x86)\NSIS\makensis.exe
+        run: |
+          foreach ($server in @('node', 'iis', 'apache', 'nginx')) {
+            $env:PHOTOFRAME_INSTALLER_SERVER = $server
+            npm run build:installer
+            if ($LASTEXITCODE -ne 0) { throw "Installer failed: $server" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: servers
+          path: |
+            dist/*.zip
+            installers/*.exe
+          if-no-files-found: error
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [reterminal-e1002, neoframe]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: node tools/release.mjs check
+      - run: python -m pip install platformio==6.1.18
+      - run: npm run firmware:build
+        env:
+          PHOTOFRAME_PLATFORM: ${{ matrix.target }}
+          PLATFORMIO_EXTRA_SCRIPTS: post:../tools/release-firmware.py
+      - run: node tools/release.mjs firmware ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: release-assets/*.zip
+          if-no-files-found: error
+  manual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libreoffice-writer
+      - run: python tools/build-manual.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manual
+          path: release-assets/*
+          if-no-files-found: error
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [servers, firmware, manual]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          path: collected
+          merge-multiple: true
+      - name: Collect assets
+        run: |
+          mkdir -p release-assets
+          find collected -type f -exec cp -t release-assets {} +
+          test "$(find release-assets -type f | wc -l)" -eq 12
+          node tools/release.mjs checksums
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          [[ "$GITHUB_REF_NAME" == *-beta ]] && args+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes "${args[@]}"

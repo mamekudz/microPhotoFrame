@@ -42,7 +42,10 @@
     "commit:ink": "gulp COMMIT_INK_ENCODER",
     "publish:ink": "gulp PUBLISH_INK_ENCODER",
     "gulp:tasks": "gulp --tasks",
-    "gen:branding": "node tools/gen-embedded-branding.mjs"
+    "gen:branding": "node tools/gen-embedded-branding.mjs",
+    "release:check": "node tools/release.mjs check",
+    "test:release": "node --test tools/release.test.mjs",
+    "build:manual": "python tools/build-manual.py"
   },
   "dependencies": {
     "fast-glob": "^3.3.3",
