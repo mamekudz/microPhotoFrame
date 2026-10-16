@@ -476,9 +476,10 @@ async function _buildInstaller(cb) {
 		// .nsi liegt unter installer\ — File "..\…" relativ zur .nsi-Datei; Aufruf vom Projektroot.
 		const scriptArg = path.relative(PROJECT_ROOT, nsisScript).replace(/\//g, '\\');
 		progress.Update(0.4, Translate('Compiling NSIS script…<context="task log"/>'));
-		await _spawn(makensisPath, ['/V3', scriptArg], { cwd: PROJECT_ROOT });
-		const exeName = `${PROJECT_NAME}_Setup_v${VERSION}.exe`;
+		await _spawn(makensisPath, ['/V3', scriptArg], { cwd: PROJECT_ROOT, shell: false });
+		const exeName = `${PROJECT_NAME}${installerServer ? `_${installerServer}` : ''}_Setup_v${VERSION}.exe`;
 		const exePath = path.join(INSTALLERS_DIR, exeName);
+		if (!fs.existsSync(exePath)) throw new Error(`Installer output missing: ${exePath}`);
 		if (fs.existsSync(exePath)) {
 			const size = fs.statSync(exePath).size;
 			Log('Installer created: <path/> (<size format="byteSize"/>)<context="task log"/>', { path: exePath, size });
