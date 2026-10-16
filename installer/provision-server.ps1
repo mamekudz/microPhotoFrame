@@ -203,6 +203,9 @@ try {
                 $site = $manager.Sites.Add('microPhotoFrame','http',"*:${port}:",$InstallDir)
                 $site.Applications['/'].ApplicationPoolName = 'microPhotoFrame'
                 $site.ServerAutoStart = $true
+                $anonymous = $manager.GetApplicationHostConfiguration().GetSection('system.webServer/security/authentication/anonymousAuthentication', 'microPhotoFrame')
+                $anonymous['enabled'] = $true
+                $anonymous['userName'] = '' # use the application pool identity
                 $manager.CommitChanges()
             } finally { $manager.Dispose() }
             Set-Service WAS -StartupType Automatic
@@ -237,6 +240,7 @@ try {
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
+
 
 
 
