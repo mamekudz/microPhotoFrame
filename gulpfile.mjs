@@ -420,14 +420,10 @@ function _buildSelectedPackage(cb) {
 // ==============================================
 
 async function _fetchInstallerRedistributables(cb) {
-	Log('Checking installer redistributables / downloading from Microsoft if needed…<context="task section"/>');
-	try {
-		await fetchInstallerRedistributables({ root: PROJECT_ROOT });
-		cb();
-	} catch (err) {
-		LogError('Installer assets failed: <message/><context="task error"/>', { message: err.message });
-		cb(err);
-	}
+ try {
+  await _spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(PROJECT_ROOT, 'tools', 'build-server-runtimes.ps1'), '-Server', process.env.PHOTOFRAME_INSTALLER_SERVER || 'all'], { cwd: PROJECT_ROOT, shell: false });
+  cb();
+ } catch (err) { cb(err); }
 }
 
 async function _buildInstaller(cb) {

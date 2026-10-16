@@ -1,0 +1,36 @@
+name: Full Windows installers
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        server: [node, iis, apache, nginx]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: choco install nsis --yes --no-progress
+      - run: npm run build:installer
+        env:
+          PHOTOFRAME_INSTALLER_SERVER: ${{ matrix.server }}
+          MAKENSIS: C:\Program Files (x86)\NSIS\makensis.exe
+      - name: Install, update, restart and uninstall
+        shell: powershell
+        run: ./tools/test-server-installer.ps1 -Server '${{ matrix.server }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-${{ matrix.server }}
+          path: |
+            installers/*.exe
+            tmp/test-logs/**
+          if-no-files-found: warn

@@ -15,6 +15,8 @@ RequestExecutionLevel admin
 !include "nsDialogs.nsh"
 !include "FileFunc.nsh"
 !include "WinMessages.nsh"
+!include "x64.nsh"
+SetCompressor /SOLID lzma
 
 ; Version info from gulp build
 !include "..\tmp\version.nsh"
@@ -51,13 +53,15 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !define MUI_WELCOMEPAGE_TITLE "${PRODUCT_NAME} Setup ${VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "This wizard will install ${PRODUCT_NAME} on your computer.$\r$\n$\r$\n\
 ${PRODUCT_NAME} is a WiFi-based E-Ink photo frame system with server, web UI, and firmware.$\r$\n$\r$\n\
-You can choose which server type to install or skip the server setup for manual configuration.$\r$\n$\r$\n\
+Setup includes the required runtime and configures automatic startup, local-network access and a server health check.$\r$\n$\r$\n\
 Click Next to continue."
 
 !define MUI_FINISHPAGE_TITLE "Installation Complete"
 !define MUI_FINISHPAGE_TEXT "${PRODUCT_NAME} has been installed to:$\r$\n$\r$\n$INSTDIR$\r$\n$\r$\n\
-See the README.md and INSTALLATION.md for further setup instructions."
-!define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\README.md"
+The server is configured for automatic startup. Open the desktop shortcut to manage your photo frame. If a restart is required, setup continues automatically after Windows restarts."
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION OpenPhotoFrame
+!define MUI_FINISHPAGE_RUN_TEXT "Open microPhotoFrame"
 !define MUI_FINISHPAGE_LINK "Visit ${PRODUCT_NAME} on GitHub"
 !define MUI_FINISHPAGE_LINK_LOCATION "${PRODUCT_WEB_SITE}"
 
@@ -87,12 +91,21 @@ Var RadioNginx
 Var RadioNone
 Var SelectedServer ; "node", "iis", "apache", "nginx", "none"
 Var LabelInfo
+Var PowerShell
 
 ; ===============================================================
 ; Custom Page: Server Type Selection
 ; ===============================================================
 
 Function .onInit
+ SetRegView 64
+ ${IfNot} ${RunningX64}
+  MessageBox MB_OK|MB_ICONSTOP "64-bit Windows is required."
+  Abort
+ ${EndIf}
+ StrCpy $PowerShell "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+ IfFileExists "$PowerShell" +2 0
+ StrCpy $PowerShell "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
 !ifdef FIXED_SERVER
 	StrCpy $SelectedServer "${FIXED_SERVER}"
 !else
@@ -117,19 +130,19 @@ Function ServerTypePage
 	${NSD_AddStyle} $RadioNode ${WS_GROUP}
 	${NSD_Check} $RadioNode
 
-	${NSD_CreateRadioButton} 20u 52u 280u 12u "IIS / ASP.NET (Port 888) - requires IIS with URL Rewrite"
+	${NSD_CreateRadioButton} 20u 52u 280u 12u "IIS / ASP.NET (Port 888) - IIS and URL Rewrite installed automatically"
 	Pop $RadioIIS
 
-	${NSD_CreateRadioButton} 20u 68u 280u 12u "Apache + PHP (Port 889) - requires Apache with mod_rewrite and PHP"
+	${NSD_CreateRadioButton} 20u 68u 280u 12u "Apache + PHP (Port 889) - Apache and PHP included"
 	Pop $RadioApache
 
-	${NSD_CreateRadioButton} 20u 84u 280u 12u "Nginx + PHP (Port 890) - requires Nginx and PHP-CGI"
+	${NSD_CreateRadioButton} 20u 84u 280u 12u "Nginx + PHP (Port 890) - Nginx and PHP included"
 	Pop $RadioNginx
 
 	${NSD_CreateRadioButton} 20u 104u 280u 12u "None - copy files only, I will configure the server manually"
 	Pop $RadioNone
 
-	${NSD_CreateLabel} 20u 124u 280u 28u "Tip: Node.js Express is the easiest to set up. It requires Node.js (https://nodejs.org) to be installed."
+	${NSD_CreateLabel} 20u 124u 280u 28u "All server runtimes are included. Setup creates a Windows service and checks that the application works."
 	Pop $0
 
 	nsDialogs::Show
@@ -174,6 +187,15 @@ FunctionEnd
 ; ===============================================================
 
 Section "Install" SecInstall
+ InitPluginsDir
+ SetOutPath "$PLUGINSDIR"
+ File "provision-server.ps1"
+ nsExec::ExecToLog '"$PowerShell" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\provision-server.ps1" -Action Prepare -Server "$SelectedServer" -InstallDir "$INSTDIR"'
+ Pop $0
+ ${If} $0 != 0
+  SetErrorLevel 1
+  Abort "Preflight failed. Check the installation log above."
+ ${EndIf}
 	SetOutPath $INSTDIR
 	SetOverwrite on
 
@@ -286,21 +308,14 @@ Section "Install" SecInstall
 		File /r "..\nginx\*.*"
 	${EndIf}
 
-	; ---- Post-install: config paths ----
-	; Nginx/Apache: Pfade in den mitgelieferten *.conf ggf. an $INSTDIR anpassen (siehe INSTALLATION.md).
-
-	; ---- Node.js: run npm install ----
-	${If} $SelectedServer == "node"
-		DetailPrint "Installing Node.js dependencies..."
-		SetOutPath "$INSTDIR\node"
-		nsExec::ExecToLog 'cmd /c npm ci --omit=dev'
-		Pop $0
-		${If} $0 != 0
-			MessageBox MB_OK|MB_ICONEXCLAMATION "Node.js dependencies could not be installed. Install Node.js, then run npm ci --omit=dev in $INSTDIR\node."
-			SetErrorLevel 1
-		${EndIf}
-	${EndIf}
-
+ ; Offline runtimes selected at compile time for the individual release installers.
+ SetOutPath "$INSTDIR\.installer"
+ File "provision-server.ps1"
+ SetOutPath "$INSTDIR\.installer\templates"
+ File "templates\*.*"
+ SetOutPath "$INSTDIR\runtime"
+ File "assets\server-runtimes.json"
+ !include "runtime-files.nsh"
 	; ---- Registry & Uninstaller ----
 	SetOutPath $INSTDIR
 	WriteRegStr HKLM "Software\${PRODUCT_NAME}" "InstallDir" "$INSTDIR"
@@ -317,6 +332,21 @@ Section "Install" SecInstall
 	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "NoRepair" 1
 
 	WriteUninstaller "$INSTDIR\uninstall.exe"
+ ${If} $SelectedServer != "none"
+  nsExec::ExecToLog '"$PowerShell" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\.installer\provision-server.ps1" -Action Configure -Server "$SelectedServer" -InstallDir "$INSTDIR"'
+  Pop $0
+  ${If} $0 == 3010
+   SetRebootFlag true
+   SetErrorLevel 3010
+  ${ElseIf} $0 != 0
+   SetErrorLevel 1
+   Abort "Server setup failed. See logs\setup.log; rerun Setup to retry."
+  ${Else}
+   SetErrorLevel 0
+  ${EndIf}
+  SetShellVarContext all
+  CreateShortcut "$DESKTOP\microPhotoFrame.lnk" "$INSTDIR\Open microPhotoFrame.url"
+ ${EndIf}
 
 	DetailPrint ""
 	DetailPrint "======================================"
@@ -331,6 +361,24 @@ SectionEnd
 ; ===============================================================
 
 Section "Uninstall"
+ SetRegView 64
+ StrCpy $PowerShell "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+ IfFileExists "$PowerShell" +2 0
+ StrCpy $PowerShell "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+ IfFileExists "$INSTDIR\.installer\provision-server.ps1" 0 skipServiceCleanup
+ nsExec::ExecToLog '"$PowerShell" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\.installer\provision-server.ps1" -Action Remove -InstallDir "$INSTDIR"'
+ Pop $0
+ ${If} $0 != 0
+  SetErrorLevel 1
+  Abort "Service cleanup failed. Files have been preserved."
+ ${EndIf}
+ skipServiceCleanup:
+ SetShellVarContext all
+ Delete "$DESKTOP\microPhotoFrame.lnk"
+ Delete "$INSTDIR\Open microPhotoFrame.url"
+ RMDir /r "$INSTDIR\runtime"
+ RMDir /r "$INSTDIR\.installer"
+ RMDir /r "$INSTDIR\temp"
 	; Remove registry keys
 	DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 	DeleteRegKey HKLM "Software\${PRODUCT_NAME}"
@@ -364,3 +412,7 @@ Section "Uninstall"
 
 	RMDir "$INSTDIR"
 SectionEnd
+
+Function OpenPhotoFrame
+ ExecShell "open" "$INSTDIR\Open microPhotoFrame.url"
+FunctionEnd

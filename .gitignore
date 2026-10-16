@@ -89,3 +89,5 @@ installer/assets/*.phar
 !installer/assets/redistributables.json
 
 release-assets/
+
+installer/assets/runtime-cache/

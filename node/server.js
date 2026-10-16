@@ -781,6 +781,11 @@ app.post('/', async (req, res) => {
 // --- STATIK & FALLBACK ---
 
 // Bedient index.html, CSS, JS aus C:\Projects\microPhotoFrame
+// Keep bundled service executables, setup scripts and logs outside the public surface.
+app.use((req, res, next) => {
+    if (/^\/(?:runtime|\.installer|logs|temp|node|aspx|bin|php)(?:\/|$)/i.test(req.path) || /^\/(?:config\.json|web\.config)$/i.test(req.path)) return res.sendStatus(404);
+    next();
+});
 app.use(express.static(BASE_DIR));
 
 // Fallback für alle GET-Anfragen liefert die index.html

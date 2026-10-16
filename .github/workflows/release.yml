@@ -25,13 +25,18 @@ jobs:
       - name: Build installers for each server
         shell: pwsh
         env:
-          SKIP_FETCH_INSTALLER_ASSETS: '1'
           MAKENSIS: C:\Program Files (x86)\NSIS\makensis.exe
         run: |
           foreach ($server in @('node', 'iis', 'apache', 'nginx')) {
             $env:PHOTOFRAME_INSTALLER_SERVER = $server
             npm run build:installer
             if ($LASTEXITCODE -ne 0) { throw "Installer failed: $server" }
+          }
+      - name: Verify ready-to-use installers
+        shell: powershell
+        run: |
+          foreach ($server in @('node', 'iis', 'apache', 'nginx')) {
+            ./tools/test-server-installer.ps1 -Server $server
           }
       - uses: actions/upload-artifact@v4
         with:
