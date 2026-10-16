@@ -7,7 +7,7 @@ Die Versionsnummern in `package.json`, im ersten Eintrag von `RELEASES.json`, in
 ## Downloads
 
 - Server: je ein ZIP fÃ¼r Node, IIS, Apache und Nginx.
-- Windows: je eine NSIS-EXE fÃ¼r denselben Server. Die Laufzeiten mÃ¼ssen installiert sein; IIS, Apache und Nginx werden anhand der mitgelieferten Konfigurationen eingerichtet. Node-AbhÃ¤ngigkeiten werden mit `npm ci --omit=dev` installiert. Kein MSI und keine automatische Dienstinstallation.
+- Windows: je eine vollständige NSIS-EXE für Node.js, IIS, Apache und Nginx. Laufzeiten und produktive Abhängigkeiten werden mitgeliefert; Setup richtet Dienste bzw. IIS-Website, Schreibrechte und Firewall automatisch ein und prüft die Erreichbarkeit. Ein erforderlicher Windows-Neustart setzt die Einrichtung automatisch fort.
 - Firmware: je ein ZIP fÃ¼r reTerminal E1002 und NeoFrame mit Boot-Dateien, Firmware, Manifest, Python-Installer, Windows-Starter und lokalem Web-Flasher. E1001 ist kein eigenes Build-Ziel.
 - Handbuch: versionierte DOCX und PDF; zusÃ¤tzlich SHA256SUMS.txt Ã¼ber alle Downloads.
 
