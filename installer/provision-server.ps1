@@ -205,8 +205,20 @@ try {
                 $site.ServerAutoStart = $true
                 $manager.CommitChanges()
             } finally { $manager.Dispose() }
-            Grant-Access $InstallDir 'IIS AppPool\microPhotoFrame' 'RX'
-            foreach ($dir in @('shows','logs','temp')) { Grant-Access "$InstallDir/$dir" 'IIS AppPool\microPhotoFrame' 'M' }
+            Set-Service WAS -StartupType Automatic
+            Start-Service WAS
+            Set-Service W3SVC -StartupType Automatic
+            Start-Service W3SVC
+            # Resolve the virtual identity after WAS has loaded the newly committed pool.
+            for ($attempt=0; $attempt -lt 30; $attempt++) {
+                try {
+                    $poolAccount = New-Object Security.Principal.NTAccount('IIS AppPool\microPhotoFrame')
+                    $poolSid = '*' + $poolAccount.Translate([Security.Principal.SecurityIdentifier]).Value
+                    break
+                } catch { if ($attempt -eq 29) { throw }; Start-Sleep -Seconds 1 }
+            }
+            Grant-Access $InstallDir $poolSid 'RX'
+            foreach ($dir in @('shows','logs','temp')) { Grant-Access "$InstallDir/$dir" $poolSid 'M' }
             Expand-Template 'iis.config' "$InstallDir/web.config"
             Set-Service W3SVC -StartupType Automatic
             Start-Service W3SVC
@@ -225,5 +237,6 @@ try {
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
+
 
 
