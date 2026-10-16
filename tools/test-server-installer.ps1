@@ -51,7 +51,9 @@ try {
 } finally {
     if (Test-Path "$target/logs") {
         New-Item -ItemType Directory -Force "$root/tmp/test-logs/$Server" | Out-Null
+        Get-ChildItem "$target/logs" -File | ForEach-Object { Write-Host $_.Name; Get-Content $_.FullName -Tail 60 }
         Copy-Item "$target/logs/*" "$root/tmp/test-logs/$Server" -Recurse -Force
     }
 }
+
 

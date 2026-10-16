@@ -189,7 +189,7 @@ try {
         }
         iis {
             if (!(Test-Path "$env:WINDIR/System32/inetsrv/rewrite.dll")) {
-                Run-Installer "$env:WINDIR/System32/msiexec.exe" "/i `"$runtime/rewrite.msi`" /qn /norestart /L*v `"$logDir/rewrite-install.log`""
+                Run-Installer "$env:WINDIR/System32/msiexec.exe" "/i `"$runtime\rewrite.msi`" /qn /norestart /L*v `"$logDir\rewrite-install.log`""
             }
             if ($script:reboot) { Schedule-Resume; Stop-Transcript | Out-Null; exit 3010 }
             Add-Type -Path "$env:WINDIR/System32/inetsrv/Microsoft.Web.Administration.dll"
@@ -225,4 +225,5 @@ try {
     try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
+
 
