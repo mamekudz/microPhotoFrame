@@ -13,6 +13,7 @@ import path from 'node:path';
 
 export const PLATFORM_RETERMINAL = 'reterminal-e1002';
 export const PLATFORM_NEOFRAME = 'neoframe';
+export const PLATFORM_WAVESHARE_154G = 'waveshare-154g';
 export const PLATFORM_DEFAULT = PLATFORM_RETERMINAL;
 
 export const PLATFORMS = Object.freeze([
@@ -30,6 +31,14 @@ export const PLATFORMS = Object.freeze([
 		tooltip: 'GooDisplay NeoFrame GDP073EW1 · ESP32-S3 · Spectra 6 7.3" 800×480 (GDEP073E01)',
 		shortName: 'NeoFrame',
 		pioEnv: 'neoframe',
+		esptoolChip: 'esp32s3',
+	},
+	{
+		id: PLATFORM_WAVESHARE_154G,
+		label: 'Waveshare 1.54G',
+		tooltip: 'Waveshare ESP32-S3 1.54" e-Paper (G) · 200×200 · Red/Yellow/Black/White · no battery',
+		shortName: 'WS154G',
+		pioEnv: 'waveshare_154g',
 		esptoolChip: 'esp32s3',
 	},
 ]);

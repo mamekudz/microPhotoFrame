@@ -52,7 +52,8 @@ export const DISPLAYS = {
   EINK_BWRY_266_SQ_296x152: { id: "b", name: 'Spectra 3100 · 2.66" · 296×152', width: 296, height: 152, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.66 },
   EINK_BWRY_300_SQ_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168', width: 400, height: 168, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 3.0 },
   EINK_BWRY_420_SQ_400x300: { id: "d", name: 'Spectra 3100 · 4.2" · 400×300', width: 400, height: 300, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 4.2 },
-  EINK_BWRY_750_SQ_800x480: { id: "e", name: 'Spectra 3100 · 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 7.5 }
+  EINK_BWRY_750_SQ_800x480: { id: "e", name: 'Spectra 3100 · 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 7.5 },
+  EINK_BWRY_154_SQ_200x200: { id: "f", name: 'Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)', width: 200, height: 200, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 1.54 }
 };
 
 const DISPLAY_LONG_ID_BY_SHORT_ID = {
@@ -93,7 +94,8 @@ const DISPLAY_LONG_ID_BY_SHORT_ID = {
   b: "EINK_BWRY_266_SQ_296x152",
   c: "EINK_BWRY_300_SQ_400x168",
   d: "EINK_BWRY_420_SQ_400x300",
-  e: "EINK_BWRY_750_SQ_800x480"
+  e: "EINK_BWRY_750_SQ_800x480",
+  f: "EINK_BWRY_154_SQ_200x200"
 };
 
 export function getDisplayByShortId(shortId) {

@@ -8,6 +8,7 @@ import {
 	PLATFORM_DEFAULT,
 	PLATFORM_NEOFRAME,
 	PLATFORM_RETERMINAL,
+	PLATFORM_WAVESHARE_154G,
 	PLATFORM_IDS,
 	buildFilterPlatformOptions,
 	buildPlatformProjectControl,
@@ -25,8 +26,9 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 test('platform IDs are stable and default is reTerminal E1002', () => {
 	assert.equal(PLATFORM_RETERMINAL, 'reterminal-e1002');
 	assert.equal(PLATFORM_NEOFRAME, 'neoframe');
+	assert.equal(PLATFORM_WAVESHARE_154G, 'waveshare-154g');
 	assert.equal(PLATFORM_DEFAULT, PLATFORM_RETERMINAL);
-	assert.deepEqual([...PLATFORM_IDS], [PLATFORM_RETERMINAL, PLATFORM_NEOFRAME]);
+	assert.deepEqual([...PLATFORM_IDS], [PLATFORM_RETERMINAL, PLATFORM_NEOFRAME, PLATFORM_WAVESHARE_154G]);
 });
 
 test('Project Control is radio id=platform', () => {
@@ -34,7 +36,7 @@ test('Project Control is radio id=platform', () => {
 	assert.equal(ctrl.id, 'platform');
 	assert.equal(ctrl.type, 'radio');
 	assert.equal(ctrl.default, PLATFORM_RETERMINAL);
-	assert.deepEqual(ctrl.options.map((o) => o.value), [PLATFORM_RETERMINAL, PLATFORM_NEOFRAME]);
+	assert.deepEqual(ctrl.options.map((o) => o.value), [PLATFORM_RETERMINAL, PLATFORM_NEOFRAME, PLATFORM_WAVESHARE_154G]);
 });
 
 test('microgulp.config.json mirrors platform Project Control', () => {
@@ -45,7 +47,7 @@ test('microgulp.config.json mirrors platform Project Control', () => {
 	assert.equal(platform.default, PLATFORM_RETERMINAL);
 	assert.deepEqual(
 		platform.options.map((o) => o.value),
-		[PLATFORM_RETERMINAL, PLATFORM_NEOFRAME],
+		[PLATFORM_RETERMINAL, PLATFORM_NEOFRAME, PLATFORM_WAVESHARE_154G],
 	);
 	assert.equal(
 		platform.options.find((o) => o.value === PLATFORM_NEOFRAME).tooltip,
@@ -77,6 +79,7 @@ test('resolveActivePlatform uses MICROGULP_CONTROLS then PHOTOFRAME_PLATFORM', (
 test('pio env and build-filter platform match the target', () => {
 	assert.equal(pioEnvForPlatform(PLATFORM_RETERMINAL), 'seeed_xiao_esp32s3');
 	assert.equal(pioEnvForPlatform(PLATFORM_NEOFRAME), 'neoframe');
+	assert.equal(pioEnvForPlatform(PLATFORM_WAVESHARE_154G), 'waveshare_154g');
 	assert.equal(buildFilterPlatformOptions(PLATFORM_NEOFRAME).platform, PLATFORM_NEOFRAME);
 	assert.equal(buildFilterPlatformOptions(PLATFORM_NEOFRAME).mode, 'remove');
 	const neo = platformMeta(PLATFORM_NEOFRAME);

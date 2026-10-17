@@ -87,9 +87,10 @@ export default class EInkDef {
     EINK_BWRY_300_sq_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168', width: 400, height: 168, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 3.0 },
     EINK_BWRY_420_sq_400x300: { id: "d", name: 'Spectra 3100 · 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
     EINK_BWRY_750_sq_800x480: { id: "e", name: 'Spectra 3100 · 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
+    EINK_BWRY_154_sq_200x200: { id: "f", name: 'Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)', width: 200, height: 200, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
 
     // ═══════════════════════════════════════════════════════════
-    // FUTURE/NEW MODELS - IDs: f-z (Reserved)
+    // FUTURE/NEW MODELS - IDs: g-z (Reserved)
     // Space for upcoming technologies:
     // - ACeP (Advanced Color ePaper, 8 colors)
     // - Gallery Palette 3 (7 colors)

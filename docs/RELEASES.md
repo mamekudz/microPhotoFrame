@@ -8,7 +8,7 @@ Die Versionsnummern in `package.json`, im ersten Eintrag von `RELEASES.json`, in
 
 - Server: je ein ZIP für Node, IIS, Apache und Nginx.
 - Windows: je eine vollständige NSIS-EXE für Node.js, IIS, Apache und Nginx. Laufzeiten und produktive Abhängigkeiten werden mitgeliefert; Setup richtet Dienste bzw. IIS-Website, Schreibrechte und Firewall automatisch ein und prüft die Erreichbarkeit. Ein erforderlicher Windows-Neustart setzt die Einrichtung automatisch fort.
-- Firmware: je ein ZIP für reTerminal E1002 und NeoFrame mit Boot-Dateien, Firmware, Manifest, Python-Installer, Windows-Starter und lokalem Web-Flasher. E1001 ist kein eigenes Build-Ziel.
+- Firmware: je ein ZIP für reTerminal E1002, NeoFrame und Waveshare 1.54G mit Boot-Dateien, Firmware, Manifest, Python-Installer, Windows-Starter und lokalem Web-Flasher. E1001 ist kein eigenes Build-Ziel.
 - Handbuch: versionierte DOCX und PDF; zusätzlich SHA256SUMS.txt über alle Downloads.
 
 ## Lokal bauen
@@ -20,7 +20,7 @@ npm run test:release
 npm run build:packages
 $env:PHOTOFRAME_INSTALLER_SERVER = 'node' # auch iis, apache, nginx
 npm run build:installer
-$env:PHOTOFRAME_PLATFORM = 'reterminal-e1002' # oder neoframe
+$env:PHOTOFRAME_PLATFORM = 'reterminal-e1002' # oder neoframe / waveshare-154g
 $env:PLATFORMIO_EXTRA_SCRIPTS = 'post:../tools/release-firmware.py'
 npm run firmware:build
 node tools/release.mjs firmware reterminal-e1002

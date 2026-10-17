@@ -1,6 +1,19 @@
 [
 	{
 		"main": 1,
+		"minor": 3,
+		"revision": 0,
+		"date": "2026-10-17 11:15",
+		"beta": false,
+		"info": [
+			"Waveshare ESP32-S3 1.54inch e-Paper (G) is a first-class firmware target: 200×200 BWRY, display ID f, official wiki pin map, native USB-C, no battery.",
+			"If the photo server is offline, the last successfully loaded image stays on the panel instead of a loading or error screen.",
+			"Status and config text follow the frame orientation; .ink pixels stay in native panel layout.",
+			"Buttonless boards keep deep sleep off by default so USB power banks do not cut off."
+		]
+	},
+	{
+		"main": 1,
 		"minor": 2,
 		"revision": 0,
 		"date": "2026-10-14 17:30",

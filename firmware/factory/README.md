@@ -5,6 +5,7 @@ Stock images only — not the firmware this repo builds. Place a vendor dump her
 ```
 firmware/factory/neoframe/factory.bin
 firmware/factory/reterminal-e1002/factory.bin
+firmware/factory/waveshare-154g/factory.bin
 ```
 
 A merged image is written at `0x0` (full flash / Arduino export). Accepted names:

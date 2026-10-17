@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	PLATFORM_NEOFRAME,
 	PLATFORM_RETERMINAL,
+	PLATFORM_WAVESHARE_154G,
 	buildFilterPlatformOptions,
 } from './photoframe-platforms.mjs';
 
@@ -55,10 +56,26 @@ test('NeoFrame board header stays live only for neoframe with ESP32E6-E01 pins, 
 	assert.doesNotMatch(e1002, /EPD_CS_PIN/);
 });
 
+test('Waveshare 1.54G header stays live only for waveshare-154g with official EPD pins', () => {
+	const ws = filterFile('boards/waveshare-154g.h', PLATFORM_WAVESHARE_154G);
+	const e1002 = filterFile('boards/waveshare-154g.h', PLATFORM_RETERMINAL);
+	assert.match(ws, /#define PHOTOFRAME_TARGET_NAME "Waveshare 1.54G"/);
+	assert.match(ws, /#define DEVICE_DISPLAY_ID "f"/);
+	assert.match(ws, /#define PANEL_NATIVE_WIDTH 200/);
+	assert.match(ws, /#define PHOTOFRAME_EPD_PWR_PIN 6/);
+	assert.match(ws, /#define EPD_BUSY_PIN 8/);
+	assert.match(ws, /#define EPD_CS_PIN 11/);
+	assert.match(ws, /#define PHOTOFRAME_HAS_BUTTONS 0/);
+	assert.match(ws, /#define PHOTOFRAME_HAS_SD 0/);
+	assert.doesNotMatch(e1002, /PHOTOFRAME_TARGET_NAME/);
+	assert.doesNotMatch(e1002, /EPD_CS_PIN/);
+});
+
 test('main.cpp has no C fallback that reintroduces the other platform name', () => {
 	const src = fs.readFileSync(path.join(SRC, 'main.cpp'), 'utf8');
 	assert.match(src, /#include "board\.h"/);
 	assert.doesNotMatch(src, /#ifndef PHOTOFRAME_TARGET_NAME/);
 	assert.doesNotMatch(src, /#define PHOTOFRAME_TARGET_NAME "reTerminal E1002"/);
 	assert.doesNotMatch(src, /#define PHOTOFRAME_TARGET_NAME "NeoFrame"/);
+	assert.doesNotMatch(src, /#define PHOTOFRAME_TARGET_NAME "Waveshare 1.54G"/);
 });

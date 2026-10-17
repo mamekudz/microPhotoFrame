@@ -30,9 +30,15 @@
 						"value": "neoframe",
 						"label": "NeoFrame",
 						"tooltip": "GooDisplay NeoFrame GDP073EW1 · ESP32-S3 · Spectra 6 7.3\" 800×480 (GDEP073E01)"
+					},
+					{
+						"value": "waveshare-154g",
+						"label": "Waveshare 1.54G",
+						"tooltip": "Waveshare ESP32-S3 1.54\" e-Paper (G) · 200×200 · Red/Yellow/Black/White · no battery"
 					}
 				]
 			}
 		]
-	}
+	},
+	"externalControl": true
 }

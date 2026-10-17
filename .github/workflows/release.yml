@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [reterminal-e1002, neoframe]
+        target: [reterminal-e1002, neoframe, waveshare-154g]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -107,7 +107,7 @@ jobs:
         run: |
           mkdir -p release-assets
           find collected -type f -exec cp -t release-assets {} +
-          test "$(find release-assets -type f | wc -l)" -eq 12
+          test "$(find release-assets -type f | wc -l)" -eq 13
           node tools/release.mjs checksums
       - name: Publish release
         env:

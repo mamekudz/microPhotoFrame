@@ -1,6 +1,6 @@
 # µPhotoFrame™ Firmware
 
-ESP32-S3 Firmware für WiFi-basierte E-Ink Bilderrahmen (reTerminal E1001/E1002 und GooDisplay NeoFrame)
+ESP32-S3 Firmware für WiFi-basierte E-Ink Bilderrahmen (reTerminal E1002, GooDisplay NeoFrame, Waveshare 1.54G)
 
 ## 🚀 Quick Start - Firmware Flashen
 
@@ -82,6 +82,14 @@ esptool.py --chip esp32s3 --port COM9 --baud 460800 \
 - **Pinmap:** ESP32E6-E01-Datenblatt (EPD 11/12/2/3/4/5, SD 48/47/13/21, Taster 42/41/46) — am Gerät prüfen
 - **Factory-Restore:** `firmware/factory/neoframe/` (`factory.bin` oder `GDEPE073E01.ino.merged.bin` nach `0x0`)
 
+### Waveshare ESP32-S3 1.54" e-Paper (G)
+- **Display:** GDEY0154F51 / GDEM0154F51H · 1,54" · 200×200
+- **Farben:** Schwarz, Weiß, Rot, Gelb (BWRY, Display-ID `f`)
+- **MCU:** ESP32-S3 N8R8 (8 MB Flash, 8 MB PSRAM), USB-C, WLAN+BLE, ohne Akku
+- **Taster / SD:** keine Foto-Taster; SDMMC zunächst ungenutzt
+- **Pinmap (Waveshare-Wiki):** EPD SCLK 12, SDI 13, CS 11, DC 10, RST 9, BUSY 8; EPD3V3_EN GPIO6 aktiv LOW
+- **Factory-Restore:** `firmware/factory/waveshare-154g/`
+
 ### ESP32-S3 MCU
 - **Board (E1002):** Seeed XIAO ESP32-S3
 - **RAM:** 320KB
@@ -156,11 +164,11 @@ pio device monitor --raw
 
 ### Build-Environments
 
-Ziele wählt man im µGulp-Projektformular (**Target**): `reTerminal E1002` oder `NeoFrame`.  
+Ziele wählt man im µGulp-Projektformular (**Target**): `reTerminal E1002`, `NeoFrame` oder `Waveshare 1.54G`.  
 Gulp filtert `firmware/src` nach `firmware/.generated` (`gulp-mu-build-filter`, `BUILD_ONLY_AT_PLATFORMS`, `mode: remove`) und ruft `pio run -e …` auf.
 
 Board-Header: `firmware/src/board.h` plus `firmware/src/boards/<id>.h`.  
-E1002-Pins stehen nur im Block `reterminal-e1002`. NeoFrame nutzt die offizielle ESP32E6-E01-Pinmap (GDEP073E01, Display-ID `I`), 8 MB PSRAM und nach dem Einschalten 5 Minuten das offene Config-WLAN `microPhotoFrame`. Factory-Restore bleibt für das Hersteller-Image.
+E1002-Pins stehen nur im Block `reterminal-e1002`. NeoFrame nutzt die offizielle ESP32E6-E01-Pinmap (GDEP073E01, Display-ID `I`), 8 MB PSRAM und nach dem Einschalten 5 Minuten das offene Config-WLAN `microPhotoFrame`. Waveshare 1.54G nutzt GxEPD2_4C / GDEM0154F51H (Display-ID `f`) und die Wiki-Pinmap inkl. EPD-Power GPIO6. Factory-Restore bleibt für das Hersteller-Image.
 
 Factory-Image bei fehlgeschlagenem Flash: `firmware/factory/<ziel>/factory.bin` (oder `GDEPE073E01.ino.merged.bin` / `*.ino.merged.bin`) und Task **Restore Factory Firmware**.
 
@@ -174,17 +182,16 @@ framework = arduino
 platform = espressif32
 board = esp32-s3-devkitc-1
 framework = arduino
+
+[env:waveshare_154g]
+platform = espressif32
+board = esp32-s3-devkitc-1
+framework = arduino
 ```
 
 ### Display-ID Anpassung
 
-Für verschiedene Displays die `DEVICE_DISPLAY_ID` in `main.cpp` ändern:
-
-```cpp
-// Display ID for this device
-#define DEVICE_DISPLAY_ID "I"  // Spectra 6 7.3" · E1002 / NeoFrame
-// #define DEVICE_DISPLAY_ID "D"  // reTerminal E1001 (Grayscale)
-```
+Die Display-ID steht im jeweiligen Board-Header (`DEVICE_DISPLAY_ID`): `I` für E1002/NeoFrame, `f` für Waveshare 1.54G.
 
 ## 📄 Lizenz
 

@@ -6,8 +6,14 @@
  * (gulp-mu-build-filter BUILD_ONLY_AT_PLATFORMS, exact Project Control id).
  */
 
+#include "board.h"
+#if (EPD_SELECT == 2)
+#include <GxEPD2_4C.h>
+#elif (EPD_SELECT == 1)
 #include <GxEPD2_7C.h>
+#else
 #include <GxEPD2_BW.h>
+#endif
 #include <SD.h>
 #include <SPI.h>
 #include <WiFi.h>
@@ -33,9 +39,8 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.2.0"
+#define FIRMWARE_VERSION "1.3.0"
 
-#include "board.h"
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
 #endif
@@ -120,8 +125,18 @@ static void sdPowerOn() {
 #endif
 }
 
+static void epdPowerOn() {
+#if PHOTOFRAME_EPD_PWR_PIN >= 0
+  pinMode(PHOTOFRAME_EPD_PWR_PIN, OUTPUT);
+  digitalWrite(PHOTOFRAME_EPD_PWR_PIN, PHOTOFRAME_EPD_PWR_ON_LEVEL);
+  delay(10);
+#endif
+}
+
 static bool sdCardPresent() {
-#if PHOTOFRAME_HAS_SD_DET
+#if !PHOTOFRAME_HAS_SD
+  return false;
+#elif PHOTOFRAME_HAS_SD_DET
   return digitalRead(SD_DET_PIN) == LOW;
 #else
   return true;
@@ -272,6 +287,9 @@ static void doIdleLightSleepChunk(uint32_t maxSleepMs) {
 int g_lastHttpStatusCode = -1;
 /** Zuletzt erfolgreich auf dem Panel gezeichnete .ink-Datei (nur Dateiname). */
 String lastDisplayedInkName = "";
+static void beginTextScreen();
+static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr);
+static void showStatusOrKeepLast(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr);
 /** True, solange das aktuell sichtbare Bild mit Offline-Warn-Badge oben rechts gezeichnet wurde. */
 bool offlineBadgeOnScreen = false;
 /** Letzter getShows-Lauf: HTTP 200 + gültiges JSON (Show-Liste verstanden). */
@@ -292,8 +310,15 @@ String serverActiveShowCached = "";
 /** Standard „Minuten bis Server wieder gilt“ im Quick-Menü (NVS qRevMin). */
 uint16_t quickMenuRevertMinutes = 60;
 
-/** NVS dSleep: zwischen Slides Deep Sleep (Default an, Akku). Ohne NTP/Uhrzeit nur Leichtschlaf. */
+/** NVS dSleep: zwischen Slides Deep Sleep. E1002 default an (Akku).
+ *  NeoFrame default aus: Powerbanks trennen bei µA-Last im Tiefschlaf. */
+#if PHOTOFRAME_HAS_BUTTONS
 bool configSlideshowDeepSleep = true;
+static const uint8_t kDeepSleepDefault = 1;
+#else
+bool configSlideshowDeepSleep = false;
+static const uint8_t kDeepSleepDefault = 0;
+#endif
 static uint32_t g_lastImageUnix = 0;
 static uint32_t g_lastPollUnix = 0;
 static bool g_wDeepPoll = false;
@@ -532,12 +557,17 @@ void loadConfig() {
   if (rm > 1440) rm = 1440;
   quickMenuRevertMinutes = (uint16_t)rm;
   showTempOverrideUntilSessionMs = 0;
-  if (!preferences.isKey("dSleep")) {
-    preferences.putUChar("dSleep", 1);
-    configSlideshowDeepSleep = true;
-  } else {
-    configSlideshowDeepSleep = (preferences.getUChar("dSleep", 1) != 0);
+#if !PHOTOFRAME_HAS_BUTTONS
+  // 1.1/1.2 wrote dSleep=1 for every board. NeoFrame + powerbank: one-shot off.
+  if (!preferences.isKey("dsNfOk")) {
+    preferences.putUChar("dSleep", 0);
+    preferences.putUChar("dsNfOk", 1);
   }
+#endif
+  if (!preferences.isKey("dSleep")) {
+    preferences.putUChar("dSleep", kDeepSleepDefault);
+  }
+  configSlideshowDeepSleep = (preferences.getUChar("dSleep", kDeepSleepDefault) != 0);
   g_lastImageUnix = preferences.getUInt("lstImgT", 0);
   g_lastPollUnix = preferences.getUInt("lstPolT", 0);
   preferences.end();
@@ -819,6 +849,14 @@ void handleRoot() {
 #else
   html += "<small style='color:#666;'>Dieses Gerät hat keinen Lagesensor. Die gewählte Ausrichtung gilt fest.</small><br>";
 #endif
+#if !PHOTOFRAME_HAS_BUTTONS
+  html += "<input type='hidden' name='deep_sleep_present' value='1'>";
+  html += "<label style='display:flex;align-items:flex-start;gap:10px;margin-top:12px;text-align:left;'>";
+  html += "<input type='checkbox' name='deep_sleep' value='1' style='width:auto;margin-top:4px;'";
+  if (configSlideshowDeepSleep) html += " checked";
+  html += ">";
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern. Am NeoFrame standardm&auml;&szlig;ig aus: Powerbanks schalten ab, wenn kaum Strom flie&szlig;t. Nur bei festem Netzteil einschalten.</span></label>";
+#endif
   html += "<button type='submit'>Speichern</button>";
   html += "</form>";
   html += "<p style='color:#666;font-size:13px;margin-top:16px;'>" + firmwareVersionLabel() + "</p>";
@@ -877,6 +915,15 @@ void handleSave() {
     if (server.hasArg("def_orient")) {
       int o = server.arg("def_orient").toInt();
       if (o >= 0 && o <= 3) configDefaultOrientation = (uint8_t)o;
+    }
+    if (server.hasArg("deep_sleep_present")) {
+      configSlideshowDeepSleep = server.hasArg("deep_sleep");
+      preferences.begin("microPhotoFrame", false);
+      preferences.putUChar("dSleep", configSlideshowDeepSleep ? 1 : 0);
+#if !PHOTOFRAME_HAS_BUTTONS
+      preferences.putUChar("dsNfOk", 1);
+#endif
+      preferences.end();
     }
     saveConfig();
     
@@ -946,11 +993,7 @@ void startConfigMode() {
   
   startConfigAP();
   
-  // Show config message on display
-  display.init(115200);
-  display.setRotation(0);
-  display.fillScreen(GxEPD_WHITE);
-  display.setTextColor(GxEPD_BLACK);
+  beginTextScreen();
   display.setCursor(10, 30);
   display.print("Config Mode");
   display.setCursor(10, 60);
@@ -1187,20 +1230,38 @@ static int drawWebBrandingOnEpd(int startY) {
   return y + 12;
 }
 
-// Spectra 6 7.3" (GDEP073E01): Controller-RAM ist immer 800×480.
-// setRotation(1/2/3) dreht nur GFX-Koordinaten; der Treiber aktualisiert dann
-// unvollständig (halbes Panel Rauschen, Buchstaben wirken verdoppelt).
+// .ink-Pixel liegen schon in nativer Panel-Lage. setRotation(1/2/3) + nextPage
+// (paged) aktualisiert Spectra-6-Panels unvollständig. Text nutzt display()
+// mit der Rahmen-Ausrichtung (currentOrientation).
 static void useNativePanelRotation() {
   display.setRotation(0);
 }
 
-// Statusmeldung auf dem E-Ink in lesbarer Größe (textSize 2, ~12 px/Zeichen)
 static bool g_epdInited = false;
 
 static void ensureEpdInited() {
   if (g_epdInited) return;
+  epdPowerOn();
   display.init(115200);
   g_epdInited = true;
+}
+
+static int frameTextRotation() {
+  int rot = currentOrientation;
+  if (rot < 0 || rot > 3) rot = 0;
+  return rot;
+}
+
+static void beginTextScreen() {
+  ensureEpdInited();
+  display.setRotation(frameTextRotation());
+  display.setFullWindow();
+  display.fillScreen(GxEPD_WHITE);
+  display.setTextColor(GxEPD_BLACK);
+}
+
+static bool hasLastImageOnPanel() {
+  return lastDisplayedInkName.length() > 0;
 }
 
 static void pumpWeb(uint32_t ms) {
@@ -1213,11 +1274,7 @@ static void pumpWeb(uint32_t ms) {
 }
 
 static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
-  ensureEpdInited();
-  useNativePanelRotation();
-  display.setFullWindow();
-  display.fillScreen(GxEPD_WHITE);
-  display.setTextColor(GxEPD_BLACK);
+  beginTextScreen();
 
   int yText = 20;
   if (sdCardMounted) {
@@ -1244,6 +1301,16 @@ static void showStatusScreen(const char* line1, const char* line2 = nullptr, con
   }
   display.setTextSize(1);
   display.display(false);
+}
+
+static void showStatusOrKeepLast(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+  if (hasLastImageOnPanel()) {
+    Serial1.print("Status '");
+    Serial1.print(line1);
+    Serial1.println("' — letztes Bild bleibt sichtbar");
+    return;
+  }
+  showStatusScreen(line1, line2, line3);
 }
 
 // === Forward Declarations ===
@@ -1890,10 +1957,15 @@ struct LZWDictEntry {
   std::vector<uint8_t> data;
 };
 
-// Color palette for Spectra 6: Black, White, Red, Yellow, Blue, Green
+#if (PANEL_PALETTE_SIZE == 4)
+static const uint16_t displayPalette[4] = {
+  GxEPD_BLACK, GxEPD_WHITE, GxEPD_RED, GxEPD_YELLOW
+};
+#else
 static const uint16_t displayPalette[6] = {
   GxEPD_BLACK, GxEPD_WHITE, GxEPD_RED, GxEPD_YELLOW, GxEPD_BLUE, GxEPD_GREEN
 };
+#endif
 
 // Decode raw deflate using ESP32 ROM tinfl. tinfl_decompressor is ~12–15 kB;
 // tinfl_decompress_mem_to_mem keeps it on the caller stack and overflows the
@@ -2067,9 +2139,10 @@ static bool offlineBadgePixel(int x, int y, int dw, int dh, uint16_t& outColor) 
 static void displayPixels(uint8_t* result, int resIdx,
                           int displayWidth, int displayHeight, int fileOrientation,
                           bool offlineHint) {
+  epdPowerOn();
   display.init(115200);
-  // Pixel liegen im nativen 800×480; Hochkant steckt schon im Inhalt. setRotation(1)
-  // würde das logische Raster auf 480×800 drehen und drawPixel(x≥480) verwerfen.
+  // Pixel liegen im nativen Panelraster; Hochkant steckt schon im .ink-Inhalt.
+  // setRotation(1) würde das Raster drehen und drawPixel außerhalb verwerfen.
   display.setRotation(0);
   (void)fileOrientation;
   display.fillScreen(GxEPD_WHITE);
@@ -2090,7 +2163,7 @@ static void displayPixels(uint8_t* result, int resIdx,
         int pixelIdx = y * displayWidth + x;
         if (pixelIdx < resIdx) {
           uint8_t colorIdx = result[pixelIdx];
-          if (colorIdx < 6) {
+          if (colorIdx < PANEL_PALETTE_SIZE) {
             display.drawPixel(x, y, displayPalette[colorIdx]);
           } else {
             display.drawPixel(x, y, GxEPD_BLACK);
@@ -2256,7 +2329,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   if (version == 3) {
     resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
     if (resIdx > 0) {
-      inversePaethPrediction(result, resIdx, displayWidth, 6);
+      inversePaethPrediction(result, resIdx, displayWidth, PANEL_PALETTE_SIZE);
     }
   } else if (version == 2) {
     resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
@@ -2567,7 +2640,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   if (version == 3) {
     resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
     if (resIdx > 0) {
-      inversePaethPrediction(result, resIdx, displayWidth, 6);
+      inversePaethPrediction(result, resIdx, displayWidth, PANEL_PALETTE_SIZE);
     }
   } else if (version == 2) {
     resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
@@ -2878,7 +2951,7 @@ void filterImagesByOrientation() {
 void displayNextImage() {
   if (currentShowImages.size() == 0) {
     Serial1.println("No images in current show");
-    showStatusScreen("No images in show", currentShowName.c_str());
+    showStatusOrKeepLast("No images in show", currentShowName.c_str());
     return;
   }
 
@@ -2959,7 +3032,7 @@ void displayNextImage() {
       if (!tryRedisplayLastWithOfflineBadge()) {
         Serial1.println("Kein lokales letztes Bild: E-Ink bleibt unverändert.");
         String ipLine = WiFi.localIP().toString();
-        showStatusScreen("Bild nicht geladen", ipLine.c_str(), hostChannelUrl.c_str());
+        showStatusOrKeepLast("Bild nicht geladen", ipLine.c_str(), hostChannelUrl.c_str());
       }
       slideTimerMarkNow();
     }
@@ -3107,8 +3180,13 @@ void handleQuickMenu() {
   html += "<label>Bildwechsel (Minuten):</label><input type='number' id='timerIn' min='1' max='1440' value='" + String(currentShowTimer) + "'>";
   html += "<label style='display:flex;align-items:flex-start;gap:10px;margin-top:14px;cursor:pointer;'>";
   html += "<input type='checkbox' id='deepSleepIn' style='width:auto;margin-top:4px;' " + String(configSlideshowDeepSleep ? "checked" : "") + ">";
-  html += "<span><b>Deep Sleep</b> zwischen den Bildern (Standard, max. Stromsparen). Erfordert <b>gültige Uhrzeit</b> (NTP nach WLAN). ";
-  html += "Ohne NTP oder abgewählt: nur Leichtschlaf.</span></label>";
+#if PHOTOFRAME_HAS_BUTTONS
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern (Standard, max. Stromsparen). Erfordert <b>g&uuml;ltige Uhrzeit</b> (NTP nach WLAN). ";
+  html += "Ohne NTP oder abgew&auml;hlt: nur Leichtschlaf.</span></label>";
+#else
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern. Am NeoFrame <b>standardm&auml;&szlig;ig aus</b>: Powerbanks schalten bei fast keinem Strom ab. ";
+  html += "Aus = WLAN bleibt aktiv (Powerbank-tauglich). An = max. sparen, nur mit festem Netzteil.</span></label>";
+#endif
   if (!mpu6050Available) {
     html += "<label>Standard-Ausrichtung (kein Lagesensor):</label><select id='orientSel'>";
     html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
@@ -3375,11 +3453,7 @@ void enterQuickMenu() {
 
   Serial1.println("Quick-Menu mode active for 60 seconds");
 
-  display.init(115200);
-  useNativePanelRotation();
-  display.setFullWindow();
-  display.fillScreen(GxEPD_WHITE);
-  display.setTextColor(GxEPD_BLACK);
+  beginTextScreen();
 
   String ipStr = WiFi.localIP().toString();
   int m = 20;
@@ -3514,6 +3588,7 @@ void setup() {
   }
 #endif
 
+  epdPowerOn();
   initSpiBuses();
 
   // Initialize Display
@@ -3554,22 +3629,16 @@ void setup() {
       }
 
       if (!startupShown) {
-        Serial1.println("Kein Startup-.ink auf SD — weiter ohne Begrüßungsbild.");
-        display.fillScreen(GxEPD_WHITE);
-        display.hibernate();
+        Serial1.println("Kein Startup-.ink auf SD — letztes Panelbild bleibt sichtbar.");
       }
     } else {
       Serial1.println("SD-Mount fehlgeschlagen — Betrieb ohne SD (nur Serial, kein Fehlerbildschirm).");
       sdLazyMountFailed = true;
       sdCardMounted = false;
-      display.fillScreen(GxEPD_WHITE);
-      display.hibernate();
     }
   } else {
     Serial1.println("Keine SD-Karte (optional) — voller Betrieb über WLAN/Server.");
     sdCardMounted = false;
-    display.fillScreen(GxEPD_WHITE);
-    display.hibernate();
   }
   
   // Konfiguration vor MPU: Standard-Ausrichtung (defOrient) kommt aus NVS
@@ -3650,9 +3719,9 @@ void setup() {
       String ipLine = WiFi.localIP().toString();
       if (bootConfigApActive) {
         String apLine = String("5 min AP microPhotoFrame http://") + WiFi.softAPIP().toString() + "/";
-        showStatusScreen("WLAN verbunden", ipLine.c_str(), apLine.c_str());
+        showStatusOrKeepLast("WLAN verbunden", ipLine.c_str(), apLine.c_str());
       } else {
-        showStatusScreen("WLAN verbunden", ipLine.c_str(), "http://<IP>/ = Config, auch ohne Taster");
+        showStatusOrKeepLast("WLAN verbunden", ipLine.c_str(), "http://<IP>/ = Config, auch ohne Taster");
       }
     }
 
@@ -3703,13 +3772,13 @@ void setup() {
         } else {
           Serial1.println("Show has no images");
           if (!tryBootOfflineLastImage()) {
-            showStatusScreen("Show has no images", currentShowName.c_str());
+            showStatusOrKeepLast("Show has no images", currentShowName.c_str());
           }
         }
       } else {
         Serial1.println("Failed to load show data");
         if (!tryBootOfflineLastImage()) {
-          showStatusScreen("Failed to load show", currentShowName.c_str());
+          showStatusOrKeepLast("Failed to load show", currentShowName.c_str());
         }
       }
     } else {
@@ -3747,10 +3816,10 @@ void setup() {
             displayNextImage();
           }
         } else if (!tryBootOfflineLastImage()) {
-          showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+          showStatusOrKeepLast("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
         }
       } else if (!tryBootOfflineLastImage()) {
-        showStatusScreen("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+        showStatusOrKeepLast("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
       }
     }
     if (g_wDeepPoll || g_wDeepImg) {
@@ -3775,7 +3844,7 @@ void setup() {
     configModeStartSessionMs = sessionMs();
     String ssidInfo = "SSID: " + (wifiSSID.length() > 0 ? wifiSSID : String("not set"));
     String apInfo = "AP: microPhotoFrame  IP: " + WiFi.softAPIP().toString();
-    showStatusScreen("WiFi Connection Failed", ssidInfo.c_str(), apInfo.c_str());
+    showStatusOrKeepLast("WiFi Connection Failed", ssidInfo.c_str(), apInfo.c_str());
   }
 }
 
@@ -3965,20 +4034,28 @@ void loop() {
     displayNextImage();
   }
 
-  // Deep Sleep (Default, NVS dSleep) oder Leichtschlaf zwischen Slides/Poll
+  // Deep Sleep oder Leichtschlaf zwischen Slides/Poll.
+  // NeoFrame ohne Deep Sleep: wach bleiben — Powerbanks halten die Last.
   if (!configMode && !quickMenuMode && !bootConfigApActive && wifiConnected && WiFi.status() == WL_CONNECTED
       && currentShowImages.size() > 0) {
     if (configSlideshowDeepSleep) {
       trySlideshowDeepSleep();
     }
-    uint64_t now = sessionMs();
-    uint64_t nextImg = lastImageChangeSessionMs + (uint64_t)currentShowTimer * 60000ULL;
-    uint64_t nextPoll = lastServerCheckSessionMs + (uint64_t)SERVER_CHECK_INTERVAL;
-    uint64_t nextEv = nextImg < nextPoll ? nextImg : nextPoll;
-    if (nextEv > now + 40) {
-      uint64_t wait = nextEv - now;
-      if (wait > 1950) wait = 1950;
-      doIdleLightSleepChunk((uint32_t)wait);
+#if !PHOTOFRAME_HAS_BUTTONS
+    const bool allowLightSleep = configSlideshowDeepSleep;
+#else
+    const bool allowLightSleep = true;
+#endif
+    if (allowLightSleep) {
+      uint64_t now = sessionMs();
+      uint64_t nextImg = lastImageChangeSessionMs + (uint64_t)currentShowTimer * 60000ULL;
+      uint64_t nextPoll = lastServerCheckSessionMs + (uint64_t)SERVER_CHECK_INTERVAL;
+      uint64_t nextEv = nextImg < nextPoll ? nextImg : nextPoll;
+      if (nextEv > now + 40) {
+        uint64_t wait = nextEv - now;
+        if (wait > 1950) wait = 1950;
+        doIdleLightSleepChunk((uint32_t)wait);
+      }
     }
   }
 

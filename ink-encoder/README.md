@@ -163,7 +163,8 @@ IDs follow `src/inkEncoder.mjs` (not the npm 1.0.0 README):
 - **"I"**: Spectra 6 · 7.3" · 800×480 · reTerminal E1002
 
 ### Spectra BWR / BWY / BWRY
-- **"Q"**–**"Y"** and **"a"**–**"e"** as in `DISPLAY_LONG_ID_BY_SHORT_ID`
+- **"Q"**–**"Y"** and **"a"**–**"f"** as in `DISPLAY_LONG_ID_BY_SHORT_ID`
+- **"f"**: Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)
 
 ### Beispiel: Display-Informationen abrufen
 

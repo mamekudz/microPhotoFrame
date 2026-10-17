@@ -56,7 +56,9 @@ The 1.0.0 short-id table is remapped:
 - `"0"`–`"3"` remain B&W panels of the same pixel sizes (name punctuation only).
 - From **`"4"`** onward the meaning changes (example: 1.0.0 `"4"` = B&W 7.5" 800×480; 2.0.0 `"4"` = B&W 5.83" 648×480). 1.0.0 `"7"` = Spectra 6 1.69" round; 2.0.0 `"7"` = B&W 13.3".
 
-microPhotoFrame firmware uses `DEVICE_DISPLAY_ID "I"`. Files whose header id is `"9"` do not match that device.
+microPhotoFrame firmware uses `DEVICE_DISPLAY_ID "I"` on E1002/NeoFrame and `"f"` on Waveshare 1.54G (200×200 BWRY). Files whose header id is `"9"` do not match those devices.
+
+Additive in 2.0.0: short id **`"f"`** = Spectra 3100 · 1.54" · 200×200 · Black/White/Red/Yellow.
 
 ### Breaking: default `.ink` format
 
