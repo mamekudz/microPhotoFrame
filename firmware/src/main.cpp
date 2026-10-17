@@ -39,7 +39,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.3.0"
+#define FIRMWARE_VERSION "1.3.1"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -1273,7 +1273,7 @@ static void pumpWeb(uint32_t ms) {
   }
 }
 
-static void showStatusScreen(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+static void showStatusScreen(const char* line1, const char* line2, const char* line3) {
   beginTextScreen();
 
   int yText = 20;
@@ -1303,7 +1303,7 @@ static void showStatusScreen(const char* line1, const char* line2 = nullptr, con
   display.display(false);
 }
 
-static void showStatusOrKeepLast(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr) {
+static void showStatusOrKeepLast(const char* line1, const char* line2, const char* line3) {
   if (hasLastImageOnPanel()) {
     Serial1.print("Status '");
     Serial1.print(line1);
