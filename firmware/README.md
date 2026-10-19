@@ -21,22 +21,24 @@ Der einfachste Weg, die Firmware zu installieren:
 
 **Hinweis:** Der Web-Flasher funktioniert nur in **Chrome**, **Edge** oder **Opera** (keine Firefox-Unterstützung wegen WebSerial API).
 
-### Option 2: PlatformIO (für Entwickler)
+### Option 2: µGulp / PlatformIO (für Entwickler)
 
-Wenn Sie die Firmware selbst kompilieren möchten:
+Im Projektroot: **Target** in µGulp wählen (`reTerminal E1002`, `NeoFrame`, `Waveshare 1.54G`), dann `FIRMWARE_BUILD` / `FIRMWARE_UPLOAD`. Gulp findet `pio` unter `%USERPROFILE%\.platformio\penv`, schreibt die pio-Ausgabe ins Dashboard und nimmt beim Upload einen **lebendigen** USB-Serial-Port (`Status OK`). Der USB-Chip ist nur ein Hinweis: CH340 (`1A86:7523`) ist nicht automatisch NeoFrame, natives CDC (`303A:1001`) nicht automatisch E1002.
+
+Nur-Lade-Kabel erzeugen keinen COM-Port. Windows muss den Anschluss als verbunden zeigen, nicht *Unknown*.
 
 ```bash
 # Repository klonen
 git clone https://github.com/mamekudz/microPhotoFrame.git
-cd microPhotoFrame/firmware
+cd microPhotoFrame
 
-# PlatformIO installieren (falls nicht vorhanden)
-pip install platformio
+# Target setzen, dann bauen / flashen
+npx gulp FIRMWARE_BUILD
+npx gulp FIRMWARE_UPLOAD
 
-# Firmware kompilieren und hochladen
-pio run --target upload
-
-# Serial Monitor starten
+# oder direkt PlatformIO im firmware-Ordner
+cd firmware
+pio run -e seeed_xiao_esp32s3 -t upload
 pio device monitor --raw
 ```
 
@@ -142,6 +144,8 @@ pio device monitor --raw
 ## 🐛 Troubleshooting
 
 ### Upload schlägt fehl
+- **Problem:** µGulp: kein USB-Serial-Gerät / Windows zeigt den Anschluss als *Unknown*
+- **Lösung:** Datenkabel (kein Nur-Lade-Kabel), anderen USB-Anschluss, Strom am Rahmen trennen und neu stecken. Target bewusst wählen — der COM-Port identifiziert das Board nicht eindeutig.
 - **Problem:** `A fatal error occurred: Could not open port`
 - **Lösung:** Stellen Sie sicher, dass kein anderes Programm den COM-Port verwendet
 - **Tipp:** Drücken Sie die **BOOT-Taste** am ESP32-S3 während des Uploads

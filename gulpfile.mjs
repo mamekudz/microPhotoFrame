@@ -227,12 +227,84 @@ function _RunSeries(...tasks) {
 
 function _spawn(cmd, args, options = {}) {
 	return new Promise((resolve, reject) => {
-		const child = cp.spawn(cmd, args, { stdio: 'inherit', shell: true, ...options });
+		const absolute = path.isAbsolute(String(cmd));
+		const child = cp.spawn(cmd, args, {
+			stdio: 'inherit',
+			windowsHide: true,
+			...options,
+			// Absolute .exe + shell:true drops args on Windows (pio exits 1 immediately).
+			shell: options.shell ?? !absolute,
+		});
 		child.on('close', (code) => {
 			if (code !== 0) reject(new Error(`${cmd} exited with code ${code}`));
 			else resolve();
 		});
 		child.on('error', reject);
+	});
+}
+
+/** µGulp / Cursor often lack `pio` on PATH. Prefer the PlatformIO home install. */
+function _resolvePio() {
+	const win = process.platform === 'win32';
+	const home = process.env.USERPROFILE || process.env.HOME || '';
+	const core = process.env.PLATFORMIO_CORE_DIR || path.join(home, '.platformio');
+	const candidates = [
+		process.env.PIO,
+		path.join(core, 'penv', win ? 'Scripts' : 'bin', win ? 'pio.exe' : 'pio'),
+		path.join(home, '.platformio', 'penv', win ? 'Scripts' : 'bin', win ? 'pio.exe' : 'pio'),
+	].filter(Boolean);
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	return 'pio';
+}
+
+function _spawnPio(args, options = {}) {
+	const pio = _resolvePio();
+	if (pio === 'pio') {
+		Warn('pio not on PATH and no ~/.platformio/penv install found — using "pio".<context="task warning"/>');
+	}
+	Log('pio <args/><context="task log"/>', { args: args.join(' ') });
+	const env = { ...process.env, ...(options.env || {}) };
+	if (path.isAbsolute(pio)) {
+		const scripts = path.dirname(pio);
+		const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+		env[pathKey] = scripts + path.delimiter + (env[pathKey] || env.PATH || '');
+		env.PATH = env[pathKey];
+	}
+	return new Promise((resolve, reject) => {
+		const child = cp.spawn(pio, args, {
+			cwd: FIRMWARE_DIR,
+			env,
+			shell: false,
+			windowsHide: true,
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+		let tail = '';
+		const onData = (chunk) => {
+			const text = String(chunk);
+			process.stdout.write(text);
+			tail = (tail + text).slice(-2500);
+			for (const line of text.split(/\r?\n/)) {
+				const trimmed = line.trim();
+				if (trimmed) Log('pio: <line/><context="task log"/>', { line: trimmed.slice(0, 400) });
+			}
+		};
+		child.stdout.on('data', onData);
+		child.stderr.on('data', onData);
+		child.on('error', reject);
+		child.on('close', (code) => {
+			if (code !== 0) {
+				const lines = tail.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+				const useful = [...lines].reverse().find((l) =>
+					/error:|could not open|denied|no serial|not found|failed to|timed out|\*\*\s*\[/i.test(l)
+					&& !/failed, 0 succeeded/i.test(l)
+				);
+				reject(new Error(useful || lines.pop() || `${pio} exited with code ${code}`));
+				return;
+			}
+			resolve();
+		});
 	});
 }
 
@@ -522,6 +594,47 @@ function _pioArgs(extra = []) {
 	return ['run', '-e', meta.pioEnv, ...extra];
 }
 
+/** Connected USB-UART / native CDC ports. Skips Bluetooth COM stubs. */
+function _listUsbSerialPorts() {
+	if (process.platform !== 'win32') return [];
+	try {
+		const out = cp.execSync(
+			'powershell -NoProfile -Command "Get-PnpDevice -Class Ports -Status OK | ForEach-Object { $_.FriendlyName }"',
+			{ encoding: 'utf8', windowsHide: true },
+		);
+		const ports = [];
+		for (const line of out.split(/\r?\n/)) {
+			const m = line.match(/^(.*)\((COM\d+)\)\s*$/i);
+			if (!m) continue;
+			const name = m[1].trim();
+			if (/Bluetooth|Standardm/i.test(name) && !/CH340|CH9102|XIAO|USB-SERIAL|Serielles USB/i.test(name)) {
+				continue;
+			}
+			ports.push({ com: m[2].toUpperCase(), name });
+		}
+		return ports;
+	} catch {
+		return [];
+	}
+}
+
+function _resolveUploadPort() {
+	const ports = _listUsbSerialPorts();
+	if (!ports.length) {
+		throw new Error('Kein USB-Serial-Gerät. Rahmen per Datenkabel anschließen und den Task erneut starten.');
+	}
+	for (const p of ports) {
+		Log('USB serial: <com/> — <name/><context="task log"/>', { com: p.com, name: p.name });
+	}
+	if (ports.length === 1) return ports[0].com;
+	const meta = _activeFirmwareMeta();
+	const preferXiao = meta.id === 'reterminal-e1002' || meta.id === 'waveshare-154g';
+	const match = ports.find((p) => preferXiao
+		? /XIAO|Serielles USB|303A/i.test(p.name)
+		: /CH340|CH9102|USB-SERIAL/i.test(p.name));
+	return (match || ports[0]).com;
+}
+
 async function _firmwareBuild(cb) {
 	Log('Building firmware…<context="task section"/>');
 	const progress = CreateProgress(Translate('Firmware<context="task log"/>'));
@@ -530,7 +643,7 @@ async function _firmwareBuild(cb) {
 		const meta = await _prepareFirmwareSources();
 		progress.Update(0.35);
 		Log('Building <label/> (<env/>)…<context="task log"/>', { label: meta.label, env: meta.pioEnv });
-		await _spawn('pio', _pioArgs(), { cwd: FIRMWARE_DIR });
+		await _spawnPio(_pioArgs());
 		progress.Done();
 		Log('Firmware build successful.<context="task log"/>');
 		cb();
@@ -547,7 +660,9 @@ async function _firmwareUpload(cb) {
 	try {
 		await _prepareFirmwareSources();
 		ReportProgress(0.35);
-		await _spawn('pio', _pioArgs(['-t', 'upload']), { cwd: FIRMWARE_DIR });
+		const port = _resolveUploadPort();
+		Log('Uploading to <port/> (<label/>).<context="task log"/>', { port, label: _activeFirmwareMeta().label });
+		await _spawnPio(_pioArgs(['-t', 'upload', '--upload-port', port]));
 		ReportProgress(1);
 		Log('Firmware upload successful.<context="task log"/>');
 		cb();
@@ -562,10 +677,12 @@ async function _firmwareUploadMonitor(cb) {
 	await _killSerialMonitors();
 	try {
 		await _prepareFirmwareSources();
-		await _spawn('pio', _pioArgs(['-t', 'upload']), { cwd: FIRMWARE_DIR });
+		const port = _resolveUploadPort();
+		Log('Uploading to <port/> (<label/>).<context="task log"/>', { port, label: _activeFirmwareMeta().label });
+		await _spawnPio(_pioArgs(['-t', 'upload', '--upload-port', port]));
 		Log('Upload successful. Starting monitor…<context="task log"/>');
 		await new Promise((r) => setTimeout(r, 2000));
-		await _spawn('pio', ['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv], { cwd: FIRMWARE_DIR });
+		await _spawnPio(['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv, '--port', port]);
 		cb();
 	} catch (err) {
 		LogError('Firmware upload/monitor failed: <message/><context="task error"/>', { message: err.message });
@@ -576,7 +693,7 @@ async function _firmwareUploadMonitor(cb) {
 async function _firmwareMonitor(cb) {
 	Log('Starting serial monitor…<context="task section"/>');
 	try {
-		await _spawn('pio', ['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv], { cwd: FIRMWARE_DIR });
+		await _spawnPio(['device', 'monitor', '-e', _activeFirmwareMeta().pioEnv]);
 		cb();
 	} catch (err) {
 		LogError('Monitor failed: <message/><context="task error"/>', { message: err.message });

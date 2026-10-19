@@ -80,10 +80,12 @@ The easiest way for end users:
 
 **👉 [Open Web Flasher](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
-1. Connect **reTerminal** (native USB), **NeoFrame** (USB-A / CH340) or **Waveshare 1.54G** (native USB-C) via USB
-2. In µGulp choose **Target** `reTerminal E1002`, `NeoFrame` or `Waveshare 1.54G`, then upload
-3. Select the matching COM port
+1. Use a **data** USB cable (charge-only cables do not create a COM port). Windows Device Manager must show the port as connected (not *Unknown*).
+2. In µGulp choose **Target** explicitly: `reTerminal E1002`, `NeoFrame` or `Waveshare 1.54G`. USB chip is only a hint — CH340 is not automatically NeoFrame.
+3. `FIRMWARE_UPLOAD` picks a live USB serial port. Typical IDs: native ESP32-S3 CDC `303A:1001` (XIAO / often E1002 or Waveshare), CH340 `1A86:7523` (UART adapter).
 4. Wait until complete (~2 minutes)
+
+If the task says no USB serial device, unplug power, try another data cable, and avoid charge-only or power-only sockets on the frame.
 
 More options: [Firmware README](firmware/README.md)
 
@@ -165,7 +167,7 @@ The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParamete
 
 **NAS backup is a mirror with deletions, not a versioned backup.** Extra files on the destination are removed. Regenerable trees (`node_modules`, `dist`, `tmp`, `.pio`, …) are not copied; leftovers with those names are deleted **inside the destination only**. `lib` / `build` are excluded only as project-root (and `firmware/lib`) paths so vendored `src/libs` is kept. Drive/share roots and destinations that are the project folder, a parent, or a child of it are refused. Junctions/symlinks that point outside the destination are not followed for deletion.
 
-`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO for the µGulp **Target** (`reTerminal E1002`, `NeoFrame` or `Waveshare 1.54G`). `FIRMWARE_RESTORE_FACTORY` writes a stock image at `0x0` when one is present under `firmware/factory/<target>/`. `µWatch` is dashboard-only; on the CLI run the task again after edits.
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` wrap PlatformIO for the µGulp **Target** (`reTerminal E1002`, `NeoFrame` or `Waveshare 1.54G`). Gulp locates `pio` under `%USERPROFILE%\.platformio\penv` when it is missing from PATH, logs pio output in the dashboard, and for upload requires a live USB serial port (`--upload-port`). `FIRMWARE_RESTORE_FACTORY` writes a stock image at `0x0` when one is present under `firmware/factory/<target>/`. `µWatch` is dashboard-only; on the CLI run the task again after edits.
 
 **Checked on 2026-09-18** (this workstation: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP dashboard (`microgulp-serve --http`) `ENCODE_INK` parameter form, successful synthetic PNG→`.ink` (`DONE 100%`, visible log), and a missing-file failure (`No files found`). CLI the same day: `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` success and missing-input abort. `node --test tools/nas-backup.test.mjs`. **Not claimed as tested here:** µWatch arming, `LogTable` after server packages, firmware flash, live NAS backup, `npm publish`.
 
@@ -243,10 +245,12 @@ Der einfachste Weg für Endanwender:
 
 **👉 [Web-Flasher öffnen](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
-1. **reTerminal** (natives USB), **NeoFrame** (USB-A / CH340) oder **Waveshare 1.54G** (natives USB-C) per USB verbinden
-2. In µGulp **Target** `reTerminal E1002`, `NeoFrame` oder `Waveshare 1.54G` wählen, dann hochladen
-3. Passenden COM-Port auswählen
+1. **Datenkabel** verwenden (Nur-Lade-Kabel erzeugen keinen COM-Port). In der Windows-Geräteverwaltung muss der Anschluss verbunden sein, nicht *Unknown*.
+2. In µGulp das **Target** bewusst wählen: `reTerminal E1002`, `NeoFrame` oder `Waveshare 1.54G`. Der USB-Chip ist nur ein Hinweis — CH340 ist nicht automatisch NeoFrame.
+3. `FIRMWARE_UPLOAD` nimmt einen aktiven USB-Serial-Port. Typisch: natives ESP32-S3-CDC `303A:1001` (XIAO / oft E1002 oder Waveshare), CH340 `1A86:7523` (UART-Adapter).
 4. Warten bis fertig (~2 Minuten)
+
+Meldung „Kein USB-Serial-Gerät“: Strom trennen, anderes Datenkabel, keinen reinen Lade- oder Stromanschluss am Rahmen.
 
 Weitere Optionen: [Firmware README](firmware/README.md)
 
@@ -335,7 +339,7 @@ Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: 
 
 **Die NAS-Sicherung ist eine Spiegelung mit Löschungen, kein versioniertes Backup.** Überzählige Dateien am Ziel werden entfernt. Reproduzierbare Bäume (`node_modules`, `dist`, `tmp`, `.pio`, …) werden nicht kopiert; Reste dieser Namen nur **innerhalb des Ziels** gelöscht. `lib` / `build` gelten nur als Projektroot (plus `firmware/lib`), damit `src/libs` erhalten bleibt. Laufwerks-/Freigabewurzeln sowie Ziele, die dem Projekt, einem Vorfahren oder einem Unterordner entsprechen, werden verweigert. Junctions/Symlinks nach außerhalb des Ziels werden beim Löschen nicht gefolgt.
 
-`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO für das µGulp-**Target** (`reTerminal E1002`, `NeoFrame` oder `Waveshare 1.54G`) auf. `FIRMWARE_RESTORE_FACTORY` schreibt ein Stock-Image nach `0x0`, wenn eines unter `firmware/factory/<ziel>/` liegt. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
+`npx gulp FIRMWARE_BUILD` / `FIRMWARE_UPLOAD` / `FIRMWARE_MONITOR` rufen PlatformIO für das µGulp-**Target** (`reTerminal E1002`, `NeoFrame` oder `Waveshare 1.54G`) auf. Gulp findet `pio` unter `%USERPROFILE%\.platformio\penv`, wenn PATH ihn nicht kennt, schreibt die pio-Ausgabe ins Dashboard und verlangt beim Upload einen lebendigen USB-Serial-Port (`--upload-port`). `FIRMWARE_RESTORE_FACTORY` schreibt ein Stock-Image nach `0x0`, wenn eines unter `firmware/factory/<ziel>/` liegt. `µWatch` gilt nur im Dashboard; auf der CLI den Task nach Änderungen erneut starten.
 
 **Geprüft am 2026-09-18** (dieser Rechner: Windows 10.0.22631, Cursor, Node v22.19.0, gulp 5.0.1, gulp-mu-gulp-api 0.4.2, µGulp™ 0.9.5): HTTP-Dashboard (`microgulp-serve --http`) `ENCODE_INK` mit Parameterformular, erfolgreichem synthetischem PNG→`.ink` (`DONE 100%`, sichtbares Log) und Fehlerfall fehlende Datei (`No files found`). CLI am selben Tag: Erfolg mit `MICROGULP_PARAM_INPUT`/`OUTPUT`/`CONFIG` und Abbruch ohne Input. NAS-Unit-Tests. **Hier nicht geprüft:** µWatch-Scharfschaltung, `LogTable` nach Serverpaketen, Firmware-Flash, echtes NAS-Backup, `npm publish`.
 
