@@ -2,78 +2,63 @@
 
 Dieses Verzeichnis enthält vorgefertigte Bildergalerien zum direkten Import.
 
-## 📦 Verfügbare Shows
+## Verfügbare Shows
 
-### 1. Colorful Animals 🦎
-**Für:** reTerminal E1002 (Full Color)  
-**Bilder:** 10 farbenfrohe Tier-Fotos  
-**Lizenz:** Unsplash License (kostenlos)
+### 1. Colorful Animals
+**Für:** reTerminal E1002 (Full Color)
+**Bilder:** 10 farbenfrohe Tier-Fotos
+**Lizenz:** Unsplash License
 
-- Chamäleon mit bunten Schuppen
-- Ara-Papagei in Blau und Gelb
-- Blauer Morphofalter
-- Kampffisch (Betta) in lebendigen Farben
-- Pfau mit ausgebreiteten Federn
-- Tukan mit farbigem Schnabel
-- Pfeilgiftfrosch
-- Eisvogel in brillantem Blau
-- Mandrill mit buntem Gesicht
-- Tropische Korallenfische
+Chamäleon, Ara, Morphofalter, Kampffisch, Pfau, Tukan, Pfeilgiftfrosch, Eisvogel, Mandrill, Korallenfische.
 
-**Status:** ✅ Bildquellen fertig, ZIP-Export folgt
+**Status:** Bildquellen fertig, ZIP-Export folgt
 
-## 🎯 Verwendung
+### 2. Classic Art
+**Für:** reTerminal E1002 (Full Color), auch andere Farb-Panels
+**Bilder:** 12 gemeinfreie Gemälde
+**Lizenz:** Public Domain (Wikimedia Commons)
 
-### Option 1: Über Webapp importieren (Empfohlen)
+Vermeer (Perlenohrring, Milchmädchen), van Gogh (Sternennacht, Sonnenblumen), Hokusai (Große Welle), Leonardo (Mona Lisa), Botticelli (Geburt der Venus), Monet (Impression, Sonnenaufgang), Rembrandt (Nachtwache), Turner (Fighting Temeraire), Seurat (Grande Jatte), Klimt (Der Kuss).
+
+```bash
+node tools/downloadShowImages.mjs ClassicArt
+```
+
+**Status:** Bildquellen fertig. Originale nach `ClassicArt/ClassicArt_orgimgs/` laden, dann in der Webapp Add Photos.
+
+## Verwendung
+
+### Option 1: Über Webapp importieren
 1. Webapp öffnen
-2. 'Import Show' auswählen
-3. ZIP-Datei hochladen
-4. Fertig!
+2. Import Show
+3. ZIP- oder `.show`-Datei hochladen
 
-### Option 2: Bilder manuell herunterladen
-1. JSON-Datei öffnen (z.B. 'ColorfulAnimals_orgimgs.json')
-2. Bildquellen über URLs herunterladen
-3. In 'xxx_orgimgs/' Verzeichnis ablegen
-4. Über Webapp 'Add Photos' verwenden
+### Option 2: Originale herunterladen und verarbeiten
+1. `node tools/downloadShowImages.mjs <ShowName>`
+2. Show in der Webapp anlegen
+3. Add Photos auf den Ordner `*_orgimgs`
 
-## 📥 Bildquellen
+## Bildquellen
 
-Alle Bilder stammen von **Unsplash.com** und sind:
-- ✅ Kostenlos für privaten und kommerziellen Gebrauch
-- ✅ Keine Registrierung erforderlich
-- ✅ Keine Namensnennung erforderlich (aber nett!)
-- ✅ Hochauflösend (800px optimal für E-Ink)
+**Unsplash** (Colorful Animals): frei für privat und kommerziell.
 
-## 🎨 Weitere Show-Ideen
+**Wikimedia Commons** (Classic Art): gemeinfreie Werke, Künstler tot seit mehr als 70 Jahren.
 
-- **Nature Landscapes:** Berge, Ozeane, Wälder (gut für Grayscale)
-- **Abstract Art:** Moderne abstrakte Kunst und Geometrie
-- **Space & Cosmos:** Planeten, Nebel, Galaxien
-- **Minimalist:** Einfache, reduzierte Designs
+## JSON-Format
 
-## 🛠️ Show selbst erstellen
-
-1. Verzeichnis erstellen: 'MyShow/'
-2. JSON-Datei mit Bildquellen: 'MyShow_orgimgs.json'
-3. Bilder-Ordner: 'MyShow_orgimgs/'
-4. Über Webapp verarbeiten und exportieren
-
-## 📄 JSON Format
-
-`json
+```json
 {
   "name": "Show Name",
   "description": "Beschreibung",
   "displayId": "I",
-  "timer": 5,
-  "mode": "random",
+  "timer": 15,
+  "mode": "sequential",
   "images": [
     {
       "name": "bild_name",
       "url": "https://...",
       "description": "...",
-      "photographer": "...",
-      "source": "Unsplash"
+      "source": "Wikimedia Commons"
     }
   ],
   "credits": {
@@ -82,10 +67,6 @@ Alle Bilder stammen von **Unsplash.com** und sind:
     "url": "https://..."
   }
 }
-`
+```
 
----
-
-💡 **Tipp:** Verwenden Sie die Webapp zum Verarbeiten - sie optimiert Bilder automatisch für E-Ink Displays!
-
-Made with ❤️ for microPhotoFrame
+Die Webapp verarbeitet die Fotos für das gewählte E-Ink-Display.

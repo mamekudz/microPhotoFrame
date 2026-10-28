@@ -1,0 +1,100 @@
+﻿{
+    "name":  "Classic Art",
+    "description":  "Twelve public-domain paintings for a color E-Ink frame: Vermeer, van Gogh, Hokusai, Leonardo, Botticelli, Monet, Rembrandt, Turner, Seurat, Klimt.",
+    "version":  "1.0.0",
+    "displayId":  "9",
+    "timer":  15,
+    "mode":  "sequential",
+    "dither":  "floyd",
+    "images":  [
+                   {
+                       "name":  "vermeer_pearl_earring",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Girl_with_a_Pearl_Earring.jpg?width=1600",
+                       "description":  "Johannes Vermeer, Girl with a Pearl Earring, c. 1665",
+                       "artist":  "Johannes Vermeer",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "vangogh_starry_night",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg?width=1600",
+                       "description":  "Vincent van Gogh, The Starry Night, 1889",
+                       "artist":  "Vincent van Gogh",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "hokusai_great_wave",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/The_Great_Wave_off_Kanagawa.jpg?width=1600",
+                       "description":  "Katsushika Hokusai, The Great Wave off Kanagawa, c. 1831",
+                       "artist":  "Katsushika Hokusai",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "leonardo_mona_lisa",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg?width=1600",
+                       "description":  "Leonardo da Vinci, Mona Lisa, c. 1503–1506",
+                       "artist":  "Leonardo da Vinci",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "vangogh_sunflowers",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Vincent_Willem_van_Gogh_127.jpg?width=1600",
+                       "description":  "Vincent van Gogh, Sunflowers, 1888",
+                       "artist":  "Vincent van Gogh",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "botticelli_venus",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg?width=1600",
+                       "description":  "Sandro Botticelli, The Birth of Venus, c. 1485",
+                       "artist":  "Sandro Botticelli",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "monet_impression_sunrise",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Monet_-_Impression,_Sunrise.jpg?width=1600",
+                       "description":  "Claude Monet, Impression, Sunrise, 1872",
+                       "artist":  "Claude Monet",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "rembrandt_night_watch",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/The_Nightwatch_by_Rembrandt.jpg?width=1600",
+                       "description":  "Rembrandt van Rijn, The Night Watch, 1642",
+                       "artist":  "Rembrandt van Rijn",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "turner_temeraire",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/The_Fighting_Temeraire,_JMW_Turner,_National_Gallery.jpg?width=1600",
+                       "description":  "J. M. W. Turner, The Fighting Temeraire, 1839",
+                       "artist":  "J. M. W. Turner",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "seurat_grande_jatte",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Georges_Seurat_-_A_Sunday_on_La_Grande_Jatte_--_1884_-_Google_Art_Project.jpg?width=1600",
+                       "description":  "Georges Seurat, A Sunday on La Grande Jatte, 1884",
+                       "artist":  "Georges Seurat",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "klimt_the_kiss",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg?width=1600",
+                       "description":  "Gustav Klimt, The Kiss, 1907–1908",
+                       "artist":  "Gustav Klimt",
+                       "source":  "Wikimedia Commons"
+                   },
+                   {
+                       "name":  "vermeer_milkmaid",
+                       "url":  "https://commons.wikimedia.org/wiki/Special:FilePath/Johannes_Vermeer_-_Het_melkmeisje_-_Google_Art_Project.jpg?width=1600",
+                       "description":  "Johannes Vermeer, The Milkmaid, c. 1658",
+                       "artist":  "Johannes Vermeer",
+                       "source":  "Wikimedia Commons"
+                   }
+               ],
+    "credits":  {
+                    "source":  "Wikimedia Commons",
+                    "license":  "Public domain — the artists died more than 70 years ago. Files via Wikimedia Commons.",
+                    "url":  "https://commons.wikimedia.org/"
+                }
+}

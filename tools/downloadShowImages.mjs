@@ -50,45 +50,55 @@ if (!data.images || !Array.isArray(data.images)) {
 
 console.log(`✅ Found ${data.images.length} images to download\n`);
 
-// Download a single image
-function downloadImage(url, filename) {
+const USER_AGENT = 'microPhotoFrame/1.5 (https://github.com/mamekudz/microPhotoFrame)';
+
+function downloadImage(url, filename, hops = 0) {
   return new Promise((resolve, reject) => {
     const filepath = path.join(outputDir, filename);
-    
-    // Skip if file already exists
-    if (fs.existsSync(filepath)) {
+
+    if (hops === 0 && fs.existsSync(filepath)) {
       console.log(`⏭️  Skipping ${filename} (already exists)`);
       resolve();
       return;
     }
-    
-    console.log(`⬇️  Downloading ${filename}...`);
-    
-    const file = fs.createWriteStream(filepath);
-    
-    https.get(url, (response) => {
-      // Follow redirects
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        https.get(response.headers.location, (redirectResponse) => {
-          redirectResponse.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            console.log(`✅ Downloaded ${filename}`);
-            resolve();
-          });
-        }).on('error', (err) => {
-          fs.unlink(filepath, () => {});
-          reject(err);
-        });
-      } else {
-        response.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          console.log(`✅ Downloaded ${filename}`);
-          resolve();
-        });
+    if (hops > 6) {
+      reject(new Error('too many redirects'));
+      return;
+    }
+    if (hops === 0) console.log(`⬇️  Downloading ${filename}...`);
+
+    const req = https.get(url, { headers: { 'User-Agent': USER_AGENT } }, (response) => {
+      const loc = response.headers.location;
+      if (loc && [301, 302, 303, 307, 308].includes(response.statusCode)) {
+        response.resume();
+        const next = loc.startsWith('http') ? loc : new URL(loc, url).href;
+        downloadImage(next, filename, hops + 1).then(resolve, reject);
+        return;
       }
-    }).on('error', (err) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+      const type = String(response.headers['content-type'] || '');
+      if (type && !type.startsWith('image/')) {
+        response.resume();
+        reject(new Error(`not an image: ${type}`));
+        return;
+      }
+      const file = fs.createWriteStream(filepath);
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        console.log(`✅ Downloaded ${filename}`);
+        resolve();
+      });
+      file.on('error', (err) => {
+        fs.unlink(filepath, () => {});
+        reject(err);
+      });
+    });
+    req.on('error', (err) => {
       fs.unlink(filepath, () => {});
       reject(err);
     });
