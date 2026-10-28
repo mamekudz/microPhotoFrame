@@ -18,13 +18,16 @@ foreach ($item in $manifest.items) {
             & curl.exe --fail --location --proto '=https' --proto-redir '=https' `
                 --retry 5 --retry-all-errors --retry-delay 3 --retry-max-time 180 `
                 --continue-at - --silent --show-error -o $part $item.url
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $part) -and (Get-FileHash $part -Algorithm SHA256).Hash -eq $item.sha256) {
-                $ok = $true
-                break
+            if ($LASTEXITCODE -ne 0 -or !(Test-Path $part)) {
+                Write-Host "Download attempt $attempt failed for $($item.file) (exit $LASTEXITCODE)"
+                if (Test-Path $part) { Remove-Item -LiteralPath $part -Force }
+                Start-Sleep -Seconds (3 * $attempt)
+                continue
             }
-            Write-Host "Download attempt $attempt failed for $($item.file) (exit $LASTEXITCODE)"
-            if (Test-Path $part) { Remove-Item -LiteralPath $part -Force }
-            Start-Sleep -Seconds (3 * $attempt)
+            $got = (Get-FileHash $part -Algorithm SHA256).Hash.ToLower()
+            $want = ([string]$item.sha256).ToLower()
+            if ($got -eq $want) { $ok = $true; break }
+            throw "Checksum mismatch: $($item.file) expected $want got $got"
         }
         if (-not $ok) { throw "Download failed: $($item.file)" }
         Move-Item -LiteralPath $part -Destination $file -Force

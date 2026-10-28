@@ -2,6 +2,16 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 4,
+		"date": "2026-10-28 11:02",
+		"beta": false,
+		"info": [
+			"Installer runtimes: Apache Lounge zip pin updated; PHP Windows builds moved to 8.4.27-1 after 8.4.26 disappeared."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 3,
 		"date": "2026-10-28 10:08",
 		"beta": false,

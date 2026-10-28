@@ -26,7 +26,7 @@
     {
       "file": "apache.zip",
       "url": "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.69-261002-Win64-VS18.zip",
-      "sha256": "ca272e0b75abad78b1e4029a0753b20ff2232d2d857e8eebeea5d469c5776977",
+      "sha256": "77d715d0d9cee731e2251e7ddc2090a7a8e6d41fedef2e9827cd918593c5a652",
       "servers": [
         "apache"
       ],
@@ -36,8 +36,8 @@
     },
     {
       "file": "php-ts.zip",
-      "url": "https://downloads.php.net/~windows/releases/php-8.4.26-Win32-vs17-x64.zip",
-      "sha256": "6e56f0e932e92bfdce208d3a7e6068f6e2f7a19fc2922a5f856fb085f61673f3",
+      "url": "https://downloads.php.net/~windows/releases/php-8.4.27-1-Win32-vs17-x64.zip",
+      "sha256": "53db2047139bdfb8e6c7c7d5860a0a6a2a4f1dcac49fcf18ae610a14d8ccdf5b",
       "servers": [
         "apache"
       ],
@@ -107,8 +107,8 @@
     },
     {
       "file": "php-nts.zip",
-      "url": "https://downloads.php.net/~windows/releases/php-8.4.26-nts-Win32-vs17-x64.zip",
-      "sha256": "da68394f9193b7f6b89d0c76861a4034ae10efee7fd55a7255d8118c2acf70d7",
+      "url": "https://downloads.php.net/~windows/releases/php-8.4.27-1-nts-Win32-vs17-x64.zip",
+      "sha256": "dbae154a0a89791f36c3d48e68bae797878333e7d6cb5721e74617de59b63ab7",
       "servers": [
         "nginx"
       ],
