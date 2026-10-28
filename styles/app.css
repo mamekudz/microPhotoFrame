@@ -601,6 +601,12 @@
             margin-right: 4px;
         }
 
+        .back-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
         @media (prefers-color-scheme: dark) {
             .back-btn {
                 background: #666;

@@ -84,5 +84,6 @@
 	"(none)<context=\"ui\"/>": "(keine)",
 	"Initializing µPhotoFrame™...<context=\"ui\"/>": "µPhotoFrame™ wird gestartet...",
 	"Please wait while the application starts<context=\"ui\"/>": "Bitte warten, die Anwendung startet",
-	"Page<context=\"ui\"/>": "Seite"
+	"Page<context=\"ui\"/>": "Seite",
+	"Photos are still being processed. Stay on this page.<context=\"ui\"/>": "Fotos werden noch verarbeitet. Bitte auf dieser Seite bleiben."
 }

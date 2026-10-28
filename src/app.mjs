@@ -1,7 +1,7 @@
 import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
-import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs";
+import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs?v=exp2";
 import RESTX from "./microLib/RESTX.mjs";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
@@ -197,6 +197,9 @@ function loadSettingsFromStorage() {
 }
 
 window.ShowPage = function (pageId) {
+    if (window._addPhotosBusy && pageId !== 'AddShowPhotos') {
+        return;
+    }
     if (PAGES_NEED_SHOW.includes(pageId) && !getSelectedShowName()) {
         if (pageId === 'AddShowPhotos' || pageId === 'ManageShowPhotos') {
             window.ShowPage('AddNewShow');
@@ -317,20 +320,59 @@ window.ShowPage = function (pageId) {
 // Track ongoing operations to prevent navigation during processing
 window._ongoingOperations = 0;
 
+window._addPhotosBusy = false;
+
+function setBusyControls(ids, busy) {
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = busy;
+        if (busy) el.setAttribute('aria-disabled', 'true');
+        else el.removeAttribute('aria-disabled');
+    });
+}
+
+function applyAddPhotosBusyControls() {
+    const next = !!window._addPhotosBusy;
+    const leaveHint = t('Photos are still being processed. Stay on this page.<context="ui"/>');
+    const back = document.getElementById('addPhotosBackBtn');
+    if (back) {
+        back.disabled = next;
+        back.title = next ? leaveHint : '';
+        back.setAttribute('aria-disabled', next ? 'true' : 'false');
+    }
+    setBusyControls([
+        'btnProcessAndAddPhotos',
+        'addPhotosFilesBtn',
+        'addPhotosInput',
+        'saveAspectAdd',
+        'autoOptimizeAdd',
+        'globalShowSelect',
+        'globalChannelSelect'
+    ], next);
+}
+
+function setAddPhotosBusy(busy) {
+    const next = !!busy;
+    const was = !!window._addPhotosBusy;
+    window._addPhotosBusy = next;
+    if (next && !was) window.StartOperation();
+    if (!next && was) window.EndOperation();
+    applyAddPhotosBusyControls();
+}
+
 // Enable/disable back buttons based on ongoing operations
 window.UpdateBackButtons = function(enabled) {
     const backButtons = document.querySelectorAll('.back-btn');
     backButtons.forEach(btn => {
+        btn.disabled = !enabled;
+        btn.style.opacity = enabled ? '1' : '0.45';
+        btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        btn.style.pointerEvents = enabled ? 'auto' : 'none';
         if (enabled) {
-            btn.disabled = false;
-            btn.style.opacity = '1';
-            btn.style.cursor = 'pointer';
-            btn.style.pointerEvents = 'auto';
+            btn.removeAttribute('aria-disabled');
         } else {
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
-            btn.style.pointerEvents = 'none';
+            btn.setAttribute('aria-disabled', 'true');
         }
     });
 };
@@ -364,8 +406,11 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 window.Return2TopMenu = () => {
+    if (window._addPhotosBusy) {
+        return;
+    }
     if (window.IsOperationOngoing()) {
-        if (!confirm('An operation is currently in progress. Are you sure you want to go back?')) {
+        if (!confirm(t('Photos are still being processed. Stay on this page.<context="ui"/>'))) {
             return;
         }
     }
@@ -396,6 +441,7 @@ function isAcceptedDropFile(file, kinds) {
 }
 
 function assignDroppedFiles(input, files, kinds, multi) {
+    if (window._addPhotosBusy) return false;
     if (!input || !files || !files.length) return false;
     const dt = new DataTransfer();
     for (const file of files) {
@@ -718,6 +764,7 @@ window.UpdateGlobalChannelSelect = function () {
     if (!pick || !currentChannels[pick]) pick = currentDefaultChannel || slugs[0] || '';
     sel.value = pick;
     if (pick) saveLastSelectedChannel(pick);
+    applyAddPhotosBusyControls();
 };
 
 window.ShowNewChannel = function () {
@@ -726,6 +773,7 @@ window.ShowNewChannel = function () {
 };
 
 window.OnGlobalChannelChange = function () {
+    if (window._addPhotosBusy) return;
     const slug = getSelectedChannelSlug();
     if (slug && slug !== NEW_CHANNEL_VALUE) {
         saveLastSelectedChannel(slug);
@@ -972,6 +1020,7 @@ window.UpdateGlobalShowSelect = async function () {
                 if (window.UpdateActivateShowButton) {
                     window.UpdateActivateShowButton();
                 }
+                applyAddPhotosBusyControls();
                 // Ensure active show option keeps red color after selection
                 const options = sel.options;
                 for (let i = 0; i < options.length; i++) {
@@ -993,6 +1042,7 @@ window.UpdateGlobalShowSelect = async function () {
     } finally {
         window._updatingShowSelect = false;
         syncPhotoSettingsDisplayFromContext();
+        applyAddPhotosBusyControls();
     }
 };
 
@@ -1017,26 +1067,13 @@ window.UpdateButtonStates = async function () {
     const selectedShow = globalSelect ? globalSelect.value : '';
     
     // Buttons that modify the current show
-    const modifyButtons = ['btnDeleteShow', 'btnShowSettings', 'btnAddShowPhotos', 'btnManageShowPhotos', 'btnExportShow'];
-    
-    // Get the displayId of the selected show
-    let selectedShowDisplayId = null;
-    if (selectedShow) {
-        try {
-            const showRes = await new RESTX().promiseCall('getShow', { showName: selectedShow });
-            if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
-                selectedShowDisplayId = showRes.output.show.displayId;
-            }
-        } catch (e) {
-            console.warn("Could not load displayId for selected show:", selectedShow, e);
-        }
-    }
-    
-    // Check if the selected show is active for its displayId
+    const modifyButtons = ['btnDeleteShow', 'btnShowSettings', 'btnActivateShow', 'btnAddShowPhotos', 'btnManageShowPhotos', 'btnExportShow'];
+
     const selectedShowTrimmed = selectedShow ? selectedShow.trim() : '';
-    const isActive = !!selectedShowTrimmed && !!selectedShowDisplayId &&
-                   currentActiveShows[selectedShowDisplayId] &&
-                   currentActiveShows[selectedShowDisplayId].trim() === selectedShowTrimmed;
+    const channelSlug = getSelectedChannelSlug();
+    const isActive = !!selectedShowTrimmed && !!channelSlug &&
+        currentChannels[channelSlug] &&
+        (currentChannels[channelSlug].showName || '').trim() === selectedShowTrimmed;
     
     modifyButtons.forEach(btnId => {
         const btn = document.getElementById(btnId);
@@ -1065,7 +1102,7 @@ window.UpdateButtonStates = async function () {
                     btn.disabled = true;
                     btn.style.opacity = '0.5';
                     btn.style.cursor = 'not-allowed';
-                    btn.title = 'This show is already active for its display.';
+                    btn.title = 'This show is already assigned to the channel.';
                 }
             } else {
                 // Reset to default
@@ -1078,7 +1115,7 @@ window.UpdateButtonStates = async function () {
                     btn.disabled = false;
                     btn.style.opacity = '1';
                     btn.style.cursor = 'pointer';
-                    btn.title = '';
+                    btn.title = 'Assign this show to the channel.';
                 }
             }
         }
@@ -1098,6 +1135,7 @@ window.GetCurrentPageId = function () {
 
 // Reload the current page if it's show-specific
 window.ReloadCurrentPageIfNeeded = function () {
+    if (window._addPhotosBusy) return;
     // Use stored page ID to avoid race conditions
     const currentPageId = window._currentPageId || window.GetCurrentPageId();
     if (!currentPageId) return;
@@ -2366,24 +2404,7 @@ window.ProcessAndAddPhotos = async function () {
         }, 3000);
         return;
     }
-    
-    // Reset stop flag
-    window._stopAddPhotos = false;
-    
-    // Start operation - disable back buttons
-    window.StartOperation();
-    
-    // Get the displayId from the show (will be used automatically during conversion)
-    let showDisplayId = null;
-    try {
-        const showRes = await new RESTX().promiseCall('getShow', { showName: showName });
-        if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
-            showDisplayId = showRes.output.show.displayId;
-        }
-    } catch (err) {
-        console.error("Error loading show displayId:", err);
-    }
-    
+
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#e74c3c';
@@ -2392,9 +2413,27 @@ window.ProcessAndAddPhotos = async function () {
         setTimeout(() => {
             messageDiv.style.display = 'none';
         }, 3000);
-        window.EndOperation();
         return;
     }
+
+    if (window._addPhotosBusy) return;
+
+    window._stopAddPhotos = false;
+    setAddPhotosBusy(true);
+
+    let showDisplayId = null;
+    let processedCount = 0;
+    let totalFiles = 0;
+    let stopped = false;
+    try {
+        try {
+            const showRes = await new RESTX().promiseCall('getShow', { showName: showName });
+            if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
+                showDisplayId = showRes.output.show.displayId;
+            }
+        } catch (err) {
+            console.error("Error loading show displayId:", err);
+        }
     
     if (!detectorModel) {
         messageDiv.style.display = 'block';
@@ -2411,8 +2450,7 @@ window.ProcessAndAddPhotos = async function () {
     }
     
     const files = Array.from(fileInput.files);
-    const totalFiles = files.length;
-    let processedCount = 0;
+    totalFiles = files.length;
     let successCount = 0;
     let errorCount = 0;
     
@@ -2576,21 +2614,18 @@ window.ProcessAndAddPhotos = async function () {
         messageDiv.style.display = 'none';
     }, 5000);
     
-    // Clear file input
-    fileInput.value = '';
-    window.UpdateAddPhotosButtonText();
-    
-    // Reset stop flag
-    window._stopAddPhotos = false;
-    
-    // End operation - re-enable back buttons
-    window.EndOperation();
-    
-    // Automatically navigate to Manage Photos page to review results
-    if (!window._stopAddPhotos && processedCount > 0) {
+    stopped = window._stopAddPhotos;
+    } finally {
+        fileInput.value = '';
+        window.UpdateAddPhotosButtonText();
+        window._stopAddPhotos = false;
+        setAddPhotosBusy(false);
+    }
+
+    if (!stopped && processedCount > 0) {
         setTimeout(() => {
             window.ShowPage('ManageShowPhotos');
-        }, 1000); // Wait 1 second to show success message
+        }, 1000);
     }
 };
 
@@ -3199,12 +3234,16 @@ window.LoadActivateShowPage = async function () {
                 : 'No channels yet';
             chSel.appendChild(o);
         } else {
+            const headerSlug = getSelectedChannelSlug();
+            const prefer = matching.some(([slug]) => slug === headerSlug)
+                ? headerSlug
+                : currentDefaultChannel;
             matching.forEach(([slug, ch]) => {
                 const o = document.createElement('option');
                 o.value = slug;
                 o.text = channelLabel(slug, ch, true) +
                     (ch.showName ? ' → ' + ch.showName : '');
-                if (slug === currentDefaultChannel) o.selected = true;
+                if (slug === prefer) o.selected = true;
                 chSel.appendChild(o);
             });
         }

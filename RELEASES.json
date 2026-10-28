@@ -2,6 +2,18 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 5,
+		"date": "2026-10-28 11:40",
+		"beta": false,
+		"info": [
+			"Auto-optimize uses the subject (or the image center) so night photos and bright high-key shots keep faces visible.",
+			"Adding photos disables Back and warns before the tab is closed.",
+			"Activate Show is back in the main menu."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 4,
 		"date": "2026-10-28 11:02",
 		"beta": false,

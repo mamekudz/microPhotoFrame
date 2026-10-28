@@ -53,6 +53,8 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, GooDi
 #### 🎨 Image Processing
 - ✅ Fully automated image processing in browser
 - ✅ AI-powered cropping (local TensorFlow.js / COCO-SSD — `npm run init` / `gulp INIT`)
+- ✅ Auto-optimize: local histogram plus subject detection — night and bright high-key photos keep the person visible
+- ✅ Adding photos disables Back and warns before the tab is closed
 - ✅ Extreme compression with highest quality
 - ✅ Support for both landscape and portrait formats
 - ✅ Custom `.ink` format for optimal storage (mimetype image/ink)
@@ -230,6 +232,8 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 #### 🎨 Bildverarbeitung
 - ✅ Vollautomatische Bildaufbereitung im Browser
 - ✅ KI-gestützter Zuschnitt (lokales TensorFlow.js / COCO-SSD — `npm run init` / `gulp INIT`)
+- ✅ Auto-optimize: lokales Histogramm plus Motiverkennung — Nacht- und helle High-Key-Fotos behalten die Person
+- ✅ Während Fotos hinzugefügt werden ist Zurück gesperrt; das Schließen des Tabs warnt
 - ✅ Extreme Kompression bei höchster Qualität
 - ✅ Unterstützung für Quer- und Hochformat
 - ✅ Eigenes `.ink` Format für optimale Speicherung (mimetype image/ink)

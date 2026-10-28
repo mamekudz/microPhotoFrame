@@ -84,5 +84,6 @@
 	"(none)<context=\"ui\"/>": "（无）",
 	"Initializing µPhotoFrame™...<context=\"ui\"/>": "正在启动 µPhotoFrame™...",
 	"Please wait while the application starts<context=\"ui\"/>": "请稍候，应用程序正在启动",
-	"Page<context=\"ui\"/>": "页面"
+	"Page<context=\"ui\"/>": "页面",
+	"Photos are still being processed. Stay on this page.<context=\"ui\"/>": "仍在处理照片。请留在此页。"
 }
