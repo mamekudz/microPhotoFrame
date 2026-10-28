@@ -237,9 +237,7 @@ Section "Install" SecInstall
 	${If} $SelectedServer == "node"
 		DetailPrint "Installing Node.js Express server..."
 		SetOutPath "$INSTDIR\node"
-		File "..\node\server.js"
-		File "..\node\package.json"
-		File "..\node\package-lock.json"
+		File /r "..\node\*.*"
 	${EndIf}
 
 	; -- IIS / ASP.NET --
@@ -291,9 +289,7 @@ Section "Install" SecInstall
 		File "..\web.config"
 		File "..\\.htaccess"
 		SetOutPath "$INSTDIR\node"
-		File "..\node\server.js"
-		File "..\node\package.json"
-		File "..\node\package-lock.json"
+		File /r "..\node\*.*"
 		SetOutPath "$INSTDIR\aspx"
 		File "..\aspx\microPhotoFrame.aspx"
 		File "..\aspx\microPhotoFrame.cs"
