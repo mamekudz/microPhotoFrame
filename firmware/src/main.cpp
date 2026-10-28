@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.1"
+#define FIRMWARE_VERSION "1.5.2"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -380,11 +380,11 @@ static void computeRestWindowFromHours(uint32_t nowUtc) {
     g_restSleepUntil = 0;
     return;
   }
-  time_t local = (time_t)nowUtc + (time_t)currentTzOffsetMin * 60;
+  time_t wall = (time_t)nowUtc + (time_t)currentTzOffsetMin * 60;
   struct tm t;
-  gmtime_r(&local, &t);
+  gmtime_r(&wall, &t);
   int h = t.tm_hour;
-  time_t localMid = local - (time_t)t.tm_hour * 3600 - (time_t)t.tm_min * 60 - (time_t)t.tm_sec;
+  time_t localMid = wall - (time_t)t.tm_hour * 3600 - (time_t)t.tm_min * 60 - (time_t)t.tm_sec;
   uint32_t startU;
   uint32_t endU;
   if (currentRestStart > currentRestEnd) {

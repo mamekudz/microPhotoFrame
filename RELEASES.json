@@ -2,6 +2,17 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 2,
+		"date": "2026-10-28 10:00",
+		"beta": false,
+		"info": [
+			"Firmware compiles again: rest-period time math no longer uses a name that PNGdec defines as a macro.",
+			"COCO-SSD model.json pin matches the current TensorFlow.js download."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 1,
 		"date": "2026-10-28 09:50",
 		"beta": false,

@@ -6,8 +6,8 @@
     {
       "dest": "src/libs/models/model.json",
       "url": "https://storage.googleapis.com/tfjs-models/savedmodel/ssdlite_mobilenet_v2/model.json",
-      "sha256": "6b628411e88829d90334c4c87f8c9c811b30c688058d31b1bf6f1304a292eb3f",
-      "bytes": 548863
+      "sha256": "3770b2528339b1e3340cb74360e1e40401816b009779aeb8d0cce3a4353ea3a9",
+      "bytes": 527315
     },
     {
       "dest": "src/libs/models/group1-shard1of5",
