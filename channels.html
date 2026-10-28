@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>µPhotoFrame™ Channels</title>
+    <link rel="icon" href="./favicon.ico" type="image/x-icon">
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #121212; color: #e0e0e0; padding: 24px; }
+        a { color: #4a9eff; }
+        .wrap { max-width: 880px; margin: 0 auto; }
+        h1 { margin-top: 0; }
+        .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 16px 20px; margin: 16px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+        th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #333; vertical-align: top; }
+        button, input, select { padding: 8px 10px; border-radius: 4px; border: 1px solid #555; background: #2a2a2a; color: #eee; }
+        button { cursor: pointer; font-weight: bold; }
+        button.ok { background: #27ae60; border-color: #27ae60; color: #fff; font-size: 1rem; padding: 10px 16px; }
+        button.warn { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+        button.def { background: #e67e22; border-color: #e67e22; color: #fff; font-size: 1rem; padding: 10px 16px; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+        .row label { min-width: 90px; }
+        .row input, .row select { flex: 1; min-width: 160px; }
+        .msg { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; }
+        code { word-break: break-all; }
+        .hint { color: #aaa; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <p><a href="./index.html">← Main Menu</a></p>
+        <h1>Channels</h1>
+        <p class="hint">Jeder Kanal ist eine URL mit einem Display-Typ und einer Show. Der Default gilt für die Serverwurzel. Ein benannter Kanal: <code>/c/slug</code>.</p>
+
+        <div class="card">
+            <h2>Default-Kanal</h2>
+            <p class="hint">Rahmen mit der Server-URL ohne <code>/c/…</code> nutzen diesen Kanal.</p>
+            <div class="row">
+                <label for="defaultSelect">Default</label>
+                <select id="defaultSelect"></select>
+                <button class="def" type="button" onclick="saveDefault()">Default setzen</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="channelList">Lade Kanäle…</div>
+            <div id="channelMsg" class="msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Kanal anlegen</h2>
+            <div class="row"><label>Slug</label><input id="newSlug" placeholder="desk"></div>
+            <div class="row"><label>Display</label><select id="newDisplay"></select></div>
+            <div class="row"><label>Show</label><select id="newShow"></select></div>
+            <button class="ok" type="button" onclick="createChannel()">Create Channel</button>
+        </div>
+
+        <div class="card">
+            <h2>Rahmen per USB (ohne 192.168.4.1)</h2>
+            <p class="hint"><code>192.168.4.1</code> gibt es nur, wenn das Handy im offenen WLAN <b>microPhotoFrame</b> ist — nicht im Heimnetz, Mobilfunk aus. Sonst Waveshare per USB, WLAN und Kanal-URL hier schreiben.</p>
+            <div class="row"><label>WLAN</label><input id="usbSsid" placeholder="Heim-SSID"></div>
+            <div class="row"><label>Passwort</label><input id="usbPass" type="password"></div>
+            <div class="row"><label>Kanal-URL</label><input id="usbUrl" value="http://192.168.0.69:888/"></div>
+            <button class="ok" type="button" onclick="usbConfigure()">USB verbinden und speichern</button>
+            <pre id="usbLog" class="hint"></pre>
+        </div>
+    </div>
+    <script type="module">
+        import EInkDef from './src/microLib/EInkDef.mjs?v=21';
+
+        const DISPLAYS = Object.entries(EInkDef.DISPLAYS).filter(([, d]) => d.id);
+
+        function displayName(id) {
+            const hit = DISPLAYS.find(([, d]) => d.id === id);
+            return hit ? hit[1].name : id;
+        }
+
+        async function api(action, input = {}) {
+            const r = await fetch('/?action=' + encodeURIComponent(action), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, input })
+            });
+            return r.json();
+        }
+
+        function msg(text, ok) {
+            const el = document.getElementById('channelMsg');
+            el.style.display = 'block';
+            el.style.background = ok ? '#1e4620' : '#5a1f1f';
+            el.textContent = text;
+        }
+
+        function baseUrl() {
+            return location.origin;
+        }
+
+        window.createChannel = async function () {
+            const slug = document.getElementById('newSlug').value.trim();
+            const displayId = document.getElementById('newDisplay').value;
+            const showName = document.getElementById('newShow').value;
+            if (!slug) { msg('Slug fehlt.', false); return; }
+            const res = await api('createChannel', { slug, displayId, showName });
+            if (!res.ok) { msg(res.error?.msg || 'Anlegen fehlgeschlagen', false); return; }
+            document.getElementById('newSlug').value = '';
+            msg('Kanal "' + slug + '" angelegt.', true);
+            await load();
+        };
+
+        window.setDefault = async function (slug) {
+            if (!slug) { msg('Kein Kanal gewählt.', false); return; }
+            const res = await api('setDefaultChannel', { slug });
+            if (!res.ok) { msg(res.error?.msg || 'Default fehlgeschlagen', false); return; }
+            msg('Default ist "' + slug + '".', true);
+            await load();
+        };
+
+        window.saveDefault = async function () {
+            const slug = document.getElementById('defaultSelect')?.value || '';
+            await window.setDefault(slug);
+        };
+
+        window.delChannel = async function (slug) {
+            if (!confirm('Kanal "' + slug + '" löschen?')) return;
+            const res = await api('deleteChannel', { slug });
+            if (!res.ok) { msg(res.error?.msg || 'Löschen fehlgeschlagen', false); return; }
+            await load();
+        };
+
+        window.assignShow = async function (slug, showName) {
+            const res = await api('updateChannel', { slug, showName });
+            if (!res.ok) { msg(res.error?.msg || 'Update fehlgeschlagen', false); return; }
+            await load();
+        };
+
+        window.copyUrl = async function (url) {
+            try { await navigator.clipboard.writeText(url); msg('Kopiert: ' + url, true); }
+            catch { msg(url, true); }
+        };
+
+        async function load() {
+            const res = await api('getShows');
+            const shows = res.output?.shows || {};
+            const channels = shows.channels || {};
+            const def = shows.defaultChannel || '';
+            const names = shows.shows || [];
+            const showSel = document.getElementById('newShow');
+            showSel.innerHTML = '<option value="">— none —</option>';
+            names.forEach((n) => {
+                const o = document.createElement('option');
+                o.value = n; o.textContent = n; showSel.appendChild(o);
+            });
+            const disp = document.getElementById('newDisplay');
+            if (!disp.options.length) {
+                DISPLAYS.forEach(([, d]) => {
+                    const o = document.createElement('option');
+                    o.value = d.id; o.textContent = d.name;
+                    if (d.id === 'f') o.selected = true;
+                    disp.appendChild(o);
+                });
+            }
+            const slugs = Object.keys(channels);
+            const defSel = document.getElementById('defaultSelect');
+            if (defSel) {
+                defSel.innerHTML = '';
+                slugs.forEach((slug) => {
+                    const o = document.createElement('option');
+                    o.value = slug;
+                    o.textContent = slug + (slug === def ? ' (aktuell)' : '');
+                    if (slug === def) o.selected = true;
+                    defSel.appendChild(o);
+                });
+                if (!slugs.length) {
+                    const o = document.createElement('option');
+                    o.value = '';
+                    o.textContent = '— zuerst Kanal anlegen —';
+                    defSel.appendChild(o);
+                }
+            }
+            const list = document.getElementById('channelList');
+            if (!slugs.length) {
+                list.innerHTML = '<p>Noch keine Kanäle. Unten anlegen. Für Waveshare Display-ID f (1,54" BWRY).</p>';
+                return;
+            }
+            let html = '<table><tr><th>Kanal</th><th>Display</th><th>Show</th><th>URL</th><th></th></tr>';
+            slugs.forEach((slug) => {
+                const ch = channels[slug] || {};
+                const isDef = slug === def;
+                const url = isDef ? baseUrl() : baseUrl() + '/c/' + slug;
+                html += '<tr><td><strong>' + slug + '</strong>' + (isDef ? ' <span style="color:#ff8a80">default</span>' : '') + '</td>';
+                html += '<td>' + (displayName(ch.displayId) || ch.displayId || '–') + '</td>';
+                html += '<td><select onchange="assignShow(\'' + slug + '\', this.value)"><option value="">—</option>';
+                names.forEach((n) => {
+                    html += '<option value="' + n + '"' + (n === ch.showName ? ' selected' : '') + '>' + n + '</option>';
+                });
+                html += '</select></td>';
+                html += '<td><code>' + url + '</code></td><td>';
+                html += '<button type="button" onclick="copyUrl(\'' + url + '\')">Copy URL</button> ';
+                html += '<button class="def" type="button" onclick="setDefault(\'' + slug + '\')">Default setzen</button> ';
+                html += '<button class="warn" type="button" onclick="delChannel(\'' + slug + '\')">Delete</button>';
+                html += '</td></tr>';
+            });
+            html += '</table>';
+            list.innerHTML = html;
+        }
+
+        function usbLog(t) {
+            const el = document.getElementById('usbLog');
+            el.textContent += t + '\n';
+        }
+
+        async function writeLine(writer, enc, line) {
+            await writer.write(enc.encode(line + '\n'));
+        }
+
+        window.usbConfigure = async function () {
+            const log = document.getElementById('usbLog');
+            log.textContent = '';
+            if (!navigator.serial) {
+                usbLog('Web Serial nur in Chrome/Edge. Diese Seite per https oder localhost, oder Chrome-Flag nicht nötig im LAN-http auf manchen Builds.');
+                usbLog('Alternativ: Handy auf WLAN microPhotoFrame, dann http://192.168.4.1');
+                return;
+            }
+            const ssid = document.getElementById('usbSsid').value.trim();
+            const pass = document.getElementById('usbPass').value;
+            const url = document.getElementById('usbUrl').value.trim();
+            if (!ssid || !url) { usbLog('SSID und Kanal-URL nötig.'); return; }
+            let port;
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+            } catch (e) {
+                usbLog('Port: ' + (e.message || e));
+                return;
+            }
+            usbLog('USB offen. Warte auf Boot (Reset durch COM-Port)…');
+            await new Promise((r) => setTimeout(r, 6000));
+            const enc = new TextEncoder();
+            const writer = port.writable.getWriter();
+            try {
+                await writeLine(writer, enc, 'CFG WIFI ' + ssid);
+                await writeLine(writer, enc, 'CFG PASS ' + pass);
+                await writeLine(writer, enc, 'CFG URL ' + url);
+                await writeLine(writer, enc, 'CFG SAVE');
+                usbLog('Gesendet. Rahmen startet neu und geht ins Heim-WLAN.');
+            } catch (e) {
+                usbLog('Schreiben: ' + (e.message || e));
+            } finally {
+                writer.releaseLock();
+                try { await port.close(); } catch { /* ignore */ }
+            }
+        };
+
+        load().catch((e) => { document.getElementById('channelList').textContent = 'Fehler: ' + e.message; });
+    </script>
+</body>
+</html>

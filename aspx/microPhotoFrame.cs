@@ -129,6 +129,13 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     return "show_" + safeName;
   }
 
+  private string ShowDisplayId(string showName) {
+    if (string.IsNullOrEmpty(showName)) return "";
+    string showPathName = PathCorrection("./shows/" + GetSafeShowName(showName)) + "\\show.json";
+    dynamic show = ReadAllJSONObject(showPathName);
+    return show != null && show.displayId != null ? (string)show.displayId : "";
+  }
+
   public string UnzipBufferToString(byte[] zippedBuffer) {
     if (zippedBuffer == null || zippedBuffer.Length == 0)
       return string.Empty;
@@ -259,6 +266,118 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     _r.ok = true;
   }
 
+  private static readonly Regex ChannelSlugRe = new Regex(@"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$", RegexOptions.Compiled);
+
+  private static string NormalizeChannelSlug(string raw) {
+    if (string.IsNullOrWhiteSpace(raw)) return "";
+    raw = raw.Trim();
+    return ChannelSlugRe.IsMatch(raw) ? raw : "";
+  }
+
+  private static string SlugFromShowName(string name) {
+    if (string.IsNullOrWhiteSpace(name)) return "";
+    string s = Regex.Replace(name.Trim().ToLowerInvariant(), @"[^a-z0-9_-]+", "-").Trim('-');
+    if (s.Length > 32) s = s.Substring(0, 32);
+    return ChannelSlugRe.IsMatch(s) ? s : "";
+  }
+
+  private static string UniqueChannelSlug(JObject channels, string preferred) {
+    string slug = NormalizeChannelSlug(preferred);
+    if (slug == "") slug = "channel";
+    if (channels[slug] == null) return slug;
+    string baseSlug = slug.Length > 28 ? slug.Substring(0, 28) : slug;
+    int n = 2;
+    while (channels[baseSlug + "-" + n] != null) n++;
+    string next = baseSlug + "-" + n;
+    return next.Length > 32 ? next.Substring(0, 32) : next;
+  }
+
+  private JObject EmptyShowsCfg() {
+    JObject o = new JObject();
+    o["shows"] = new JArray();
+    o["dayStart"] = 7;
+    o["dayEnd"] = 24;
+    o["activeShows"] = new JObject();
+    o["channels"] = new JObject();
+    o["defaultChannel"] = "";
+    return o;
+  }
+
+  private JObject AsShowsObject(dynamic shows) {
+    if (shows == null) return EmptyShowsCfg();
+    return shows as JObject ?? JObject.FromObject(shows);
+  }
+
+  private JObject SyncActiveShows(JObject cfg) {
+    JObject active = new JObject();
+    JObject chs = cfg["channels"] as JObject ?? new JObject();
+    foreach (var p in chs.Properties()) {
+      JObject ch = p.Value as JObject;
+      if (ch == null) continue;
+      string displayId = (string)ch["displayId"];
+      string showName = (string)ch["showName"];
+      if (!string.IsNullOrEmpty(displayId) && !string.IsNullOrEmpty(showName)) {
+        active[displayId] = showName;
+      }
+    }
+    cfg["activeShows"] = active;
+    return cfg;
+  }
+
+  private JObject MigrateShowsCfg(dynamic showsDyn) {
+    JObject cfg = AsShowsObject(showsDyn);
+    if (cfg["shows"] == null || cfg["shows"].Type != JTokenType.Array) cfg["shows"] = new JArray();
+    if (cfg["activeShows"] == null || cfg["activeShows"].Type != JTokenType.Object) cfg["activeShows"] = new JObject();
+    if (cfg["channels"] == null || cfg["channels"].Type != JTokenType.Object) {
+      cfg["channels"] = new JObject();
+    }
+    JObject chObj = (JObject)cfg["channels"];
+    string def = (string)cfg["defaultChannel"];
+    if (string.IsNullOrEmpty(def) || chObj[def] == null) {
+      var first = chObj.Properties().FirstOrDefault();
+      cfg["defaultChannel"] = first != null ? first.Name : "";
+    }
+    return SyncActiveShows(cfg);
+  }
+
+  private JObject AssignShowToChannel(JObject cfg, string showName, string displayId, string channel) {
+    if (string.IsNullOrEmpty(showName)) throw new Exception("showName fehlt.");
+    string did = displayId ?? "";
+    string slug = NormalizeChannelSlug(channel);
+    JObject chs = (JObject)cfg["channels"];
+    if (slug == "") throw new Exception("Kanal fehlt — Kanäle werden nur manuell angelegt.");
+    if (chs[slug] == null) throw new Exception("Kanal nicht gefunden.");
+    string chDid = (string)chs[slug]["displayId"];
+    if (string.IsNullOrEmpty(chDid)) throw new Exception("Kanal hat keinen Displaytyp.");
+    if (did == "") throw new Exception("Show-Display fehlt.");
+    if (chDid != did) throw new Exception("Show-Display passt nicht zum Kanal.");
+    chs[slug]["showName"] = showName;
+    return SyncActiveShows(cfg);
+  }
+
+  private string ChannelSlugForShow(JObject cfg, string showName) {
+    JObject chs = cfg["channels"] as JObject ?? new JObject();
+    foreach (var p in chs.Properties()) {
+      if ((string)p.Value["showName"] == showName) return p.Name;
+    }
+    return "";
+  }
+
+  private JObject EnsureShowHasChannel(JObject cfg, string showName, string displayId, string channel) {
+    if (string.IsNullOrEmpty(showName)) throw new Exception("showName fehlt.");
+    string requested = NormalizeChannelSlug(channel);
+    if (requested != "") return AssignShowToChannel(cfg, showName, displayId, requested);
+    string existing = ChannelSlugForShow(cfg, showName);
+    if (existing != "") {
+      string chDid = (string)cfg["channels"][existing]["displayId"];
+      if (!string.IsNullOrEmpty(displayId) && !string.IsNullOrEmpty(chDid) && chDid != displayId) {
+        throw new Exception("Show-Display passt nicht zum Kanal.");
+      }
+      return SyncActiveShows(cfg);
+    }
+    return cfg;
+  }
+
   /** Creates a show.
     * dynamic _r  the given rest json by webservice
     * @param input.showName   the name of the show which should be created.
@@ -267,48 +386,33 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     *         output.showName, name of the created show (without "show_" prefix, perhaps corrected and cleaned)
     */
   public void CreateShow(dynamic _r) {
-    string showsPathName = PathCorrection("./shows/shows.json");
     string orgShowName = (string)_r.input.showName;
-    string displayId = (string)_r.input.displayId;
-    string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
-    string showPathName = showPath + "\\show.json";
-    if (IsValidDirectoryName(showName)) {
-      dynamic shows = ReadAllJSONObject(showsPathName);
-      if (shows == null) {
-        shows = new JObject();
-        shows.shows = new JArray();
-        shows.dayStart = 7;
-        shows.dayEnd = 24;
-        shows.activeShows = new JObject();
-      }
-      JArray showsList = (JArray)shows.shows;
-      bool exists = showsList.Any(obj => obj.ToString() == orgShowName);
-      if (!exists) {
-        shows.shows.Add(orgShowName);
-        if(shows.activeShows.Property(displayId) == null) {
-          shows.activeShows.Add(displayId, orgShowName);
-        }else{
-          shows.activeShows.Property(displayId).Value = orgShowName;
-        }
-      }
-      WriteAllJSONNoFormat(showsPathName, shows);
-      if (!Directory.Exists(showPath)) Directory.CreateDirectory(showPath);
-      dynamic show = ReadAllJSONObject(showPathName);
-      if (show == null) {
-        show = new JObject();
-        show.timer = 1;
-        show.mode = "random";
-        show.imgs = new JArray();
-        show.displayId = displayId;
-      }
-      WriteAllJSONNoFormat(showPathName, show);
-      _r.output.shows = shows;
-      _r.output.showName = showName;
-      _r.ok = true;
-    } else {
-      _r.ok = false;
+    string channel = _r.input.channel != null ? (string)_r.input.channel : "";
+    string user, target, displayId;
+    if (!TryParseChannelId(channel, out user, out target, out displayId)) {
+      throw new Exception("Kanal fehlt — zuerst einen Kanal anlegen.");
     }
+    string safe = GetSafeShowName(orgShowName);
+    string showPath = Path.Combine(ShowsRoot(), user, target, displayId, safe);
+    if (Directory.Exists(showPath)) throw new Exception("Show existiert bereits.");
+    Directory.CreateDirectory(showPath);
+    JObject show = new JObject();
+    show["name"] = orgShowName;
+    show["timer"] = 1;
+    show["mode"] = "random";
+    show["imgs"] = new JArray();
+    show["displayId"] = displayId;
+    WriteAllJSONNoFormat(Path.Combine(showPath, "show.json"), show);
+    string chJsonPath = Path.Combine(ShowsRoot(), user, target, displayId, "channel.json");
+    JObject chJson = ReadAllJSONObject(chJsonPath) as JObject ?? new JObject();
+    if (string.IsNullOrEmpty((string)chJson["showName"])) {
+      chJson["showName"] = orgShowName;
+      WriteAllJSONNoFormat(chJsonPath, chJson);
+    }
+    JObject shows = LoadShowsCfg();
+    _r.output.shows = shows;
+    _r.output.showName = orgShowName;
+    _r.ok = true;
   }
 
   /** Deletes a show.
@@ -317,77 +421,27 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     * @return output.shows, json of a description all available shows (see GetShows)
     */
   public void DeleteShow(dynamic _r) {
-    string showsPathName = PathCorrection("./shows/shows.json");
     string orgShowName = (string)_r.input.showName;
-    string showName = GetSafeShowName(orgShowName);
-    string showPathName = PathCorrection("./shows/" + showName);
-    if (Directory.Exists(showPathName)) {
-      Directory.Delete(showPathName, true);
-      _r.ok = true;
-      dynamic shows = ReadAllJSONObject(showsPathName);
-      if (shows == null) {
-        shows = new JObject();
-        shows.activeShows = new JObject();
-        shows.shows = new JArray();
-        shows.timer = 1;
-        shows.dayStart = 7;
-        shows.dayEnd = 24;
-        shows.mode = "random";
-      } else {
-        // Get the displayId of the show being deleted
-        string showPathNameForDisplay = PathCorrection("./shows/" + showName + "\\show.json");
-        dynamic show = ReadAllJSONObject(showPathNameForDisplay);
-        string showDisplayId = null;
-        if (show != null && show.displayId != null) {
-          showDisplayId = (string)show.displayId;
-        }
-        
-        var showsArray = (JArray)shows.shows;
-        var showToRemove = showsArray.FirstOrDefault(obj => obj.ToString() == orgShowName);
-        if (showToRemove != null) {
-          showToRemove.Remove();
-        }
-        
-        // Remove from activeShows if this show is active for its displayId
-        bool wasActive = false;
-        if (showDisplayId != null && shows.activeShows != null) {
-          if (shows.activeShows.Property(showDisplayId) != null) {
-            string activeShowForDisplay = (string)shows.activeShows.Property(showDisplayId).Value;
-            if (activeShowForDisplay == orgShowName) {
-              shows.activeShows.Property(showDisplayId).Remove();
-              wasActive = true;
-            }
-          }
-        }
-        
-        // If this was the active show for its displayId, try to activate another show with the same displayId
-        if (wasActive && showDisplayId != null) {
-          // Find another show with the same displayId
-          string newActiveShow = null;
-          foreach (var showNameInList in shows.shows) {
-            string candidateShowName = showNameInList.ToString();
-            string candidateSafeName = GetSafeShowName(candidateShowName);
-            string candidateShowPath = PathCorrection("./shows/" + candidateSafeName + "\\show.json");
-            dynamic candidateShow = ReadAllJSONObject(candidateShowPath);
-            if (candidateShow != null && candidateShow.displayId != null) {
-              string candidateDisplayId = (string)candidateShow.displayId;
-              if (candidateDisplayId == showDisplayId) {
-                newActiveShow = candidateShowName;
-                break;
-              }
-            }
-          }
-          
-          // Set the new active show if found
-          if (newActiveShow != null) {
-            shows.activeShows[showDisplayId] = newActiveShow;
-          }
-        }
-      }
-      WriteAllJSONNoFormat(showsPathName, shows);
-      _r.output.shows = shows;
-
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
+    FoundShow found = FindShow(orgShowName, channel);
+    if (found == null) {
+      _r.ok = false;
+      return;
     }
+    Directory.Delete(found.Dir, true);
+    if (!string.IsNullOrEmpty(found.Channel)) {
+      string user, target, displayId;
+      TryParseChannelId(found.Channel, out user, out target, out displayId);
+      string chJsonPath = Path.Combine(ShowsRoot(), user, target, displayId, "channel.json");
+      JObject chJson = ReadAllJSONObject(chJsonPath) as JObject ?? new JObject();
+      if ((string)chJson["showName"] == orgShowName) {
+        JArray names = ListShowNamesIn(Path.Combine(ShowsRoot(), user, target, displayId));
+        chJson["showName"] = names.Count > 0 ? (string)names[0] : "";
+        WriteAllJSONNoFormat(chJsonPath, chJson);
+      }
+    }
+    _r.output.shows = LoadShowsCfg();
+    _r.ok = true;
   }
 
   /** Adds an image to the show.
@@ -403,8 +457,9 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     */
   public void SaveShowImage(dynamic _r) {
     string orgShowName = (string)_r.input.showName;
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
     string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
+    string showPath = ResolveShowDirectory(orgShowName, channel);
     string showPathName = showPath + "\\show.json";
     string imageData = (string)_r.input.img;
     string mimeType = DataUrlMimeType(ref imageData);
@@ -537,8 +592,9 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     */
   public void DeleteShowImage(dynamic _r) {
     string orgShowName = (string)_r.input.showName;
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
     string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
+    string showPath = ResolveShowDirectory(orgShowName, channel);
     string showPathName = showPath + "\\show.json";
     string imgName = (string)_r.input.imgName;
     string imgPathName = showPath + "/" + imgName;
@@ -579,17 +635,20 @@ public partial class microPhotoFrame : System.Web.UI.Page {
   public void GetShow(dynamic _r) {
     RegisterDeviceEcho(_r);
     string orgShowName = (string)_r.input.showName;
-    string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
-    string showPathName = showPath + "\\show.json";
-    dynamic show = ReadAllJSONObject(showPathName);
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
+    FoundShow found = FindShow(orgShowName, channel);
+    if (found == null) {
+      _r.ok = false;
+      return;
+    }
+    dynamic show = ReadAllJSONObject(Path.Combine(found.Dir, "show.json"));
     if (show != null) {
+      AttachShowMeta(show, found);
       _r.output.show = show;
       _r.ok = true;
     } else {
       _r.ok = false;
     }
-
   }
 
   /** Sets up the active show.
@@ -599,30 +658,22 @@ public partial class microPhotoFrame : System.Web.UI.Page {
    */
   public void SetActiveShow(dynamic _r) {
     string orgShowName = (string)_r.input.showName;
-    string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
-    string showsPathName = PathCorrection("./shows/shows.json");
-    string showPathName = showPath + "\\show.json";
-    dynamic shows = ReadAllJSONObject(showsPathName);
-    dynamic show = ReadAllJSONObject(showPathName);
-     _r.ok = false;
-    if (shows != null) {
-      if(show != null) {
-        string showDisplayId = (string)show.displayId;
-        if(shows.activeShows.Property(showDisplayId) == null) {
-          shows.activeShows.Add(showDisplayId, orgShowName);
-        }else{
-          shows.activeShows.Property(showDisplayId).Value = orgShowName;
-        }
-        _r.output.shows = shows;
-        WriteAllJSONNoFormat(showsPathName, shows);
-        _r.ok = true;
-      } else {
-      _r.error = "Show not found";
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
+    FoundShow found = FindShow(orgShowName, channel);
+    if (found == null || string.IsNullOrEmpty(found.Channel)) {
+      throw new Exception("Show gehört nicht zu diesem Kanal.");
     }
-    } else {
-      _r.error = "Shows not found";
+    if (!string.IsNullOrEmpty(channel) && found.Channel != channel) {
+      throw new Exception("Show gehört nicht zu diesem Kanal.");
     }
+    string user, target, displayId;
+    TryParseChannelId(found.Channel, out user, out target, out displayId);
+    JObject chJson = new JObject();
+    chJson["showName"] = orgShowName;
+    WriteAllJSONNoFormat(Path.Combine(ShowsRoot(), user, target, displayId, "channel.json"), chJson);
+    JObject shows = LoadShowsCfg();
+    _r.output.shows = shows;
+    _r.ok = true;
   }
 
   /** Saves new setting to a show (time to show each photo, selection mode of photos).
@@ -634,8 +685,8 @@ public partial class microPhotoFrame : System.Web.UI.Page {
    */
   public void SetShowSettings(dynamic _r) {
     string orgShowName = (string)_r.input.showName;
-    string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
+    string showPath = ResolveShowDirectory(orgShowName, channel);
     string showPathName = showPath + "\\show.json";
     dynamic show = ReadAllJSONObject(showPathName);
     if (show != null) {
@@ -658,19 +709,56 @@ public partial class microPhotoFrame : System.Web.UI.Page {
   * shows.dayStart    hour and minute (e.g. 1330) wakeup from daily device sleep
   * shows.dayEnd      hour and minute (e.g. 1330) begin of daily device sleep
   */
+  public void ListTargets(dynamic _r) {
+    string user = InputUserId(_r.input, Request);
+    string displayId = "";
+    JObject input = _r.input as JObject;
+    if (input != null && input["displayId"] != null) displayId = (string)input["displayId"];
+    if (displayId == "" && input != null && input["deviceInfo"] != null && input["deviceInfo"]["displayId"] != null) {
+      displayId = (string)input["deviceInfo"]["displayId"];
+    }
+    if (displayId == "" && Request != null) displayId = Request.QueryString["displayId"] ?? "";
+    displayId = ToEinkDisplay(NormalizeChannelDisplay(displayId));
+    if (user == "") throw new Exception("User ID fehlt.");
+    if (displayId == "") throw new Exception("Displaytyp fehlt.");
+    JObject shows = LoadShowsCfg();
+    JArray groups = new JArray();
+    JObject chs = shows["channels"] as JObject ?? new JObject();
+    foreach (var p in chs.Properties()) {
+      JObject ch = p.Value as JObject;
+      if (ch == null) continue;
+      string chUser = (string)(ch["userId"] ?? ch["user"] ?? "");
+      if (chUser != user) continue;
+      if ((string)ch["displayId"] != displayId) continue;
+      string group = (string)(ch["groupId"] ?? ch["group"] ?? ch["target"] ?? "");
+      JObject row = new JObject();
+      row["group"] = group;
+      row["groupId"] = group;
+      row["target"] = group;
+      row["user"] = user;
+      row["userId"] = user;
+      row["channel"] = p.Name;
+      row["pathId"] = ch["pathId"] != null ? ch["pathId"] : ToPathDisplay(displayId);
+      row["displayId"] = ch["displayId"];
+      row["showName"] = ch["showName"] != null ? ch["showName"] : "";
+      JArray names = ch["shows"] as JArray;
+      row["shows"] = names != null ? names.Count : 0;
+      groups.Add(row);
+    }
+    _r.output.user = user;
+    _r.output.userId = user;
+    _r.output.displayId = displayId;
+    _r.output.groups = groups;
+    _r.output.targets = groups;
+    _r.ok = true;
+  }
+
   public void GetShows(dynamic _r) {
     try {
       RegisterDeviceEcho(_r);
-      string showsPathName = PathCorrection("./shows/shows.json");
-      dynamic shows = ReadAllJSONObject(showsPathName);
-      if (shows == null) {
-        shows = new JObject();
-        shows.shows = new JArray();
-        shows.dayStart = 7;
-        shows.dayEnd = 24;
-        shows.activeShows = new JObject();
-      }
+      JObject shows = LoadShowsCfg();
       _r.output.shows = shows;
+      AttachChannelOutput(_r, shows);
       _r.ok = true;
     } catch (Exception ex) {
       _r.ok = false;
@@ -682,6 +770,92 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     }
   }
 
+  public void CreateChannel(dynamic _r) {
+    string user = InputUserId(_r.input);
+    string target = InputGroupId(_r.input);
+    string displayId = ToPathDisplay((string)_r.input.displayId);
+    if (user == "") throw new Exception("User ID fehlt.");
+    if (target == "") throw new Exception("Group ID fehlt.");
+    if (displayId == "") throw new Exception("Displaytyp fehlt.");
+    string dir = Path.Combine(ShowsRoot(), user, target, displayId);
+    if (Directory.Exists(dir) && (File.Exists(Path.Combine(dir, "channel.json")) || ListShowNamesIn(dir).Count > 0)) {
+      throw new Exception("Kanal existiert bereits.");
+    }
+    Directory.CreateDirectory(dir);
+    JObject chJson = new JObject();
+    chJson["showName"] = "";
+    WriteAllJSONNoFormat(Path.Combine(dir, "channel.json"), chJson);
+    JObject shows = LoadShowsCfg();
+    string id = MakeChannelId(user, target, displayId);
+    if (string.IsNullOrEmpty((string)shows["defaultChannel"])) {
+      shows["defaultChannel"] = id;
+      WriteAllJSONNoFormat(ShowsCfgPath(), shows);
+    }
+    _r.output.shows = shows;
+    _r.ok = true;
+  }
+
+  public void UpdateChannel(dynamic _r) {
+    _r.input.channel = _r.input.channel != null ? _r.input.channel : _r.input.slug;
+    SetActiveShow(_r);
+  }
+
+  public void DeleteChannel(dynamic _r) {
+    string channel = _r.input.channel != null ? (string)_r.input.channel : (string)_r.input.slug;
+    string user, target, displayId;
+    if (!TryParseChannelId(channel, out user, out target, out displayId)) {
+      user = InputUserId(_r.input);
+      target = InputGroupId(_r.input);
+      displayId = NormalizeChannelDisplay((string)_r.input.displayId);
+    }
+    if (user == "" || target == "" || displayId == "") throw new Exception("Kanal nicht gefunden.");
+    string dir = Path.Combine(ShowsRoot(), user, target, displayId);
+    if (!Directory.Exists(dir)) throw new Exception("Kanal nicht gefunden.");
+    Directory.Delete(dir, true);
+    string targetDir = Path.Combine(ShowsRoot(), user, target);
+    if (Directory.Exists(targetDir) && Directory.GetFileSystemEntries(targetDir).Length == 0) Directory.Delete(targetDir);
+    string userDir = Path.Combine(ShowsRoot(), user);
+    if (Directory.Exists(userDir) && Directory.GetFileSystemEntries(userDir).Length == 0) Directory.Delete(userDir);
+    _r.output.shows = LoadShowsCfg();
+    _r.ok = true;
+  }
+
+  public void DeleteTarget(dynamic _r) {
+    string user = InputUserId(_r.input);
+    string target = InputGroupId(_r.input);
+    if (user == "" || target == "") throw new Exception("Group ID fehlt.");
+    string dir = Path.Combine(ShowsRoot(), user, target);
+    if (!Directory.Exists(dir)) throw new Exception("Gruppe nicht gefunden.");
+    Directory.Delete(dir, true);
+    string userDir = Path.Combine(ShowsRoot(), user);
+    if (Directory.Exists(userDir) && Directory.GetFileSystemEntries(userDir).Length == 0) Directory.Delete(userDir);
+    _r.output.shows = LoadShowsCfg();
+    _r.ok = true;
+  }
+
+  public void DeleteUser(dynamic _r) {
+    string user = InputUserId(_r.input);
+    if (user == "" || IsLegacyShowDir(user) || IsReservedShowsTop(user)) throw new Exception("User ID nicht gefunden.");
+    string dir = Path.Combine(ShowsRoot(), user);
+    if (!Directory.Exists(dir)) throw new Exception("User ID nicht gefunden.");
+    Directory.Delete(dir, true);
+    _r.output.shows = LoadShowsCfg();
+    _r.ok = true;
+  }
+
+  public void SetDefaultChannel(dynamic _r) {
+    string channel = _r.input.channel != null ? (string)_r.input.channel : (string)_r.input.slug;
+    JObject shows = LoadShowsCfg();
+    string user, target, displayId;
+    if (!TryParseChannelId(channel, out user, out target, out displayId) || shows["channels"][MakeChannelId(user, target, displayId)] == null) {
+      throw new Exception("Kanal nicht gefunden.");
+    }
+    shows["defaultChannel"] = MakeChannelId(user, target, displayId);
+    WriteAllJSONNoFormat(ShowsCfgPath(), shows);
+    _r.output.shows = shows;
+    _r.ok = true;
+  }
+
 
   /** Exports a given show as a zipped json file including all image data.
     * dynamic _r  the given rest json by webservice
@@ -690,8 +864,9 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     */
   public void ExportShow(dynamic _r) {
     string orgShowName = (string)_r.input.showName;
+    string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
     string showName = GetSafeShowName(orgShowName);
-    string showPath = PathCorrection("./shows/" + showName);
+    string showPath = ResolveShowDirectory(orgShowName, channel);
     string showPathName = showPath + "\\show.json";
     if (Directory.Exists(showPath)) {
       string showsPathName = showPath + "/shows/show.json";
@@ -840,6 +1015,11 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       rest.error.code = 0;
     }
     
+    if (action == "getShowFile") {
+      ServeLegacyShowFile(rest);
+      return;
+    }
+
     switch (action) {
       case "getDevices":
         GetDevices(rest);
@@ -862,8 +1042,29 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       case "setActiveShow":
         SetActiveShow(rest);
         break;
+      case "createChannel":
+        CreateChannel(rest);
+        break;
+      case "updateChannel":
+        UpdateChannel(rest);
+        break;
+      case "deleteChannel":
+        DeleteChannel(rest);
+        break;
+      case "deleteTarget":
+        DeleteTarget(rest);
+        break;
+      case "deleteUser":
+        DeleteUser(rest);
+        break;
+      case "setDefaultChannel":
+        SetDefaultChannel(rest);
+        break;
       case "setShowSettings":
         SetShowSettings(rest);
+        break;
+      case "listTargets":
+        ListTargets(rest);
         break;
       case "getShows":
         GetShows(rest);
@@ -891,6 +1092,400 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     Response.Write(Newtonsoft.Json.JsonConvert.SerializeObject(rest, Newtonsoft.Json.Formatting.None));
     Response.Flush();
     HttpContext.Current.ApplicationInstance.CompleteRequest();
+  }
+
+  private static readonly Regex ChannelSegRe = new Regex(@"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$", RegexOptions.Compiled);
+  private static readonly Regex ChannelDisplayRe = new Regex(@"^[0-9A-Za-z]$", RegexOptions.Compiled);
+  private const string MigrateUser = "mamekudz";
+  private const string MigrateTarget = "family";
+
+  private class FoundShow {
+    public string Dir;
+    public string Channel;
+    public string DisplayId;
+    public string RelDir;
+  }
+
+  private string ShowsRoot() {
+    return PathCorrection("./shows");
+  }
+
+  private string ShowsCfgPath() {
+    return PathCorrection("./shows/shows.json");
+  }
+
+  private static string NormalizeChannelSeg(string raw) {
+    if (string.IsNullOrWhiteSpace(raw)) return "";
+    raw = raw.Trim();
+    return ChannelSegRe.IsMatch(raw) ? raw : "";
+  }
+
+  private static string JStr(JObject jo, params string[] names) {
+    if (jo == null) return "";
+    foreach (string name in names) {
+      if (jo[name] != null && jo[name].Type != JTokenType.Null) return (string)jo[name];
+    }
+    return "";
+  }
+
+  private static string InputUserId(dynamic input, System.Web.HttpRequest req = null) {
+    string v = JStr(input as JObject, "userId", "user");
+    if (v == "" && req != null) v = req.QueryString["userId"] ?? req.QueryString["user"] ?? "";
+    return NormalizeChannelSeg(v);
+  }
+
+  private static string InputGroupId(dynamic input, System.Web.HttpRequest req = null) {
+    string v = JStr(input as JObject, "groupId", "group", "target");
+    if (v == "" && req != null) v = req.QueryString["groupId"] ?? req.QueryString["group"] ?? req.QueryString["target"] ?? "";
+    return NormalizeChannelSeg(v);
+  }
+
+  private static string NormalizeChannelDisplay(string raw) {
+    if (string.IsNullOrWhiteSpace(raw)) return "";
+    raw = raw.Trim();
+    return ChannelDisplayRe.IsMatch(raw) ? raw : "";
+  }
+
+  private static string ToPathDisplay(string id) {
+    return NormalizeChannelDisplay(id);
+  }
+
+  private static string ToEinkDisplay(string id) {
+    return NormalizeChannelDisplay(id);
+  }
+
+  private static string MakeChannelId(string user, string target, string displayId) {
+    return user + "/" + target + "/" + displayId;
+  }
+
+  private static bool TryParseChannelId(string id, out string user, out string target, out string displayId) {
+    user = target = displayId = "";
+    if (string.IsNullOrWhiteSpace(id)) return false;
+    string[] parts = id.Replace("\\", "/").Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+    if (parts.Length != 3) return false;
+    user = NormalizeChannelSeg(parts[0]);
+    target = NormalizeChannelSeg(parts[1]);
+    displayId = ToPathDisplay(parts[2]);
+    return user != "" && target != "" && displayId != "";
+  }
+
+  private void RenameEinkFoldersToPathIds(string root) {
+    if (!Directory.Exists(root)) return;
+    foreach (string userDir in Directory.GetDirectories(root)) {
+      string userName = Path.GetFileName(userDir);
+      if (IsReservedShowsTop(userName) || IsLegacyShowDir(userName)) continue;
+      foreach (string targetDir in Directory.GetDirectories(userDir)) {
+        foreach (string dispDir in Directory.GetDirectories(targetDir)) {
+          string leaf = Path.GetFileName(dispDir);
+          string pathId = ToPathDisplay(leaf);
+          if (pathId == "" || pathId == leaf) continue;
+          string dest = Path.Combine(targetDir, pathId);
+          if (!Directory.Exists(dest)) Directory.Move(dispDir, dest);
+          else {
+            CopyShowDirectory(dispDir, dest);
+            Directory.Delete(dispDir, true);
+          }
+        }
+      }
+    }
+  }
+
+  private string RequestedChannelId(dynamic _r) {
+    string q = Request != null ? Request.QueryString["channel"] : null;
+    string user, target, displayId;
+    if (TryParseChannelId(q, out user, out target, out displayId)) return MakeChannelId(user, target, displayId);
+    string input = _r.input != null && _r.input.channel != null ? (string)_r.input.channel : "";
+    if (TryParseChannelId(input, out user, out target, out displayId)) return MakeChannelId(user, target, displayId);
+    string path = Request != null ? Request.Path : "";
+    Match m = Regex.Match(path ?? "", @"/(?:shows|c)/([A-Za-z0-9][A-Za-z0-9_-]{0,31})/([A-Za-z0-9][A-Za-z0-9_-]{0,31})/([0-9A-Za-z])(?:/|$)");
+    if (m.Success) return MakeChannelId(m.Groups[1].Value, m.Groups[2].Value, ToPathDisplay(m.Groups[3].Value));
+    return "";
+  }
+
+  private static bool IsLegacyShowDir(string name) {
+    return name != null && name.StartsWith("show_");
+  }
+
+  private static bool IsReservedShowsTop(string name) {
+    return name == "shows.json" || name == "devices.json" || name == ".gitkeep" || (name != null && name.StartsWith("."));
+  }
+
+  private void CopyShowDirectory(string src, string dest) {
+    Directory.CreateDirectory(dest);
+    foreach (string file in Directory.GetFiles(src)) {
+      File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), true);
+    }
+    foreach (string child in Directory.GetDirectories(src)) {
+      CopyShowDirectory(child, Path.Combine(dest, Path.GetFileName(child)));
+    }
+  }
+
+  private JArray ListShowNamesIn(string dir) {
+    JArray names = new JArray();
+    if (!Directory.Exists(dir)) return names;
+    foreach (string child in Directory.GetDirectories(dir)) {
+      string leaf = Path.GetFileName(child);
+      if (!IsLegacyShowDir(leaf)) continue;
+      dynamic show = ReadAllJSONObject(Path.Combine(child, "show.json"));
+      string name = show != null && show.name != null ? (string)show.name : leaf.Substring(5);
+      names.Add(name);
+    }
+    return names;
+  }
+
+  private JObject ScanDiskChannels() {
+    JObject channels = new JObject();
+    string root = ShowsRoot();
+    if (!Directory.Exists(root)) return channels;
+    foreach (string userDir in Directory.GetDirectories(root)) {
+      string userName = Path.GetFileName(userDir);
+      if (IsReservedShowsTop(userName) || IsLegacyShowDir(userName)) continue;
+      string user = NormalizeChannelSeg(userName);
+      if (user == "") continue;
+      foreach (string targetDir in Directory.GetDirectories(userDir)) {
+        string target = NormalizeChannelSeg(Path.GetFileName(targetDir));
+        if (target == "") continue;
+        foreach (string dispDir in Directory.GetDirectories(targetDir)) {
+          string pathId = NormalizeChannelDisplay(Path.GetFileName(dispDir));
+          if (pathId == "") continue;
+          string displayId = ToEinkDisplay(pathId);
+          string id = MakeChannelId(user, target, pathId);
+          dynamic local = ReadAllJSONObject(Path.Combine(dispDir, "channel.json"));
+          JArray names = ListShowNamesIn(dispDir);
+          string showName = local != null && local.showName != null ? (string)local.showName : "";
+          if (showName != "" && !names.Any(n => (string)n == showName)) showName = names.Count > 0 ? (string)names[0] : "";
+          if (showName == "" && names.Count > 0) showName = (string)names[0];
+          JObject ch = new JObject();
+          ch["user"] = user;
+          ch["target"] = target;
+          ch["displayId"] = displayId;
+          ch["pathId"] = pathId;
+          ch["showName"] = showName;
+          ch["shows"] = names;
+          channels[id] = ch;
+        }
+      }
+    }
+    return channels;
+  }
+
+  private JObject RefreshShowsFromDisk(JObject cfg) {
+    if (cfg == null) cfg = EmptyShowsCfg();
+    cfg["channels"] = ScanDiskChannels();
+    JObject channels = (JObject)cfg["channels"];
+    string def = (string)cfg["defaultChannel"];
+    if (string.IsNullOrEmpty(def) || channels[def] == null) {
+      cfg["defaultChannel"] = channels.Properties().Select(p => p.Name).FirstOrDefault() ?? "";
+    }
+    string use = (string)cfg["defaultChannel"];
+    cfg["shows"] = (use != "" && channels[use] != null) ? channels[use]["shows"].DeepClone() : new JArray();
+    return SyncActiveShows(cfg);
+  }
+
+  private JObject MigrateLegacyShowFolders(JObject cfg) {
+    if (cfg == null) cfg = EmptyShowsCfg();
+    string root = ShowsRoot();
+    if (!Directory.Exists(root)) return RefreshShowsFromDisk(cfg);
+    JObject oldActive = cfg["activeShows"] as JObject ?? new JObject();
+    bool copied = false;
+    foreach (string src in Directory.GetDirectories(root)) {
+      string leaf = Path.GetFileName(src);
+      if (!IsLegacyShowDir(leaf)) continue;
+      dynamic show = ReadAllJSONObject(Path.Combine(src, "show.json"));
+      if (show == null || show.displayId == null) continue;
+      string einkId = NormalizeChannelDisplay((string)show.displayId);
+      if (einkId == "") continue;
+      string pathId = ToPathDisplay(einkId);
+      string dest = Path.Combine(root, MigrateUser, MigrateTarget, pathId, leaf);
+      if (!Directory.Exists(dest)) {
+        CopyShowDirectory(src, dest);
+        copied = true;
+      }
+      if (Directory.Exists(dest) && !string.Equals(src, dest, StringComparison.OrdinalIgnoreCase)) {
+        Directory.Delete(src, true);
+      }
+      string showName = show.name != null ? (string)show.name : leaf.Substring(5);
+      string chJsonPath = Path.Combine(root, MigrateUser, MigrateTarget, pathId, "channel.json");
+      JObject chJson = ReadAllJSONObject(chJsonPath) as JObject ?? new JObject();
+      string active = (string)oldActive[einkId];
+      if (active == showName || string.IsNullOrEmpty((string)chJson["showName"])) {
+        chJson["showName"] = showName;
+        WriteAllJSONNoFormat(chJsonPath, chJson);
+      }
+    }
+    RenameEinkFoldersToPathIds(root);
+    JObject next = RefreshShowsFromDisk(cfg);
+    string oldDef = (string)cfg["defaultChannel"];
+    bool oldSlug = !string.IsNullOrEmpty(oldDef) && !oldDef.Contains("/");
+    if (copied || oldSlug || oldDef == MakeChannelId(MigrateUser, MigrateTarget, "I")) {
+      string preferred = MakeChannelId(MigrateUser, MigrateTarget, "9");
+      if (next["channels"][preferred] != null) next["defaultChannel"] = preferred;
+    }
+    return next;
+  }
+
+  private JObject LoadShowsCfg() {
+    JObject cfg = MigrateShowsCfg(ReadAllJSONObject(ShowsCfgPath()));
+    cfg = MigrateLegacyShowFolders(cfg);
+    WriteAllJSONNoFormat(ShowsCfgPath(), cfg);
+    return cfg;
+  }
+
+  private FoundShow FindShow(string showName, string channelHint) {
+    if (string.IsNullOrEmpty(showName)) return null;
+    string safe = GetSafeShowName(showName);
+    string root = ShowsRoot();
+    string user, target, displayId;
+    if (TryParseChannelId(channelHint, out user, out target, out displayId)) {
+      string dir = Path.Combine(root, user, target, displayId, safe);
+      if (File.Exists(Path.Combine(dir, "show.json"))) {
+        return new FoundShow {
+          Dir = dir,
+          Channel = MakeChannelId(user, target, displayId),
+          DisplayId = displayId,
+          RelDir = user + "/" + target + "/" + displayId + "/" + safe
+        };
+      }
+    }
+    JObject channels = ScanDiskChannels();
+    foreach (var p in channels.Properties()) {
+      if (!TryParseChannelId(p.Name, out user, out target, out displayId)) continue;
+      string dir = Path.Combine(root, user, target, displayId, safe);
+      if (File.Exists(Path.Combine(dir, "show.json"))) {
+        return new FoundShow {
+          Dir = dir,
+          Channel = p.Name,
+          DisplayId = displayId,
+          RelDir = user + "/" + target + "/" + displayId + "/" + safe
+        };
+      }
+    }
+    string legacy = Path.Combine(root, safe);
+    if (File.Exists(Path.Combine(legacy, "show.json"))) {
+      return new FoundShow { Dir = legacy, Channel = "", DisplayId = "", RelDir = safe };
+    }
+    return null;
+  }
+
+  private string ResolveShowDirectory(string showName, string channelHint) {
+    FoundShow found = FindShow(showName, channelHint);
+    if (found != null) return found.Dir;
+    return PathCorrection("./shows/" + GetSafeShowName(showName));
+  }
+
+  private void AttachShowMeta(dynamic show, FoundShow found) {
+    if (show == null || found == null) return;
+    show.channel = found.Channel ?? "";
+    show.relDir = found.RelDir ?? "";
+  }
+
+  private string RequestedDeviceDisplayIdRaw(dynamic _r) {
+    try {
+      if (_r.input != null && _r.input.deviceInfo != null && _r.input.deviceInfo.displayId != null) {
+        return NormalizeChannelDisplay((string)_r.input.deviceInfo.displayId);
+      }
+    } catch {
+    }
+    return "";
+  }
+
+  private string RequestedDeviceDisplayId(dynamic _r) {
+    return ToEinkDisplay(RequestedDeviceDisplayIdRaw(_r));
+  }
+
+  private void AliasChannelDisplayForDevice(JObject ch, string rawDeviceId) {
+    if (ch == null || string.IsNullOrEmpty(rawDeviceId)) return;
+    string einkCh = ToEinkDisplay((string)ch["displayId"]);
+    string einkDev = ToEinkDisplay(rawDeviceId);
+    if (einkCh != "" && einkCh == einkDev && (string)ch["displayId"] != rawDeviceId) {
+      ch["displayId"] = rawDeviceId;
+    }
+  }
+
+  private string ChannelIdForDeviceDisplay(JObject shows, string displayId) {
+    if (string.IsNullOrEmpty(displayId) || shows == null) return "";
+    JObject chs = shows["channels"] as JObject;
+    if (chs == null) return "";
+    string eink = ToEinkDisplay(NormalizeChannelDisplay(displayId));
+    string def = (string)shows["defaultChannel"];
+    if (!string.IsNullOrEmpty(def) && chs[def] != null && (string)chs[def]["displayId"] == eink) return def;
+    string withShow = "";
+    string any = "";
+    foreach (var p in chs.Properties()) {
+      JObject ch = p.Value as JObject;
+      if (ch == null || (string)ch["displayId"] != eink) continue;
+      if (any == "") any = p.Name;
+      if (!string.IsNullOrEmpty((string)ch["showName"])) {
+        withShow = p.Name;
+        break;
+      }
+    }
+    return withShow != "" ? withShow : any;
+  }
+
+  private void ServeLegacyShowFile(dynamic _r) {
+    string showToken = Request["show"] ?? "";
+    string file = Path.GetFileName(Request["file"] ?? "");
+    if (showToken.StartsWith("show_")) showToken = showToken.Substring(5);
+    if (string.IsNullOrEmpty(showToken) || string.IsNullOrEmpty(file) || file == "." || file == "..") {
+      Response.StatusCode = 404;
+      Response.End();
+      return;
+    }
+    FoundShow found = FindShow(showToken, RequestedChannelId(_r));
+    if (found == null) {
+      Response.StatusCode = 404;
+      Response.End();
+      return;
+    }
+    string full = Path.Combine(found.Dir, file);
+    if (!File.Exists(full)) {
+      Response.StatusCode = 404;
+      Response.End();
+      return;
+    }
+    Response.Clear();
+    Response.ContentType = "image/ink";
+    Response.TransmitFile(full);
+    Response.Flush();
+    HttpContext.Current.ApplicationInstance.CompleteRequest();
+  }
+
+  private void AttachChannelOutput(dynamic _r, JObject shows) {
+    string requested = RequestedChannelId(_r);
+    string user, target, displayId;
+    if (TryParseChannelId(requested, out user, out target, out displayId)) {
+      string id = MakeChannelId(user, target, displayId);
+      if (shows["channels"][id] != null) {
+        JObject ch = (JObject)shows["channels"][id].DeepClone();
+        ch["slug"] = id;
+        AliasChannelDisplayForDevice(ch, RequestedDeviceDisplayIdRaw(_r));
+        shows["shows"] = ch["shows"].DeepClone();
+        _r.output.shows = shows;
+        _r.output.channel = ch;
+        _r.output.channelError = null;
+        return;
+      }
+      _r.output.shows = shows;
+      _r.output.channel = null;
+      _r.output.channelError = "unknown";
+      return;
+    }
+    string idByDevice = ChannelIdForDeviceDisplay(shows, RequestedDeviceDisplayId(_r));
+    string def = !string.IsNullOrEmpty(idByDevice) ? idByDevice : (string)shows["defaultChannel"];
+    if (!string.IsNullOrEmpty(def) && shows["channels"][def] != null) {
+      JObject ch = (JObject)shows["channels"][def].DeepClone();
+      ch["slug"] = def;
+      AliasChannelDisplayForDevice(ch, RequestedDeviceDisplayIdRaw(_r));
+      shows["shows"] = ch["shows"].DeepClone();
+      _r.output.shows = shows;
+      _r.output.channel = ch;
+      _r.output.channelError = null;
+      return;
+    }
+    _r.output.shows = shows;
+    _r.output.channel = null;
+    _r.output.channelError = "no_default";
   }
 
 }

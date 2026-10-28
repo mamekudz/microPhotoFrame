@@ -49,6 +49,10 @@ desktop.ini
 # Logs
 *.log
 
+# COCO-SSD weights (gulp INIT)
+src/libs/models/model.json
+src/libs/models/group1-shard*
+
 # Shows folder should exist but be empty (use shows/.gitkeep)
 shows/*
 !shows/.gitkeep

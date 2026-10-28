@@ -7,6 +7,7 @@
  */
 
 #include "board.h"
+#include "i18n_fw.h"
 #if (EPD_SELECT == 2)
 #include <GxEPD2_4C.h>
 #elif (EPD_SELECT == 1)
@@ -39,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.3.2"
+#define FIRMWARE_VERSION "1.5.0"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -168,7 +169,21 @@ GxEPD2_DISPLAY_CLASS<GxEPD2_DRIVER_CLASS, MAX_HEIGHT(GxEPD2_DRIVER_CLASS)>
 // === Configuration Variables ===
 String wifiSSID = "";
 String wifiPassword = "";
+String hostServerUrl = "";
+String hostUser = "";
+String hostTarget = "";
 String hostChannelUrl = "";
+String uiLid = "";
+String extractChannelSlug(const String& url);
+String makeServerRequest(String action, String jsonPayload = "{}");
+static String pathDisplayId();
+static String normalizeServerUrl(String url);
+static void applyHostParts();
+static void parseLegacyHostParts();
+static void takeHostUrlAndUser(String urlIn, String userIn);
+static void persistHostIdentity();
+static String epdToAscii(const char* s);
+static String fwT(const char* key);
 /** Wenn kein MPU6050: logische Ausrichtung für Bildfilter (0–3), siehe readOrientation(). */
 uint8_t configDefaultOrientation = 0;
 bool configMode = false;
@@ -181,6 +196,7 @@ static uint64_t bootConfigApUntilSessionMs = 0;
 
 // === Show Management ===
 String currentShowName = "";
+String currentChannelPath = "";
 String currentShowMode = "forwardssequence"; // forwardssequence, reversesequence, random
 int currentShowTimer = 5; // minutes
 int currentImageIndex = 0;
@@ -296,6 +312,8 @@ bool offlineBadgeOnScreen = false;
 bool lastGetShowsSucceeded = true;
 /** Diagnose-String: letzte Fehlerstelle in getActiveShow (für Statusbildschirm). */
 String lastGetShowError = "";
+/** getShows verstand die Antwort, aber die Kanal-URL gilt nicht für dieses Display. */
+bool lastChannelUnintended = false;
 
 // === Quick-Menu Mode ===
 bool quickMenuMode = false;
@@ -310,15 +328,11 @@ String serverActiveShowCached = "";
 /** Standard „Minuten bis Server wieder gilt“ im Quick-Menü (NVS qRevMin). */
 uint16_t quickMenuRevertMinutes = 60;
 
-/** NVS dSleep: zwischen Slides Deep Sleep. E1002 default an (Akku).
+/** NVS dSleep: zwischen Slides Deep Sleep.
+ *  E1002 und Waveshare default an (eigene Versorgung).
  *  NeoFrame default aus: Powerbanks trennen bei µA-Last im Tiefschlaf. */
-#if PHOTOFRAME_HAS_BUTTONS
-bool configSlideshowDeepSleep = true;
-static const uint8_t kDeepSleepDefault = 1;
-#else
-bool configSlideshowDeepSleep = false;
-static const uint8_t kDeepSleepDefault = 0;
-#endif
+bool configSlideshowDeepSleep = PHOTOFRAME_DEEP_SLEEP_DEFAULT != 0;
+static const uint8_t kDeepSleepDefault = PHOTOFRAME_DEEP_SLEEP_DEFAULT;
 static uint32_t g_lastImageUnix = 0;
 static uint32_t g_lastPollUnix = 0;
 static bool g_wDeepPoll = false;
@@ -410,21 +424,40 @@ static bool shouldOfferBootConfigAp() {
 }
 #endif
 
-static bool startBootConfigAp() {
+/** Offenes 2,4-GHz-WLAN fürs Handy. 192.168.4.1 nur in diesem Netz. */
+static bool startFrameSoftAp() {
   WiFi.mode(WIFI_AP_STA);
-  if (!WiFi.softAP("microPhotoFrame")) {
+  IPAddress apIP(192, 168, 4, 1);
+  IPAddress gw(192, 168, 4, 1);
+  IPAddress mask(255, 255, 255, 0);
+  WiFi.softAPConfig(apIP, gw, mask);
+  if (!WiFi.softAP("microPhotoFrame", nullptr, 6, 0, 4)) {
+    Serial1.println("Soft-AP microPhotoFrame failed");
+    return false;
+  }
+  delay(250);
+  dnsServer.stop();
+  dnsServer.start(53, "*", WiFi.softAPIP());
+  dnsServerActive = true;
+  Serial1.print("Soft-AP microPhotoFrame ");
+  Serial1.println(WiFi.softAPIP());
+  return true;
+}
+
+static bool startBootConfigAp() {
+  if (!startFrameSoftAp()) {
     Serial1.println("Boot config AP failed");
     return false;
   }
-  delay(200);
-  IPAddress apip = WiFi.softAPIP();
-  dnsServer.stop();
-  dnsServer.start(53, "*", apip);
-  dnsServerActive = true;
   bootConfigApActive = true;
-  bootConfigApUntilSessionMs = sessionMs() + CONFIG_MODE_TIMEOUT;
-  Serial1.print("Boot config AP 5 min: microPhotoFrame ");
-  Serial1.println(apip);
+  // Tasterlos und ohne Deep Sleep: AP bleibt, sonst verpasst das Handy das 5-min-Fenster.
+  if (PHOTOFRAME_HAS_BUTTONS || configSlideshowDeepSleep) {
+    bootConfigApUntilSessionMs = sessionMs() + CONFIG_MODE_TIMEOUT;
+    Serial1.println("Boot config AP 5 min");
+  } else {
+    bootConfigApUntilSessionMs = 0;
+    Serial1.println("Boot config AP bleibt (kein Taster)");
+  }
   return true;
 }
 
@@ -547,6 +580,12 @@ void loadConfig() {
   wifiSSID = preferences.getString("wifiSSID", "");
   wifiPassword = preferences.getString("wifiPassword", "");
   hostChannelUrl = preferences.getString("hostChannelUrl", "");
+  hostServerUrl = preferences.getString("hostUrl", "");
+  hostUser = preferences.getString("hostUser", "");
+  hostTarget = preferences.getString("hostTgt", "");
+  uiLid = preferences.getString("uiLid", "");
+  parseLegacyHostParts();
+  applyHostParts();
   uint8_t o = preferences.getUChar("defOrient", 0);
   if (o > 3) o = 0;
   configDefaultOrientation = o;
@@ -557,11 +596,17 @@ void loadConfig() {
   if (rm > 1440) rm = 1440;
   quickMenuRevertMinutes = (uint16_t)rm;
   showTempOverrideUntilSessionMs = 0;
-#if !PHOTOFRAME_HAS_BUTTONS
+#if !PHOTOFRAME_HAS_BUTTONS && (PHOTOFRAME_DEEP_SLEEP_DEFAULT == 0)
   // 1.1/1.2 wrote dSleep=1 for every board. NeoFrame + powerbank: one-shot off.
   if (!preferences.isKey("dsNfOk")) {
     preferences.putUChar("dSleep", 0);
     preferences.putUChar("dsNfOk", 1);
+  }
+#elif !PHOTOFRAME_HAS_BUTTONS && (PHOTOFRAME_DEEP_SLEEP_DEFAULT == 1)
+  // Waveshare: eigene Ladelogik, nicht NeoFrame. Einmalig an, falls dsNfOk es ausgeschaltet hat.
+  if (!preferences.isKey("dsWsOk")) {
+    preferences.putUChar("dSleep", 1);
+    preferences.putUChar("dsWsOk", 1);
   }
 #endif
   if (!preferences.isKey("dSleep")) {
@@ -574,7 +619,11 @@ void loadConfig() {
   
   Serial1.print("Loaded config - SSID: ");
   Serial1.print(wifiSSID);
-  Serial1.print(", URL: ");
+  Serial1.print(", hostUrl: ");
+  Serial1.print(hostServerUrl);
+  Serial1.print(", user: ");
+  Serial1.print(hostUser);
+  Serial1.print(", channel: ");
   Serial1.print(hostChannelUrl);
   Serial1.print(", defOrient: ");
   Serial1.print((int)configDefaultOrientation);
@@ -590,10 +639,137 @@ void saveConfig() {
   preferences.begin("microPhotoFrame", false);
   preferences.putString("wifiSSID", wifiSSID);
   preferences.putString("wifiPassword", wifiPassword);
+  preferences.putString("hostUrl", hostServerUrl);
+  preferences.putString("hostUser", hostUser);
+  preferences.putString("hostTgt", hostTarget);
   preferences.putString("hostChannelUrl", hostChannelUrl);
+  preferences.putString("uiLid", uiLid);
   preferences.putUChar("defOrient", configDefaultOrientation);
   preferences.end();
-  Serial1.println("Config saved");
+  Serial1.print("Config saved url=");
+  Serial1.print(hostServerUrl);
+  Serial1.print(" user=");
+  Serial1.println(hostUser);
+}
+
+/** Persist server URL + user immediately (Laden must not wait for Speichern). */
+static void persistHostIdentity() {
+  preferences.begin("microPhotoFrame", false);
+  preferences.putString("hostUrl", hostServerUrl);
+  preferences.putString("hostUser", hostUser);
+  if (hostTarget.length() > 0) preferences.putString("hostTgt", hostTarget);
+  if (hostChannelUrl.length() > 0) preferences.putString("hostChannelUrl", hostChannelUrl);
+  preferences.end();
+  Serial1.print("Host identity saved url=");
+  Serial1.print(hostServerUrl);
+  Serial1.print(" user=");
+  Serial1.println(hostUser);
+}
+
+static JsonDocument fwI18nDoc;
+static bool fwI18nReady = false;
+
+static String fwResolvedLid() {
+  if (uiLid == "de-DE" || uiLid.startsWith("de")) return "de-DE";
+  if (uiLid == "zh-CN" || uiLid.startsWith("zh")) return "zh-CN";
+  return "en-US";
+}
+
+static void ensureFwI18n() {
+  if (fwI18nReady) return;
+  fwI18nReady = deserializeJson(fwI18nDoc, I18N_FW_JSON) == DeserializationError::Ok;
+}
+
+static String fwT(const char* key) {
+  ensureFwI18n();
+  if (!fwI18nReady || !key) return String(key ? key : "");
+  const char* v = fwI18nDoc[fwResolvedLid()][key];
+  if (!v) v = fwI18nDoc["en-US"][key];
+  return v ? String(v) : String(key);
+}
+
+static void persistUiLid() {
+  preferences.begin("microPhotoFrame", false);
+  preferences.putString("uiLid", uiLid);
+  preferences.end();
+}
+
+static String usbCfgLine;
+
+static void processUsbConfigLine(const String& line) {
+  if (line == "CFG") {
+    Serial.println("CFG WIFI <ssid>");
+    Serial.println("CFG PASS <password>");
+    Serial.println("CFG URL <http://host:port>");
+    Serial.println("CFG USER <userId>");
+    Serial.println("CFG GROUP <groupId>");
+    Serial.println("CFG SAVE");
+    Serial.print("ssid=");
+    Serial.println(wifiSSID);
+    Serial.print("url=");
+    Serial.println(hostServerUrl);
+    Serial.print("userId=");
+    Serial.println(hostUser);
+    Serial.print("groupId=");
+    Serial.println(hostTarget);
+    return;
+  }
+  if (line.startsWith("CFG WIFI ")) {
+    wifiSSID = line.substring(9);
+    wifiSSID.trim();
+    Serial.println("OK WIFI");
+    return;
+  }
+  if (line.startsWith("CFG PASS ")) {
+    wifiPassword = line.substring(9);
+    Serial.println("OK PASS");
+    return;
+  }
+  if (line.startsWith("CFG URL ")) {
+    hostServerUrl = normalizeServerUrl(line.substring(8));
+    applyHostParts();
+    Serial.println("OK URL");
+    return;
+  }
+  if (line.startsWith("CFG USER ")) {
+    hostUser = line.substring(9);
+    hostUser.trim();
+    applyHostParts();
+    Serial.println("OK USER");
+    return;
+  }
+  if (line.startsWith("CFG GROUP ") || line.startsWith("CFG TARGET ")) {
+    hostTarget = line.substring(line.startsWith("CFG GROUP ") ? 10 : 11);
+    hostTarget.trim();
+    applyHostParts();
+    Serial.println("OK GROUP");
+    return;
+  }
+  if (line == "CFG SAVE") {
+    if (wifiSSID.length() == 0 || hostServerUrl.length() == 0 || hostUser.length() == 0 || hostTarget.length() == 0) {
+      Serial.println("ERR SAVE need WIFI, URL, USER, GROUP");
+      return;
+    }
+    saveConfig();
+    Serial.println("OK SAVE");
+    Serial.flush();
+    delay(200);
+    ESP.restart();
+  }
+}
+
+static void processUsbConfig() {
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c != '\n') {
+      if (usbCfgLine.length() < 240) usbCfgLine += c;
+      continue;
+    }
+    usbCfgLine.trim();
+    if (usbCfgLine.length() > 0) processUsbConfigLine(usbCfgLine);
+    usbCfgLine = "";
+  }
 }
 
 void clearConfig() {
@@ -602,7 +778,11 @@ void clearConfig() {
   preferences.end();
   wifiSSID = "";
   wifiPassword = "";
+  hostServerUrl = "";
+  hostUser = "";
+  hostTarget = "";
   hostChannelUrl = "";
+  uiLid = "";
   lastDisplayedInkName = "";
   currentShowName = "";
   Serial1.println("Config cleared");
@@ -757,10 +937,7 @@ void handleRoot() {
     return;
   }
 
-  // Scan direkt beim Seitenaufbau - kein JavaScript fetch nötig
-  int numNetworks = doWiFiScan();
-
-  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><link rel='icon' href='/favicon.ico' type='image/x-icon'><title>microPhotoFrame Konfiguration</title>";
+  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><link rel='icon' href='/favicon.ico' type='image/x-icon'><title>microPhotoFrame</title>";
   html += "<style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;text-align:center;}";
   html += "input,button,select{width:100%;padding:10px;margin:10px 0;box-sizing:border-box;}";
   html += "button{background:#4CAF50;color:white;border:none;cursor:pointer;}";
@@ -778,9 +955,16 @@ void handleRoot() {
   html += "<img src='/logo' alt='Logo' onerror=\"this.style.display='none'\">";
   html += "<img src='/logotext' alt='&micro;PhotoFrame&trade;' onerror=\"this.style.display='none'\">";
   html += "</div>";
-  html += "<h1>microPhotoFrame Konfiguration</h1>";
+  html += "<h1 data-i18n='title'>Configuration</h1>";
+  html += "<label data-i18n='language'>Language</label>";
+  html += "<select id='uiLid' name='lid'>";
+  html += "<option value='auto'>Auto (browser)</option>";
+  html += "<option value='en-US'>English</option>";
+  html += "<option value='de-DE'>Deutsch</option>";
+  html += "<option value='zh-CN'>中文</option>";
+  html += "</select>";
   if (WiFi.status() == WL_CONNECTED) {
-    html += "<div class='status ok'>Heimnetz ";
+    html += "<div class='status ok'><span data-i18n='homeNet'>Home WiFi</span> ";
     html += htmlEscapeSsid(wifiSSID);
     html += " &middot; ";
     html += WiFi.localIP().toString();
@@ -790,64 +974,63 @@ void handleRoot() {
     unsigned long leftSec = 0;
     if (bootConfigApUntilSessionMs > sessionMs())
       leftSec = (unsigned long)((bootConfigApUntilSessionMs - sessionMs()) / 1000ULL);
-    html += "<div class='status ok'>Direkt-WLAN <b>microPhotoFrame</b> (offen) &middot; http://";
+    html += "<div class='status ok'><span data-i18n='apOpen'>Direct WiFi microPhotoFrame (open)</span> &middot; http://";
     html += WiFi.softAPIP().toString();
-    html += "/ &middot; noch ";
+    html += "/ &middot; ";
     html += String(leftSec / 60);
     html += ":";
     if ((leftSec % 60) < 10) html += "0";
     html += String(leftSec % 60);
-    html += " min</div>";
+    html += "</div>";
   } else if (WiFi.status() == WL_CONNECTED) {
-    html += "<div class='status warn'>Ohne Taster: nach dem Einschalten 5 min WLAN <b>microPhotoFrame</b>, sonst diese Seite im Heimnetz.</div>";
+    html += "<div class='status warn' data-i18n='phoneHint'>Phone: join open WiFi microPhotoFrame (2.4 GHz), turn off mobile data, then http://192.168.4.1 — not the home WiFi.</div>";
   }
 
-  if (numNetworks > 0) {
-    html += "<div class='status ok'>" + String(numNetworks) + " WLAN-Netzwerk(e) gefunden</div>";
-  } else {
-    html += "<div class='status warn'>Kein WLAN gefunden. Neu laden zum erneuten Scannen.</div>";
-  }
+  html += "<div class='status ok' id='scanStatus' data-i18n='scanReady'>Page ready. WiFi list loads in the background…</div>";
 
   html += "<form method='POST' action='/save' id='cfgform'>";
-  html += "<label>WiFi SSID:</label>";
+  html += "<input type='hidden' name='lid' id='lidField' value=''>";
+  html += "<label data-i18n='ssid'>WiFi SSID</label>";
   html += "<select name='ssid' id='ssid'>";
-  html += "<option value=''>-- WLAN wählen --</option>";
+  html += "<option value='' data-i18n='ssidChoose'>-- Choose WiFi --</option>";
   if (wifiSSID.length() > 0) {
-    html += "<option value='" + htmlEscapeSsid(wifiSSID) + "' selected>" + htmlEscapeSsid(wifiSSID) + " (gespeichert)</option>";
-  }
-  for (int i = 0; i < numNetworks; i++) {
-    String ssid = WiFi.SSID(i);
-    if (ssid.length() == 0) continue;
-    // Duplikate mit gespeicherter SSID vermeiden
-    if (ssid == wifiSSID) continue;
-    int rssi = WiFi.RSSI(i);
-    bool locked = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-    String label = htmlEscapeSsid(ssid);
-    label += locked ? " &#128274;" : " (offen)";
-    label += " (" + String(rssi) + " dBm)";
-    html += "<option value='" + htmlEscapeSsid(ssid) + "'>" + label + "</option>";
+    html += "<option value='" + htmlEscapeSsid(wifiSSID) + "' selected>" + htmlEscapeSsid(wifiSSID) + "</option>";
   }
   html += "</select>";
-  html += "<a href='/' style='font-size:12px;'>Erneut scannen</a>";
-  html += "<input type='text' name='ssid_manual' id='ssid_manual' placeholder='oder SSID manuell eingeben' style='margin-top:5px;' autocomplete='off'>";
-  html += "<label>WiFi Passwort:</label>";
+  html += "<a href='#' id='rescanLink' style='font-size:12px;' data-i18n='rescan'>Scan again</a>";
+  html += "<input type='text' name='ssid_manual' id='ssid_manual' data-i18n-placeholder='ssidManual' placeholder='or enter SSID manually' style='margin-top:5px;' autocomplete='off'>";
+  html += "<label data-i18n='password'>WiFi password</label>";
   html += "<div class='password-wrapper'>";
   html += "<input type='password' name='password' id='password' value='" + htmlEscapeSsid(wifiPassword) + "'>";
-  html += "<button type='button' class='password-toggle' onclick='togglePassword()' title='Passwort anzeigen/verbergen'>&#128065;</button>";
+  html += "<button type='button' class='password-toggle' onclick='togglePassword()'>&#128065;</button>";
   html += "</div>";
-  html += "<label>Host-Channel-URL:</label><input type='text' name='url' value='" + htmlEscapeSsid(hostChannelUrl) + "' placeholder='http://192.168.0.69:888/'><br>";
-  html += "<small style='color:#666;'>Basis-URL ohne Pfad (z.B. http://192.168.0.107:888).</small><br>";
-  html += "<label>Standard-Ausrichtung:</label>";
+  html += "<label data-i18n='serverUrl'>Server URL</label><input type='text' name='url' id='hostUrl' value='" + htmlEscapeSsid(hostServerUrl.length() ? hostServerUrl : hostChannelUrl) + "' placeholder='http://192.168.0.69:888'><br>";
+  html += "<small style='color:#666;' data-i18n='serverUrlHint'>Host and port only, e.g. http://192.168.0.69:888</small><br>";
+  html += "<label data-i18n='userId'>User ID</label><input type='text' name='user' id='hostUser' value='" + htmlEscapeSsid(hostUser) + "' placeholder='mamekudz' autocomplete='off'><br>";
+  html += "<label data-i18n='groupId'>Group ID</label>";
+  html += "<div style='display:flex;gap:8px;align-items:center;'>";
+  html += "<select name='group' id='hostGroup' style='flex:1'>";
+  if (hostTarget.length() > 0) {
+    html += "<option value='" + htmlEscapeSsid(hostTarget) + "' selected>" + htmlEscapeSsid(hostTarget) + "</option>";
+  } else {
+    html += "<option value='' data-i18n='groupsPlaceholder'>-- Load groups --</option>";
+  }
+  html += "</select>";
+  html += "<button type='button' id='loadTargetsBtn' style='width:auto;margin:0;padding:10px 12px;' data-i18n='loadGroups'>Load</button>";
+  html += "</div>";
+  html += "<small style='color:#666;'><span data-i18n='displayHint'>Display comes from this device</span>: " + htmlEscapeSsid(String(PHOTOFRAME_TARGET_NAME)) + " (" + htmlEscapeSsid(String(DEVICE_DISPLAY_ID)) + ")</small><br>";
+  html += "<div class='status warn' id='targetStatus' style='display:none'></div>";
+  html += "<label data-i18n='orient'>Default orientation</label>";
   html += "<select name='def_orient' id='def_orient'>";
-  html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + ">Querformat (0&deg;)</option>";
-  html += "<option value='1'" + String(configDefaultOrientation == 1 ? " selected" : "") + ">Hochkant (90&deg;)</option>";
-  html += "<option value='2'" + String(configDefaultOrientation == 2 ? " selected" : "") + ">Querformat gedreht (180&deg;)</option>";
-  html += "<option value='3'" + String(configDefaultOrientation == 3 ? " selected" : "") + ">Hochkant gedreht (270&deg;)</option>";
+  html += "<option value='0'" + String(configDefaultOrientation == 0 ? " selected" : "") + " data-i18n='orient0'>Landscape (0&deg;)</option>";
+  html += "<option value='1'" + String(configDefaultOrientation == 1 ? " selected" : "") + " data-i18n='orient1'>Portrait (90&deg;)</option>";
+  html += "<option value='2'" + String(configDefaultOrientation == 2 ? " selected" : "") + " data-i18n='orient2'>Landscape flipped (180&deg;)</option>";
+  html += "<option value='3'" + String(configDefaultOrientation == 3 ? " selected" : "") + " data-i18n='orient3'>Portrait flipped (270&deg;)</option>";
   html += "</select>";
 #if PHOTOFRAME_HAS_MPU6050
-  html += "<small style='color:#666;'>Bei verbautem Sensor wird die Lage automatisch erkannt; dieser Wert gilt nur ohne Sensor.</small><br>";
+  html += "<small style='color:#666;' data-i18n='orientMpu'>With a built-in sensor the pose is detected automatically; this value applies only without a sensor.</small><br>";
 #else
-  html += "<small style='color:#666;'>Dieses Gerät hat keinen Lagesensor. Die gewählte Ausrichtung gilt fest.</small><br>";
+  html += "<small style='color:#666;' data-i18n='orientNoMpu'>This device has no pose sensor. The chosen orientation is fixed.</small><br>";
 #endif
 #if !PHOTOFRAME_HAS_BUTTONS
   html += "<input type='hidden' name='deep_sleep_present' value='1'>";
@@ -855,12 +1038,25 @@ void handleRoot() {
   html += "<input type='checkbox' name='deep_sleep' value='1' style='width:auto;margin-top:4px;'";
   if (configSlideshowDeepSleep) html += " checked";
   html += ">";
-  html += "<span><b>Deep Sleep</b> zwischen den Bildern. Am NeoFrame standardm&auml;&szlig;ig aus: Powerbanks schalten ab, wenn kaum Strom flie&szlig;t. Nur bei festem Netzteil einschalten.</span></label>";
+#if PHOTOFRAME_DEEP_SLEEP_DEFAULT
+  html += "<span data-i18n='deepSleepWs'>Deep Sleep between images. On by default on this board (own power/charge circuit).</span></label>";
+#else
+  html += "<span data-i18n='deepSleep'>Deep Sleep between images. Off by default on NeoFrame: power banks cut power when current is low. Enable only with a wall supply.</span></label>";
 #endif
-  html += "<button type='submit'>Speichern</button>";
+#endif
+  html += "<button type='submit' data-i18n='save'>Save</button>";
   html += "</form>";
   html += "<p style='color:#666;font-size:13px;margin-top:16px;'>" + firmwareVersionLabel() + "</p>";
-  html += "<script>";
+  html += "<script>var I18N=";
+  html += I18N_FW_JSON;
+  html += ";var savedLid='";
+  html += htmlEscapeSsid(uiLid.length() ? uiLid : "auto");
+  html += "';";
+  html += "function bestLid(){if(savedLid&&savedLid!=='auto'&&I18N[savedLid])return savedLid;var n=(navigator.language||'en-US').replace('_','-');if(I18N[n])return n;var p=n.split('-')[0];if(p==='de')return 'de-DE';if(p==='zh')return 'zh-CN';return 'en-US';}";
+  html += "function t(k){var pack=I18N[bestLid()]||I18N['en-US']||{};return pack[k]||(I18N['en-US']&&I18N['en-US'][k])||k;}";
+  html += "function applyI18n(){var pack=I18N[bestLid()]||{};document.querySelectorAll('[data-i18n]').forEach(function(el){var k=el.getAttribute('data-i18n');if(pack[k])el.textContent=pack[k];});document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){var k=el.getAttribute('data-i18n-placeholder');if(pack[k])el.placeholder=pack[k];});document.documentElement.lang=bestLid();var s=document.getElementById('uiLid');if(s)s.value=savedLid||'auto';var hf=document.getElementById('lidField');if(hf)hf.value=savedLid||'auto';}";
+  html += "applyI18n();";
+  html += "var lidSel=document.getElementById('uiLid');if(lidSel)lidSel.addEventListener('change',function(){savedLid=lidSel.value||'auto';applyI18n();fetch('/lang',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'lid='+encodeURIComponent(savedLid)});});";
   html += "document.getElementById('ssid').addEventListener('change',function(e){";
   html += "if(e.target.value){document.getElementById('ssid_manual').value='';}";
   html += "});";
@@ -870,10 +1066,14 @@ void handleRoot() {
   html += "document.getElementById('cfgform').addEventListener('submit',function(e){";
   html += "var manual=document.getElementById('ssid_manual').value.trim();";
   html += "var sel=document.getElementById('ssid');";
-  html += "var url=document.querySelector('input[name=url]').value.trim();";
+  html += "var url=document.getElementById('hostUrl').value.trim();";
+  html += "var user=document.getElementById('hostUser').value.trim();";
+  html += "var target=document.getElementById('hostGroup').value.trim();";
   html += "if(!manual && !sel.value){";
-  html += "e.preventDefault();alert('Bitte ein WLAN wählen oder die SSID manuell eingeben.');return;}";
-  html += "if(!url){e.preventDefault();alert('Bitte die Host-Channel-URL eingeben.');return;}";
+  html += "e.preventDefault();alert(t('needSsid'));return;}";
+  html += "if(!url){e.preventDefault();alert(t('needUrl'));return;}";
+  html += "if(!user){e.preventDefault();alert(t('needUser'));return;}";
+  html += "if(!target){e.preventDefault();alert(t('needGroup'));return;}";
   html += "if(manual){sel.disabled=true;";
   html += "var h=document.createElement('input');h.type='hidden';h.name='ssid';h.value=manual;this.appendChild(h);}";
   html += "});";
@@ -881,6 +1081,42 @@ void handleRoot() {
   html += "var pwd=document.getElementById('password');";
   html += "if(pwd.type==='password'){pwd.type='text';}else{pwd.type='password';}";
   html += "}";
+  html += "function loadScan(){";
+  html += "var st=document.getElementById('scanStatus');";
+  html += "if(st)st.textContent=t('scanSearch');";
+  html += "fetch('/scan').then(function(r){return r.json();}).then(function(list){";
+  html += "var sel=document.getElementById('ssid'); if(!sel)return;";
+  html += "var keep=sel.value;";
+  html += "while(sel.options.length>1)sel.remove(1);";
+  html += "list.forEach(function(n){var o=document.createElement('option');o.value=n.ssid;";
+  html += "o.text=n.ssid+(n.encryption?' \\uD83D\\uDD12':' '+t('wifiOpen'))+' ('+n.rssi+' dBm)';sel.appendChild(o);});";
+  html += "if(keep)sel.value=keep;";
+  html += "if(st)st.textContent=(list.length||0)+' '+t('scanFound');";
+  html += "}).catch(function(){if(st){st.className='status warn';st.textContent=t('scanFail');}});";
+  html += "}";
+  html += "function loadTargets(){";
+  html += "var st=document.getElementById('targetStatus');";
+  html += "var url=document.getElementById('hostUrl').value.trim();";
+  html += "var user=document.getElementById('hostUser').value.trim();";
+  html += "var ssid=document.getElementById('ssid_manual').value.trim()||document.getElementById('ssid').value;";
+  html += "var password=document.getElementById('password').value;";
+  html += "if(st){st.style.display='block';st.className='status ok';st.textContent=t('loadingGroups');}";
+  html += "var body=new URLSearchParams();if(url)body.set('url',url);if(user)body.set('user',user);body.set('ssid',ssid);body.set('password',password);";
+  html += "fetch('/targets',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString()}).then(function(r){return r.json();}).then(function(data){";
+  html += "var sel=document.getElementById('hostGroup'); if(!sel)return;";
+  html += "var keep=sel.value; sel.innerHTML='';";
+  html += "var list=(data&&data.output&&(data.output.groups||data.output.targets))||[];";
+  html += "if(!data||!data.ok){if(st){st.className='status warn';st.textContent=(data&&data.error&&data.error.msg)||t('groupsFail');}return;}";
+  html += "if(!list.length){sel.appendChild(new Option(t('noGroups'),''));if(st){st.className='status warn';st.textContent=t('noGroupsHint');}return;}";
+  html += "list.forEach(function(g){var id=g.groupId||g.group||g.target;var o=new Option(id+(g.showName?' · '+g.showName:''),id);sel.appendChild(o);});";
+  html += "if(keep)sel.value=keep; if(!sel.value&&list[0])sel.value=list[0].groupId||list[0].group||list[0].target;";
+  html += "if(st){st.className='status ok';st.textContent=list.length+' '+t('groupsOk');}";
+  html += "}).catch(function(){if(st){st.style.display='block';st.className='status warn';st.textContent=t('groupsNetFail');}});";
+  html += "}";
+  html += "var lt=document.getElementById('loadTargetsBtn');if(lt)lt.addEventListener('click',function(e){e.preventDefault();loadTargets();});";
+  html += "if(document.getElementById('hostUrl').value.trim()&&document.getElementById('hostUser').value.trim())loadTargets();";
+  html += "loadScan();";
+  html += "var rs=document.getElementById('rescanLink');if(rs)rs.addEventListener('click',function(e){e.preventDefault();loadScan();});";
   html += "</script></body></html>";
 
   server.sendHeader("Cache-Control", "no-store");
@@ -900,18 +1136,29 @@ void handleSave() {
   }
   String urlIn = server.hasArg("url") ? server.arg("url") : "";
   urlIn.trim();
-  if (urlIn.length() > 0 && (ssidIn.length() > 0 || wifiSSID.length() > 0)) {
+  String userIn = server.hasArg("user") ? server.arg("user") : (server.hasArg("userId") ? server.arg("userId") : "");
+  userIn.trim();
+  String targetIn = server.hasArg("group") ? server.arg("group") : "";
+  if (targetIn.length() == 0 && server.hasArg("groupId")) targetIn = server.arg("groupId");
+  if (targetIn.length() == 0 && server.hasArg("target")) targetIn = server.arg("target");
+  targetIn.trim();
+  if (urlIn.length() > 0 && userIn.length() > 0 && targetIn.length() > 0 &&
+      (ssidIn.length() > 0 || wifiSSID.length() > 0)) {
     if (ssidIn.length() > 0) {
       wifiSSID = ssidIn;
       wifiPassword = server.hasArg("password") ? server.arg("password") : "";
     }
-    // IIS/HTTP.sys returns 400 for "http://host:888?action=" (no path slash).
-    int _q = urlIn.indexOf('?');
-    if (_q >= 0) urlIn = urlIn.substring(0, _q);
-    int _scheme = urlIn.indexOf("://");
-    int _path = (_scheme >= 0) ? urlIn.indexOf('/', _scheme + 3) : urlIn.indexOf('/');
-    if (_path < 0) urlIn += "/";
-    hostChannelUrl = urlIn;
+    if (server.hasArg("lid")) {
+      uiLid = server.arg("lid");
+      uiLid.trim();
+    }
+    hostTarget = targetIn;
+    takeHostUrlAndUser(urlIn, userIn);
+    if (hostUser.length() == 0 || hostTarget.length() == 0) {
+      hostChannelUrl = urlIn;
+      parseLegacyHostParts();
+      applyHostParts();
+    }
     if (server.hasArg("def_orient")) {
       int o = server.arg("def_orient").toInt();
       if (o >= 0 && o <= 3) configDefaultOrientation = (uint8_t)o;
@@ -927,17 +1174,91 @@ void handleSave() {
     }
     saveConfig();
     
-    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Gespeichert</title></head><body>";
-    html += "<h1>Konfiguration gespeichert!</h1>";
-    html += "<p>Das Gerät startet neu und verbindet sich mit dem WiFi...</p>";
-    html += "</body></html>";
+    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>";
+    html += fwT("savedTitle");
+    html += "</title></head><body>";
+    html += "<h1>";
+    html += fwT("savedTitle");
+    html += "</h1><p>";
+    html += fwT("savedBody");
+    html += "</p></body></html>";
     server.send(200, "text/html", html);
     
     delay(2000);
     ESP.restart();
   } else {
-    server.send(400, "text/plain", "Fehlende Parameter: SSID und Host-URL sind erforderlich.");
+    server.send(400, "text/plain", fwT("missingParams"));
   }
+}
+
+void handleLang() {
+  String lid = server.hasArg("lid") ? server.arg("lid") : "";
+  lid.trim();
+  if (lid == "en-US" || lid == "de-DE" || lid == "zh-CN" || lid == "auto" || lid.length() == 0) {
+    uiLid = (lid == "auto") ? "" : lid;
+    persistUiLid();
+    server.send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
+  server.send(400, "application/json", "{\"ok\":false}");
+}
+
+void handleTargets() {
+  String urlIn = server.hasArg("url") ? server.arg("url") : "";
+  String userIn = server.hasArg("user") ? server.arg("user") : (server.hasArg("userId") ? server.arg("userId") : "");
+  urlIn.trim();
+  userIn.trim();
+  if (urlIn.length() == 0) urlIn = hostServerUrl;
+  if (userIn.length() == 0) userIn = hostUser;
+  takeHostUrlAndUser(urlIn, userIn);
+  if (hostServerUrl.length() == 0 || hostUser.length() == 0) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":{\"msg\":\"Server-URL und User ID fehlen.\"}}");
+    return;
+  }
+  persistHostIdentity();
+  String ssidIn = server.hasArg("ssid") ? server.arg("ssid") : "";
+  ssidIn.trim();
+  if (ssidIn.length() > 0) {
+    wifiSSID = ssidIn;
+    wifiPassword = server.hasArg("password") ? server.arg("password") : wifiPassword;
+    preferences.begin("microPhotoFrame", false);
+    preferences.putString("wifiSSID", wifiSSID);
+    preferences.putString("wifiPassword", wifiPassword);
+    preferences.end();
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiSSID.length() == 0) {
+      server.send(503, "application/json", "{\"ok\":false,\"error\":{\"msg\":\"Zuerst ein WLAN wählen.\"}}");
+      return;
+    }
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.setSleep(false);
+    WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 12000) {
+      delay(200);
+    }
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(503, "application/json", "{\"ok\":false,\"error\":{\"msg\":\"Kein Heimnetz. WLAN prüfen, dann Targets laden.\"}}");
+    return;
+  }
+  String saved = hostChannelUrl;
+  hostChannelUrl = normalizeServerUrl(urlIn);
+  JsonDocument requestDoc;
+  requestDoc["input"]["user"] = userIn;
+  requestDoc["input"]["userId"] = userIn;
+  requestDoc["input"]["displayId"] = DEVICE_DISPLAY_ID;
+  String requestJson;
+  serializeJson(requestDoc, requestJson);
+  String response = makeServerRequest("listTargets", requestJson);
+  hostChannelUrl = saved;
+  if (response.length() == 0) {
+    server.send(502, "application/json", "{\"ok\":false,\"error\":{\"msg\":\"Server antwortet nicht.\"}}");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response);
 }
 
 void handleLogo() {
@@ -994,15 +1315,18 @@ void startConfigMode() {
   startConfigAP();
   
   beginTextScreen();
-  display.setCursor(10, 30);
-  display.print("Config Mode");
-  display.setCursor(10, 60);
-  display.print("WiFi: microPhotoFrame");
-  display.setCursor(10, 90);
-  display.print("(Open - no password)");
+  display.setTextSize(2);
+  display.setCursor(20, 40);
+  display.print(epdToAscii(fwT("epdConfig").c_str()));
+  display.setTextSize(1);
+  display.setCursor(20, 90);
+  display.print(epdToAscii(fwT("epdWifi").c_str()));
+  display.setCursor(20, 120);
+  display.print(epdToAscii(fwT("epdOpen").c_str()));
   IPAddress IP = WiFi.softAPIP();
-  display.setCursor(10, 120);
-  display.print("IP: ");
+  display.setCursor(20, 150);
+  display.print(epdToAscii(fwT("epdIp").c_str()));
+  display.print(" ");
   display.print(IP.toString());
   display.display(false);
 }
@@ -1252,9 +1576,78 @@ static int frameTextRotation() {
   return rot;
 }
 
+static bool epdIsSmall() {
+  return display.width() <= 250 || display.height() <= 250;
+}
+
+static String epdToAscii(const char* s) {
+  String o;
+  if (!s) return o;
+  for (size_t i = 0; s[i]; ) {
+    const uint8_t c = (uint8_t)s[i];
+    if (c < 0x80) {
+      o += (char)c;
+      i++;
+      continue;
+    }
+    if ((c & 0xE0) == 0xC0 && s[i + 1]) {
+      const uint16_t u = ((uint16_t)(c & 0x1F) << 6) | ((uint8_t)s[i + 1] & 0x3F);
+      if (u == 0xE4 || u == 0xC4) o += "ae";
+      else if (u == 0xF6 || u == 0xD6) o += "oe";
+      else if (u == 0xFC || u == 0xDC) o += "ue";
+      else if (u == 0xDF) o += "ss";
+      else o += '?';
+      i += 2;
+      continue;
+    }
+    i++;
+  }
+  return o;
+}
+
+static void epdPrintWrapped(const String& text, int16_t x, int16_t& y, uint8_t size) {
+  String t = epdToAscii(text.c_str());
+  t.trim();
+  if (!t.length()) return;
+  display.setTextSize(size);
+  const int cw = 6 * (int)size;
+  const int ch = 8 * (int)size;
+  const int maxChars = (display.width() - x - 4) / cw;
+  const int limit = maxChars < 1 ? 1 : maxChars;
+  int i = 0;
+  const int n = (int)t.length();
+  while (i < n && y + ch <= display.height() - 2) {
+    int remain = n - i;
+    int take = remain < limit ? remain : limit;
+    if (take == limit && remain > limit) {
+      int brk = take;
+      for (int k = take; k >= 4; k--) {
+        const char c = t[i + k - 1];
+        if (c == ' ' || c == '/' || c == '?' || c == '&' || c == ':') {
+          brk = k;
+          break;
+        }
+      }
+      take = brk;
+    }
+    while (take > 0 && t[i + take - 1] == ' ') take--;
+    if (take < 1) take = remain < limit ? remain : limit;
+    display.setCursor(x, y);
+    display.print(t.substring(i, i + take));
+    y += ch + (epdIsSmall() ? 2 : 4);
+    i += take;
+    while (i < n && t[i] == ' ') i++;
+  }
+}
+
 static void beginTextScreen() {
-  ensureEpdInited();
-  display.setRotation(frameTextRotation());
+  // Always re-init: after .ink hibernate the panel is asleep. Rotation 1/2/3
+  // on Spectra 6 leaves the right half of the 800×480 panel stale (startup
+  // image or color noise). Text screens stay native landscape.
+  epdPowerOn();
+  display.init(115200);
+  g_epdInited = true;
+  display.setRotation(0);
   display.setFullWindow();
   display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
@@ -1275,29 +1668,23 @@ static void pumpWeb(uint32_t ms) {
 
 static void showStatusScreen(const char* line1, const char* line2, const char* line3) {
   beginTextScreen();
-
-  int yText = 20;
-  if (sdCardMounted) {
-    yText = drawWebBrandingOnEpd(12);
-    if (yText < 100) yText = 100;
-    if (yText > 300) yText = 300;
-  } else {
-    yText = 60;
+  const bool small = epdIsSmall();
+  const int16_t margin = small ? 6 : 20;
+  const uint8_t bodySize = small ? 1 : 2;
+  int16_t y = small ? 10 : 60;
+  if (sdCardMounted && !small) {
+    y = drawWebBrandingOnEpd(12);
+    if (y < 100) y = 100;
+    if (y > 300) y = 300;
   }
-
-  display.setTextSize(2);
-  display.setCursor(20, yText);
-  display.print(line1);
-  if (line2) {
-    yText += 40;
-    display.setCursor(20, yText);
-    display.print(line2);
+  if (line1) epdPrintWrapped(String(line1), margin, y, bodySize);
+  if (line2 && line2[0]) {
+    y += small ? 4 : 8;
+    epdPrintWrapped(String(line2), margin, y, 1);
   }
-  if (line3) {
-    yText += 50;
-    display.setTextSize(1);
-    display.setCursor(20, yText);
-    display.print(line3);
+  if (line3 && line3[0]) {
+    y += small ? 4 : 10;
+    epdPrintWrapped(String(line3), margin, y, 1);
   }
   display.setTextSize(1);
   display.display(false);
@@ -1315,10 +1702,10 @@ static void showStatusOrKeepLast(const char* line1, const char* line2, const cha
 
 // === Forward Declarations ===
 bool downloadImage(String imageName);
+static String buildImageUrlForShow(const String& imageName, bool nested = true);
 bool decodeAndDisplayInk(const String& filename, bool offlineHint = false);
 bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint = false);
 bool isSDCardAvailable();
-static String buildImageUrlForShow(const String& imageName);
 static bool tryRedisplayLastWithOfflineBadge();
 static bool redisplayLastWithoutOfflineBadge();
 
@@ -1371,8 +1758,133 @@ String doHttpPost(String url, String jsonPayload) {
   return response;
 }
 
-String makeServerRequest(String action, String jsonPayload = "{}") {
+String extractChannelSlug(const String& url) {
+  int q = url.indexOf("channel=");
+  if (q >= 0) {
+    int start = q + 8;
+    int end = url.indexOf('&', start);
+    if (end < 0) end = url.length();
+    String s = url.substring(start, end);
+    s.trim();
+    if (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+    return s;
+  }
+  int p = url.indexOf("/shows/");
+  int prefixLen = 7;
+  if (p < 0) { p = url.indexOf("/c/"); prefixLen = 3; }
+  if (p >= 0) {
+    int start = p + prefixLen;
+    int end = url.length();
+    for (int i = start; i < (int)url.length(); i++) {
+      char c = url[i];
+      if (c == '?' || c == '#') { end = i; break; }
+    }
+    String s = url.substring(start, end);
+    while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+    return s;
+  }
+  return "";
+}
+
+static String pathDisplayId() {
+  return String(DEVICE_DISPLAY_ID);
+}
+
+static bool displayIdsEqual(const String& a, const String& b) {
+  return a.length() > 0 && a == b;
+}
+
+static String normalizeServerUrl(String url) {
+  url.trim();
+  int q = url.indexOf('?');
+  if (q >= 0) url = url.substring(0, q);
+  int hash = url.indexOf('#');
+  if (hash >= 0) url = url.substring(0, hash);
+  int scheme = url.indexOf("://");
+  int start = (scheme >= 0) ? scheme + 3 : 0;
+  int pathSlash = url.indexOf('/', start);
+  if (pathSlash >= 0) url = url.substring(0, pathSlash);
+  if (url.length() == 0) return "";
+  if (!url.endsWith("/")) url += "/";
+  return url;
+}
+
+static void applyHostParts() {
+  if (hostServerUrl.length() == 0 || hostUser.length() == 0 || hostTarget.length() == 0) return;
+  hostChannelUrl = hostServerUrl + "shows/" + hostUser + "/" + hostTarget + "/" + pathDisplayId();
+}
+
+static void takeHostUrlAndUser(String urlIn, String userIn) {
+  urlIn.trim();
+  userIn.trim();
+  if (urlIn.length() > 0 && userIn.length() == 0) {
+    String slug = extractChannelSlug(urlIn);
+    int a = slug.indexOf('/');
+    int b = slug.lastIndexOf('/');
+    if (a > 0 && b > a) {
+      userIn = slug.substring(0, a);
+      if (hostTarget.length() == 0) hostTarget = slug.substring(a + 1, b);
+    }
+  }
+  if (urlIn.length() > 0) hostServerUrl = normalizeServerUrl(urlIn);
+  if (userIn.length() > 0) hostUser = userIn;
+  applyHostParts();
+}
+
+static void parseLegacyHostParts() {
+  if (hostServerUrl.length() == 0 && hostChannelUrl.length() > 0) {
+    hostServerUrl = normalizeServerUrl(hostChannelUrl);
+  }
+  if (hostUser.length() > 0) return;
+  String slug = extractChannelSlug(hostChannelUrl);
+  int a = slug.indexOf('/');
+  int b = slug.lastIndexOf('/');
+  if (a > 0 && b > a) {
+    hostUser = slug.substring(0, a);
+    hostTarget = slug.substring(a + 1, b);
+  }
+}
+
+String serverOriginFromHost() {
+  String baseUrl = hostChannelUrl;
+  int queryPos = baseUrl.indexOf("?");
+  if (queryPos >= 0) baseUrl = baseUrl.substring(0, queryPos);
+  int scheme = baseUrl.indexOf("://");
+  int start = (scheme >= 0) ? scheme + 3 : 0;
+  int pathSlash = baseUrl.indexOf('/', start);
+  if (pathSlash >= 0) baseUrl = baseUrl.substring(0, pathSlash);
+  if (!baseUrl.endsWith("/")) baseUrl += "/";
+  return baseUrl;
+}
+
+const char* noShowStatusTitle() {
+  return lastChannelUnintended ? "Falscher Kanal" : "Keine Show";
+}
+
+static String withDeviceInfo(String jsonPayload) {
+  JsonDocument req;
+  if (jsonPayload.length() > 0) {
+    DeserializationError err = deserializeJson(req, jsonPayload);
+    if (err) {
+      req.clear();
+    }
+  }
+  JsonObject input = req["input"].is<JsonObject>() ? req["input"].as<JsonObject>() : req["input"].to<JsonObject>();
+  JsonObject device = input["deviceInfo"].to<JsonObject>();
+  device["displayId"] = DEVICE_DISPLAY_ID;
+  device["name"] = PHOTOFRAME_TARGET_NAME;
+  device["ip"] = WiFi.localIP().toString();
+  device["showName"] = currentShowName;
+  device["imgName"] = (currentImageIndex >= 0 && currentImageIndex < (int)currentShowImages.size())
+      ? currentShowImages[currentImageIndex] : "";
+  String out;
+  serializeJson(req, out);
+  return out;
+}
+
+String makeServerRequest(String action, String jsonPayload) {
   PowerHighScope _pwrSrv;
+  jsonPayload = withDeviceInfo(jsonPayload);
   if (hostChannelUrl.length() == 0) {
     Serial1.println("No host channel URL configured");
     return "";
@@ -1388,6 +1900,7 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
   // Primary URL (relies on server-side URL rewrite).
   // Always use a path ("/") before "?": IIS returns HTTP 400 empty for
   // "http://host:888?action=getShows" as sent by ESP32 HTTPClient.
+  String channelSlug = extractChannelSlug(hostChannelUrl);
   String url = hostChannelUrl;
   int qpos = url.indexOf('?');
   if (qpos >= 0) url = url.substring(0, qpos);
@@ -1395,6 +1908,7 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
   int pathSlash = (scheme >= 0) ? url.indexOf('/', scheme + 3) : url.indexOf('/');
   if (pathSlash < 0) url += "/";
   url += "?action=" + action;
+  if (channelSlug.length() > 0) url += "&channel=" + channelSlug;
 
   Serial1.print("Requesting URL: ");
   Serial1.println(url);
@@ -1404,9 +1918,8 @@ String makeServerRequest(String action, String jsonPayload = "{}") {
 
   // Fallback: POST directly to ASPX handler (bypasses URL Rewrite)
   if (g_lastHttpStatusCode == 405 || g_lastHttpStatusCode == 404 || g_lastHttpStatusCode == 400) {
-    String baseUrl = hostChannelUrl;
-    if (!baseUrl.endsWith("/")) baseUrl += "/";
-    String fallbackUrl = baseUrl + "aspx/microPhotoFrame.aspx?action=" + action;
+    String fallbackUrl = serverOriginFromHost() + "aspx/microPhotoFrame.aspx?action=" + action;
+    if (channelSlug.length() > 0) fallbackUrl += "&channel=" + channelSlug;
     Serial1.print("Fallback URL: ");
     Serial1.println(fallbackUrl);
     response = doHttpPost(fallbackUrl, jsonPayload);
@@ -1587,6 +2100,7 @@ static bool fetchServerShowImagesFingerprint(const String& showName, uint32_t* o
 
 bool getActiveShow() {
   Serial1.println("Fetching active show...");
+  lastChannelUnintended = false;
   
   String response = makeServerRequest("getShows");
   if (response.length() == 0) {
@@ -1619,58 +2133,86 @@ bool getActiveShow() {
     if (errMsg.length() > 0) lastGetShowError += " " + errMsg;
     Serial1.println(lastGetShowError);
     lastGetShowsSucceeded = false;
+    lastChannelUnintended = false;
     return false;
   }
   
   // Cache erst NACH JSON-Validierung setzen (nie HTML-Fehlerseiten cachen)
   cachedShowsJson = response;
-  
-  JsonObject activeShows = doc["output"]["shows"]["activeShows"];
-  if (activeShows.isNull()) {
-    // Detaillierte Diagnose: welche Pfade existieren?
-    bool hasOutput = !doc["output"].isNull();
-    bool hasShows  = hasOutput && !doc["output"]["shows"].isNull();
-    lastGetShowError = "activeShows null";
-    if (!hasOutput) lastGetShowError += " (kein output)";
-    else if (!hasShows) lastGetShowError += " (kein output.shows)";
-    Serial1.println(lastGetShowError);
-    lastGetShowsSucceeded = false;
-    return false;
+  lastChannelUnintended = false;
+
+  JsonVariant channelVar = doc["output"]["channel"];
+  const char* channelError = doc["output"]["channelError"] | "";
+  JsonVariant channelsVar = doc["output"]["shows"]["channels"];
+  bool hasChannelModel = channelsVar.is<JsonObject>();
+  if (!hasChannelModel) {
+    const char* defCh = doc["output"]["shows"]["defaultChannel"] | "";
+    hasChannelModel = defCh[0] != 0;
   }
-  
-  Serial1.print("Looking for display ID: ");
-  Serial1.println(DEVICE_DISPLAY_ID);
-  Serial1.print("Available display IDs in activeShows: ");
-  String availableIds = "";
-  for (JsonPair kv : activeShows) {
-    Serial1.print(kv.key().c_str());
-    Serial1.print("=");
-    Serial1.print(kv.value().as<String>());
-    Serial1.print(" ");
-    if (availableIds.length() > 0) availableIds += ",";
-    availableIds += String(kv.key().c_str()) + "=" + kv.value().as<String>();
+
+  String newShowName = "";
+  if (hasChannelModel) {
+    if (!channelVar.is<JsonObject>() || (channelError && channelError[0])) {
+      lastGetShowError = (channelError && strcmp(channelError, "unknown") == 0)
+        ? "Kanal in der URL unbekannt"
+        : "Kein Default-Kanal";
+      lastChannelUnintended = true;
+      lastGetShowsSucceeded = true;
+      Serial1.println(lastGetShowError);
+      return false;
+    }
+    const char* chDisplay = channelVar["displayId"] | "";
+    const char* chSlug = channelVar["slug"] | "";
+    currentChannelPath = chSlug;
+    Serial1.print("Channel ");
+    Serial1.print(chSlug);
+    Serial1.print(" display=");
+    Serial1.println(chDisplay);
+    if (!chDisplay[0] || displayIdsEqual(chDisplay, DEVICE_DISPLAY_ID)) {
+      newShowName = channelVar["showName"] | "";
+    }
   }
-  Serial1.println();
-  
-  JsonVariant showNameVariant = activeShows[DEVICE_DISPLAY_ID];
-  if (showNameVariant.isNull()) {
-    int displayIdNum = atoi(DEVICE_DISPLAY_ID);
-    showNameVariant = activeShows[String(displayIdNum)];
-  }
-  
-  if (showNameVariant.isNull() || !showNameVariant.is<String>()) {
-    lastGetShowError = "ID '" + String(DEVICE_DISPLAY_ID) + "' not in {" + availableIds + "}";
-    Serial1.println(lastGetShowError);
-    lastGetShowsSucceeded = true;
-    return false;
-  }
-  
-  String newShowName = showNameVariant.as<String>();
   if (newShowName.length() == 0) {
-    lastGetShowError = "Show name empty";
-    Serial1.println(lastGetShowError);
-    lastGetShowsSucceeded = true;
-    return false;
+    JsonObject activeShows = doc["output"]["shows"]["activeShows"];
+    if (activeShows.isNull()) {
+      bool hasOutput = !doc["output"].isNull();
+      bool hasShows  = hasOutput && !doc["output"]["shows"].isNull();
+      lastGetShowError = "activeShows null";
+      if (!hasOutput) lastGetShowError += " (kein output)";
+      else if (!hasShows) lastGetShowError += " (kein output.shows)";
+      Serial1.println(lastGetShowError);
+      lastGetShowsSucceeded = false;
+      return false;
+    }
+
+    Serial1.print("Looking for display ID: ");
+    Serial1.println(DEVICE_DISPLAY_ID);
+    String availableIds = "";
+    for (JsonPair kv : activeShows) {
+      if (availableIds.length() > 0) availableIds += ",";
+      availableIds += String(kv.key().c_str()) + "=" + kv.value().as<String>();
+    }
+    Serial1.println(availableIds);
+
+    JsonVariant showNameVariant = activeShows[DEVICE_DISPLAY_ID];
+    if (showNameVariant.isNull()) {
+      int displayIdNum = atoi(DEVICE_DISPLAY_ID);
+      showNameVariant = activeShows[String(displayIdNum)];
+    }
+
+    if (showNameVariant.isNull() || !showNameVariant.is<String>()) {
+      lastGetShowError = "ID '" + String(DEVICE_DISPLAY_ID) + "' not in {" + availableIds + "}";
+      Serial1.println(lastGetShowError);
+      lastGetShowsSucceeded = true;
+      return false;
+    }
+    newShowName = showNameVariant.as<String>();
+    if (newShowName.length() == 0) {
+      lastGetShowError = "Show name empty";
+      Serial1.println(lastGetShowError);
+      lastGetShowsSucceeded = true;
+      return false;
+    }
   }
   
   lastGetShowError = "";
@@ -1829,29 +2371,7 @@ bool downloadImage(String imageName) {
   if (hostChannelUrl.length() == 0 || currentShowName.length() == 0) {
     return false;
   }
-  
-  // Construct image URL: extract base URL from hostChannelUrl
-  // Remove query parameters and path, keep only protocol://host:port
-  String baseUrl = hostChannelUrl;
-  int queryPos = baseUrl.indexOf("?");
-  if (queryPos >= 0) {
-    baseUrl = baseUrl.substring(0, queryPos);
-  }
-  // Find the port number (after :)
-  int portPos = baseUrl.lastIndexOf(":");
-  if (portPos > 0) {
-    // Find the first / after the port
-    int slashAfterPort = baseUrl.indexOf("/", portPos);
-    if (slashAfterPort > 0) {
-      // Keep only protocol://host:port
-      baseUrl = baseUrl.substring(0, slashAfterPort);
-    }
-  }
-  // Ensure baseUrl ends with /
-  if (!baseUrl.endsWith("/")) {
-    baseUrl += "/";
-  }
-  String imageUrl = baseUrl + "shows/show_" + currentShowName + "/" + imageName;
+  String imageUrl = buildImageUrlForShow(imageName, true);
   
   Serial1.print("Downloading image: ");
   Serial1.println(imageUrl);
@@ -1871,6 +2391,18 @@ bool downloadImage(String imageName) {
   http.setConnectTimeout(10000); // 10 second connection timeout
   
   int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK && currentChannelPath.length() > 0) {
+    http.end();
+    imageUrl = buildImageUrlForShow(imageName, false);
+    Serial1.print("Retry legacy image URL: ");
+    Serial1.println(imageUrl);
+    http.begin(imageUrl);
+    http.addHeader("Accept", "*/*");
+    http.addHeader("User-Agent", "microPhotoFrame/1.0");
+    http.setTimeout(30000);
+    http.setConnectTimeout(10000);
+    httpCode = http.GET();
+  }
   if (httpCode != HTTP_CODE_OK) {
     Serial1.print("HTTP error: ");
     Serial1.print(httpCode);
@@ -2175,7 +2707,7 @@ static void displayPixels(uint8_t* result, int resIdx,
   display.hibernate();
 }
 
-static String buildImageUrlForShow(const String& imageName) {
+static String buildImageUrlForShow(const String& imageName, bool nested) {
   String baseUrl = hostChannelUrl;
   int queryPos = baseUrl.indexOf("?");
   if (queryPos >= 0) {
@@ -2191,7 +2723,10 @@ static String buildImageUrlForShow(const String& imageName) {
   if (!baseUrl.endsWith("/")) {
     baseUrl += "/";
   }
-  return baseUrl + "shows/show_" + currentShowName + "/" + imageName;
+  String imageUrl = baseUrl + "shows/";
+  if (nested && currentChannelPath.length() > 0) imageUrl += currentChannelPath + "/";
+  imageUrl += "show_" + currentShowName + "/" + imageName;
+  return imageUrl;
 }
 
 static bool tryRedisplayLastWithOfflineBadge() {
@@ -2312,7 +2847,8 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   Serial1.print(" display="); Serial1.print((char)displayId);
   Serial1.print(" orient="); Serial1.println(orient == 0 ? "L" : "P");
 
-  if (displayId != DEVICE_DISPLAY_ID[0]) {
+  if (displayId != DEVICE_DISPLAY_ID[0] &&
+      !displayIdsEqual(String((char)displayId), String(DEVICE_DISPLAY_ID))) {
     Serial1.println("Display ID mismatch!");
     free(fileData);
     return false;
@@ -2618,7 +3154,8 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   Serial1.print(" display="); Serial1.print((char)displayId);
   Serial1.print(" orient="); Serial1.println(orient == 0 ? "L" : "P");
 
-  if (displayId != DEVICE_DISPLAY_ID[0]) {
+  if (displayId != DEVICE_DISPLAY_ID[0] &&
+      !displayIdsEqual(String((char)displayId), String(DEVICE_DISPLAY_ID))) {
     Serial1.println("Display ID mismatch!");
     free(fileData);
     return false;
@@ -3183,6 +3720,8 @@ void handleQuickMenu() {
 #if PHOTOFRAME_HAS_BUTTONS
   html += "<span><b>Deep Sleep</b> zwischen den Bildern (Standard, max. Stromsparen). Erfordert <b>g&uuml;ltige Uhrzeit</b> (NTP nach WLAN). ";
   html += "Ohne NTP oder abgew&auml;hlt: nur Leichtschlaf.</span></label>";
+#elif PHOTOFRAME_DEEP_SLEEP_DEFAULT
+  html += "<span><b>Deep Sleep</b> zwischen den Bildern (Standard). Dieses Board hat eigene Ladelogik.</span></label>";
 #else
   html += "<span><b>Deep Sleep</b> zwischen den Bildern. Am NeoFrame <b>standardm&auml;&szlig;ig aus</b>: Powerbanks schalten bei fast keinem Strom ab. ";
   html += "Aus = WLAN bleibt aktiv (Powerbank-tauglich). An = max. sparen, nur mit festem Netzteil.</span></label>";
@@ -3289,21 +3828,32 @@ void handleQuickMenuShows() {
       }
       // Aktive Show direkt aus Server-Antwort ermitteln (falls lokal unbekannt, kein Temp-Override)
       if (activeShow.length() == 0 && !isShowTempOverrideActive()) {
-        JsonObject activeShows = doc["output"]["shows"]["activeShows"];
-        if (!activeShows.isNull()) {
-          JsonVariant sv = activeShows[DEVICE_DISPLAY_ID];
-          if (sv.isNull()) {
-            sv = activeShows[String(atoi(DEVICE_DISPLAY_ID))];
+        JsonVariant ch = doc["output"]["channel"];
+        if (ch.is<JsonObject>()) {
+          const char* chDisplay = ch["displayId"] | "";
+          if (!chDisplay[0] || strcmp(chDisplay, DEVICE_DISPLAY_ID) == 0) {
+            activeShow = ch["showName"] | "";
           }
-          if (!sv.isNull() && sv.is<String>()) {
-            activeShow = sv.as<String>();
-            currentShowName = activeShow;
-            preferences.begin("microPhotoFrame", false);
-            preferences.putString("lastShow", currentShowName);
-            preferences.end();
-            Serial1.print("Quick-Menu: aktive Show aus Server-Antwort: ");
-            Serial1.println(activeShow);
+        }
+        if (activeShow.length() == 0) {
+          JsonObject activeShows = doc["output"]["shows"]["activeShows"];
+          if (!activeShows.isNull()) {
+            JsonVariant sv = activeShows[DEVICE_DISPLAY_ID];
+            if (sv.isNull()) {
+              sv = activeShows[String(atoi(DEVICE_DISPLAY_ID))];
+            }
+            if (!sv.isNull() && sv.is<String>()) {
+              activeShow = sv.as<String>();
+            }
           }
+        }
+        if (activeShow.length() > 0) {
+          currentShowName = activeShow;
+          preferences.begin("microPhotoFrame", false);
+          preferences.putString("lastShow", currentShowName);
+          preferences.end();
+          Serial1.print("Quick-Menu: aktive Show aus Server-Antwort: ");
+          Serial1.println(activeShow);
         }
       }
     }
@@ -3397,7 +3947,7 @@ void handleQuickMenuSave() {
   if (followSrv) {
     showTempOverrideUntilSessionMs = 0;
     if (showChanged && wifiConnected) {
-      String payload = "{\"action\":\"setActiveShow\",\"input\":{\"showName\":\"" + newShow + "\",\"displayId\":\"" + String(DEVICE_DISPLAY_ID) + "\"}}";
+      String payload = "{\"action\":\"setActiveShow\",\"input\":{\"showName\":\"" + newShow + "\",\"displayId\":\"" + String(DEVICE_DISPLAY_ID) + "\",\"channel\":\"" + extractChannelSlug(hostChannelUrl) + "\"}}";
       makeServerRequest("setActiveShow", payload);
       currentShowName = newShow;
       getActiveShow();
@@ -3511,6 +4061,8 @@ static void registerWebServerRoutes() {
   server.on("/favicon.ico", HTTP_GET, handleFavicon);
   server.on("/scan", handleScan);
   server.on("/save", HTTP_POST, handleSave);
+  server.on("/lang", HTTP_POST, handleLang);
+  server.on("/targets", HTTP_POST, handleTargets);
   server.on("/ota", HTTP_POST, handleOtaResult, handleOtaUpdate);
   server.on("/ota", HTTP_OPTIONS, handleOtaCors);
   server.on("/info", HTTP_GET, handleDeviceInfo);
@@ -3535,12 +4087,11 @@ static void mpfShutdownHandler(void) {
 
 // === Setup Function ===
 void setup() {
+  Serial.begin(115200);
 #if PHOTOFRAME_HAS_HW_SERIAL1
   Serial1.begin(115200, SERIAL_8N1, SERIAL_RX, SERIAL_TX);
   while (!Serial1)
     delay(10);
-#else
-  Serial.begin(115200);
 #endif
   delay(2000);
   Serial1.println("--- microPhotoFrame Firmware ---");
@@ -3679,21 +4230,17 @@ void setup() {
                  (unsigned)wifiSSID.length(), (unsigned)hostChannelUrl.length(),
                  (unsigned)configDefaultOrientation, mpu6050Available ? 1 : 0, resetRequested ? 1 : 0);
 
+  if (hostChannelUrl.length() == 0) applyHostParts();
+  bool haveChannel = hostChannelUrl.length() > 0
+      || (hostServerUrl.length() > 0 && hostUser.length() > 0 && hostTarget.length() > 0);
   bool needConfig =
-      resetRequested || wifiSSID.length() == 0 || hostChannelUrl.length() == 0;
+      resetRequested || wifiSSID.length() == 0 || !haveChannel;
 
   if (needConfig) {
     Serial1.println("Starting CONFIG mode (Soft-AP + Captive Portal)...");
-    WiFi.mode(WIFI_AP_STA);
-    if (!WiFi.softAP("microPhotoFrame")) {
+    if (!startFrameSoftAp()) {
       Serial1.println("Failed to start AP!");
     }
-    delay(500);
-    IPAddress AP_IP = WiFi.softAPIP();
-    Serial1.print("AP: microPhotoFrame  IP: ");
-    Serial1.println(AP_IP);
-    dnsServer.start(53, "*", AP_IP);
-    dnsServerActive = true;
     registerWebServerRoutes();
     server.begin();
     Serial1.println("HTTP server started (config)");
@@ -3781,6 +4328,9 @@ void setup() {
           showStatusOrKeepLast("Failed to load show", currentShowName.c_str());
         }
       }
+    } else if (lastChannelUnintended) {
+      Serial1.println("Kanal-URL nicht vorgesehen — Status statt gespeicherter Show");
+      showStatusScreen(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
     } else {
       Serial1.println("No active show found (nach 3 Versuchen)");
       // Fallback: NVS-Show-Name bekannt → versuche Show trotzdem zu laden
@@ -3816,10 +4366,10 @@ void setup() {
             displayNextImage();
           }
         } else if (!tryBootOfflineLastImage()) {
-          showStatusOrKeepLast("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+          showStatusOrKeepLast(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
         }
       } else if (!tryBootOfflineLastImage()) {
-        showStatusOrKeepLast("No active show", lastGetShowError.c_str(), hostChannelUrl.c_str());
+        showStatusOrKeepLast(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
       }
     }
     if (g_wDeepPoll || g_wDeepImg) {
@@ -3831,14 +4381,9 @@ void setup() {
     g_wDeepPoll = false;
     g_wDeepImg = false;
     Serial1.println("WiFi connect failed — opening config AP for setup");
-    WiFi.mode(WIFI_AP_STA);
-    if (WiFi.softAP("microPhotoFrame")) {
-      delay(400);
-      IPAddress apip = WiFi.softAPIP();
-      dnsServer.start(53, "*", apip);
-      dnsServerActive = true;
+    if (startFrameSoftAp()) {
       Serial1.print("Fallback AP IP: ");
-      Serial1.println(apip);
+      Serial1.println(WiFi.softAPIP());
     }
     configMode = true;
     configModeStartSessionMs = sessionMs();
@@ -3850,21 +4395,24 @@ void setup() {
 
 // === Loop Function ===
 void loop() {
+  processUsbConfig();
   if (dnsServerActive) {
     dnsServer.processNextRequest();
   }
   server.handleClient();
 
-  if (bootConfigApActive && sessionMs() >= bootConfigApUntilSessionMs) {
+  if (bootConfigApActive && bootConfigApUntilSessionMs != 0 && sessionMs() >= bootConfigApUntilSessionMs) {
     stopBootConfigAp();
   }
 
   // --- Config mode (WiFi setup) ---
   if (configMode) {
+#if PHOTOFRAME_HAS_BUTTONS
     if (sessionMs() - configModeStartSessionMs > CONFIG_MODE_TIMEOUT) {
       Serial1.println("Config mode timeout, restarting...");
       ESP.restart();
     }
+#endif
     return;
   }
 
@@ -4009,7 +4557,9 @@ void loop() {
     Serial1.println("Checking for active show update...");
     bool showUpdate = getActiveShow();
     if (lastGetShowsSucceeded) {
-      if (showUpdate) {
+      if (lastChannelUnintended) {
+        showStatusScreen(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
+      } else if (showUpdate) {
         Serial1.println("Active show changed, reloading...");
         if (loadShowData()) {
           if (currentShowImages.size() > 0) {

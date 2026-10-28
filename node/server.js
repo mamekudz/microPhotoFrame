@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const channels = require('./channels');
 
 const app = express();
 const PORT = 891;
@@ -172,20 +173,72 @@ const handleGetDevices = (rest) => {
     rest.ok = true;
 };
 
-const handleGetShows = (rest, input) => {
+const showsCfgPath = () => path.join(SHOWS_DIR, 'shows.json');
+
+const loadShowsCfg = () => {
+    const raw = readJSON(showsCfgPath()) || channels.emptyShows();
+    const cfg = channels.migrateShows(raw, SHOWS_DIR);
+    saveShowsCfg(cfg);
+    return cfg;
+};
+
+const saveShowsCfg = (shows) => writeJSON(showsCfgPath(), shows);
+
+const requestedChannelId = (req, input) => {
+    const fromQuery = channels.extractChannelFromQuery(req && req.query && req.query.channel);
+    if (fromQuery) return fromQuery;
+    const fromInput = channels.extractChannelFromQuery(input && input.channel);
+    if (fromInput) return fromInput;
+    return channels.extractChannelFromPath(req && req.path);
+};
+
+const requestedDeviceDisplayId = (input) => {
+    const raw = input && input.deviceInfo && input.deviceInfo.displayId;
+    return raw ? String(raw) : '';
+};
+
+const attachChannelOutput = (rest, shows, req, input) => {
+    const resolved = channels.resolveChannel(shows, requestedChannelId(req, input), requestedDeviceDisplayId(input));
+    rest.output.shows = resolved.shows;
+    rest.output.channel = resolved.channel;
+    rest.output.channelError = resolved.channelError;
+};
+
+const requireShow = (showName, channelHint) => {
+    const found = channels.findShow(SHOWS_DIR, showName, channelHint);
+    if (!found) throw new Error(`Show "${showName}" existiert nicht.`);
+    return found;
+};
+
+const attachShowMeta = (show, found) => {
+    if (!show) return show;
+    show.channel = found.channel || '';
+    show.relDir = found.relDir || '';
+    return show;
+};
+
+const handleListTargets = (rest, input) => {
+    const user = channels.inputUserId(input);
+    const displayId = (input && input.displayId) ||
+        (input && input.deviceInfo && input.deviceInfo.displayId) || '';
+    if (!user) throw new Error('User ID fehlt.');
+    if (!displayId) throw new Error('Displaytyp fehlt.');
+    const shows = loadShowsCfg();
+    const groups = channels.listTargetsForUserDisplay(shows, user, displayId);
+    rest.output.user = user;
+    rest.output.userId = user;
+    rest.output.displayId = displayId;
+    rest.output.groups = groups;
+    rest.output.targets = groups;
+    rest.ok = true;
+};
+
+const handleGetShows = (rest, input, req) => {
     try {
         registerDeviceEcho(input);
-        const showsCfgPath = path.join(SHOWS_DIR, 'shows.json');
-        let shows = readJSON(showsCfgPath);
-        if (!shows) {
-            shows = {
-                shows: [],
-                dayStart: 7,
-                dayEnd: 24,
-                activeShows: {}
-            };
-        }
-        rest.output.shows = shows;
+        const shows = loadShowsCfg();
+        saveShowsCfg(shows);
+        attachChannelOutput(rest, shows, req, input);
         rest.ok = true;
     } catch (err) {
         rest.ok = false;
@@ -199,134 +252,35 @@ const handleGetShow = (rest, input) => {
     if (!showName) throw new Error("showName fehlt.");
     
     registerDeviceEcho(input);
-    const safeName = getSafeShowName(showName);
-    const showPath = path.join(SHOWS_DIR, safeName, 'show.json');
-    const show = readJSON(showPath);
-    
-    if (!show) throw new Error(`Show "${showName}" existiert nicht.`);
+    const found = requireShow(showName, input.channel);
+    const show = attachShowMeta(readJSON(path.join(found.dir, 'show.json')), found);
     rest.output.show = show;
     rest.ok = true;
 };
 
 const handleCreateShow = (rest, input) => {
     const showName = input.showName;
-    const displayId = input.displayId;
-    
     if (!showName) throw new Error("showName fehlt.");
-    const safeName = getSafeShowName(showName);
-    
-    if (!isValidDirectoryName(safeName)) {
-        rest.ok = false;
-        return;
-    }
-    
-    const showsCfgPath = path.join(SHOWS_DIR, 'shows.json');
-    const showDir = path.join(SHOWS_DIR, safeName);
-    const showPath = path.join(showDir, 'show.json');
-    
-    let shows = readJSON(showsCfgPath);
-    if (!shows) {
-        shows = {
-            shows: [],
-            dayStart: 7,
-            dayEnd: 24,
-            activeShows: {}
-        };
-    }
-    
-    // Füge Show zur Liste hinzu wenn nicht vorhanden
-    if (!shows.shows.includes(showName)) {
-        shows.shows.push(showName);
-    }
-    
-    // Setze aktive Show für displayId wenn displayId vorhanden
-    if (displayId && !shows.activeShows[displayId]) {
-        shows.activeShows[displayId] = showName;
-    } else if (displayId) {
-        shows.activeShows[displayId] = showName;
-    }
-    
-    writeJSON(showsCfgPath, shows);
-    
-    // Erstelle Show-Verzeichnis
-    if (!fs.existsSync(showDir)) {
-        fs.mkdirSync(showDir, { recursive: true });
-    }
-    
-    // Erstelle oder aktualisiere show.json
-    let show = readJSON(showPath) || {};
-    show.name = showName;
-    if (!show.imgs) show.imgs = [];
-    if (!show.timer) show.timer = 1;
-    if (!show.mode) show.mode = 'random';
-    if (displayId) show.displayId = displayId;
-    
-    writeJSON(showPath, show);
-    
+    const shows = channels.createShow(SHOWS_DIR, loadShowsCfg(), {
+        showName,
+        channel: input.channel
+    });
+    saveShowsCfg(shows);
     rest.output.shows = shows;
-    rest.output.showName = safeName;
+    rest.output.showName = showName;
     rest.ok = true;
 };
 
 const handleDeleteShow = (rest, input) => {
     const showName = input.showName;
     if (!showName) throw new Error("showName fehlt.");
-    
-    const safeName = getSafeShowName(showName);
-    const showsCfgPath = path.join(SHOWS_DIR, 'shows.json');
-    const showDir = path.join(SHOWS_DIR, safeName);
-    const showPath = path.join(showDir, 'show.json');
-    
-    if (fs.existsSync(showDir)) {
-        fs.rmSync(showDir, { recursive: true, force: true });
-        rest.ok = true;
-        
-        let shows = readJSON(showsCfgPath);
-        if (!shows) {
-            shows = {
-                shows: [],
-                dayStart: 7,
-                dayEnd: 24,
-                activeShows: {},
-                timer: 1,
-                mode: 'random'
-            };
-        }
-        
-        // Entferne aus Shows-Array
-        shows.shows = shows.shows.filter(n => n !== showName);
-        
-        // Finde displayId der gelöschten Show
-        const show = readJSON(showPath);
-        let showDisplayId = null;
-        if (show && show.displayId) {
-            showDisplayId = show.displayId;
-        }
-        
-        // Entferne aus activeShows wenn aktiv
-        if (showDisplayId && shows.activeShows && shows.activeShows[showDisplayId] === showName) {
-            delete shows.activeShows[showDisplayId];
-            
-            // Versuche andere Show mit gleicher displayId zu aktivieren
-            let newActiveShow = null;
-            for (const sName of shows.shows) {
-                const safeSName = getSafeShowName(sName);
-                const sSPath = path.join(SHOWS_DIR, safeSName, 'show.json');
-                const sShow = readJSON(sSPath);
-                if (sShow && sShow.displayId === showDisplayId) {
-                    newActiveShow = sName;
-                    break;
-                }
-            }
-            
-            if (newActiveShow) {
-                shows.activeShows[showDisplayId] = newActiveShow;
-            }
-        }
-        
-        writeJSON(showsCfgPath, shows);
-        rest.output.shows = shows;
-    }
+    const shows = channels.deleteShow(SHOWS_DIR, loadShowsCfg(), {
+        showName,
+        channel: input.channel
+    });
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
 };
 
 const handleSaveShowImage = (rest, input) => {
@@ -337,8 +291,8 @@ const handleSaveShowImage = (rest, input) => {
     
     if (!showName || !imgDataUrl) throw new Error("showName oder img fehlt.");
     
-    const safeName = getSafeShowName(showName);
-    const showDir = path.join(SHOWS_DIR, safeName);
+    const found = requireShow(showName, input.channel);
+    const showDir = found.dir;
     const showPath = path.join(showDir, 'show.json');
     
     // Extrahiere Base64-Daten
@@ -432,8 +386,8 @@ const handleDeleteShowImage = (rest, input) => {
     
     if (!showName || !imgName) throw new Error("showName oder imgName fehlt.");
     
-    const safeName = getSafeShowName(showName);
-    const showDir = path.join(SHOWS_DIR, safeName);
+    const found = requireShow(showName, input.channel);
+    const showDir = found.dir;
     const showPath = path.join(showDir, 'show.json');
     const imgPath = path.join(showDir, imgName);
     
@@ -457,26 +411,48 @@ const handleDeleteShowImage = (rest, input) => {
 const handleSetActiveShow = (rest, input) => {
     const showName = input.showName;
     if (!showName) throw new Error("showName fehlt.");
-    
-    const safeName = getSafeShowName(showName);
-    const showsCfgPath = path.join(SHOWS_DIR, 'shows.json');
-    const showPath = path.join(SHOWS_DIR, safeName, 'show.json');
-    
-    let shows = readJSON(showsCfgPath);
-    let show = readJSON(showPath);
-    
-    if (!shows) throw new Error("Shows not found.");
-    if (!show) throw new Error("Show not found.");
-    
-    const displayId = show.displayId;
-    if (displayId) {
-        shows.activeShows[displayId] = showName;
-        writeJSON(showsCfgPath, shows);
-        rest.output.shows = shows;
-        rest.ok = true;
-    } else {
-        throw new Error("Show has no displayId.");
-    }
+    const shows = channels.setActiveShow(SHOWS_DIR, loadShowsCfg(), {
+        showName,
+        channel: input.channel
+    });
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
+};
+
+const handleCreateChannel = (rest, input) => {
+    const shows = channels.createChannel(SHOWS_DIR, loadShowsCfg(), input);
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
+};
+
+const handleDeleteChannel = (rest, input) => {
+    const shows = channels.deleteChannel(SHOWS_DIR, loadShowsCfg(), input);
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
+};
+
+const handleDeleteTarget = (rest, input) => {
+    const shows = channels.deleteTarget(SHOWS_DIR, loadShowsCfg(), input);
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
+};
+
+const handleDeleteUser = (rest, input) => {
+    const shows = channels.deleteUser(SHOWS_DIR, loadShowsCfg(), input);
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
+};
+
+const handleSetDefaultChannel = (rest, input) => {
+    const shows = channels.setDefaultChannel(SHOWS_DIR, loadShowsCfg(), input);
+    saveShowsCfg(shows);
+    rest.output.shows = shows;
+    rest.ok = true;
 };
 
 const handleSetShowSettings = (rest, input) => {
@@ -486,10 +462,10 @@ const handleSetShowSettings = (rest, input) => {
     
     if (!showName) throw new Error("showName fehlt.");
     
-    const safeName = getSafeShowName(showName);
-    const showPath = path.join(SHOWS_DIR, safeName, 'show.json');
+    const found = requireShow(showName, input.channel);
+    const showPath = path.join(found.dir, 'show.json');
     
-    let show = readJSON(showPath);
+    let show = attachShowMeta(readJSON(showPath), found);
     if (!show) throw new Error("Show not found.");
     
     if (showMode !== undefined) show.mode = showMode;
@@ -504,8 +480,9 @@ const handleExportShowAsync = async (rest, input) => {
     const showName = input.showName;
     if (!showName) throw new Error("showName fehlt.");
     
+    const found = requireShow(showName, input.channel);
     const safeName = getSafeShowName(showName);
-    const showDir = path.join(SHOWS_DIR, safeName);
+    const showDir = found.dir;
     const showPath = path.join(showDir, 'show.json');
     
     if (!fs.existsSync(showDir)) throw new Error("Show directory not found.");
@@ -585,19 +562,10 @@ const handleImportShowAsync = async (rest, input) => {
             return;
         }
         
-        const showsCfgPath = path.join(SHOWS_DIR, 'shows.json');
         const showDir = path.join(SHOWS_DIR, safeName);
         const showPath = path.join(showDir, 'show.json');
         
-        let shows = readJSON(showsCfgPath);
-        if (!shows) {
-            shows = {
-                shows: [],
-                dayStart: 7,
-                dayEnd: 24,
-                activeShows: {}
-            };
-        }
+        let shows = loadShowsCfg();
         
         // Erstelle Show-Verzeichnis
         if (!fs.existsSync(showDir)) {
@@ -627,7 +595,7 @@ const handleImportShowAsync = async (rest, input) => {
             shows.shows.push(orgShowName);
         }
         
-        writeJSON(showsCfgPath, shows);
+        saveShowsCfg(shows);
         
         rest.ok = true;
     } catch (err) {
@@ -707,7 +675,7 @@ const handleGetDeviceInfo = async (rest, input) => {
 };
 
 // --- API POST ROUTE ---
-app.post('/', async (req, res) => {
+const handleApiPost = async (req, res) => {
     const body = req.body || {};
     const action = body.action || req.query.action;
     const input = body.input || {};
@@ -728,8 +696,11 @@ app.post('/', async (req, res) => {
             case 'getDevices':
                 handleGetDevices(rest);
                 break;
+            case 'listTargets':
+                handleListTargets(rest, input);
+                break;
             case 'getShows':
-                handleGetShows(rest, input);
+                handleGetShows(rest, input, req);
                 break;
             case 'getShow':
                 handleGetShow(rest, input);
@@ -748,6 +719,24 @@ app.post('/', async (req, res) => {
                 break;
             case 'setActiveShow':
                 handleSetActiveShow(rest, input);
+                break;
+            case 'createChannel':
+                handleCreateChannel(rest, input);
+                break;
+            case 'updateChannel':
+                handleSetActiveShow(rest, input);
+                break;
+            case 'deleteChannel':
+                handleDeleteChannel(rest, input);
+                break;
+            case 'deleteTarget':
+                handleDeleteTarget(rest, input);
+                break;
+            case 'deleteUser':
+                handleDeleteUser(rest, input);
+                break;
+            case 'setDefaultChannel':
+                handleSetDefaultChannel(rest, input);
                 break;
             case 'setShowSettings':
                 handleSetShowSettings(rest, input);
@@ -776,7 +765,12 @@ app.post('/', async (req, res) => {
     }
 
     res.json(rest);
-});
+};
+
+app.post('/', handleApiPost);
+app.post('/shows/:user/:target/:displayId', handleApiPost);
+app.post('/c/:user/:target/:displayId', handleApiPost);
+app.post('/c/:slug', handleApiPost);
 
 // --- STATIK & FALLBACK ---
 
@@ -788,10 +782,33 @@ app.use((req, res, next) => {
     if (/^\/(?:runtime|\.installer|logs|temp|node|aspx|bin|php)(?:\/|$)/i.test(requestPath) || /^\/(?:config\.json|web\.config)$/i.test(requestPath)) return res.sendStatus(404);
     next();
 });
+app.get('/shows/:showDir/:file', (req, res, next) => {
+    const showDir = String(req.params.showDir || '');
+    if (!/^show_[A-Za-z0-9_\-]+$/.test(showDir)) return next();
+    const showName = showDir.slice(5);
+    const file = path.basename(String(req.params.file || ''));
+    if (!showName || !file || file === '.' || file === '..') return next();
+    const found = channels.findShow(SHOWS_DIR, showName);
+    if (!found) return next();
+    const fp = path.join(found.dir, file);
+    if (!fp.startsWith(found.dir + path.sep) || !fs.existsSync(fp)) return next();
+    res.sendFile(fp);
+});
+
 app.use(express.static(BASE_DIR));
 
 // Fallback für alle GET-Anfragen liefert die index.html
 app.get('/', (req, res) => {
+    res.sendFile(path.join(BASE_DIR, 'index.html'));
+});
+
+app.get('/shows/:user/:target/:displayId', (req, res) => {
+    res.sendFile(path.join(BASE_DIR, 'index.html'));
+});
+app.get('/c/:user/:target/:displayId', (req, res) => {
+    res.sendFile(path.join(BASE_DIR, 'index.html'));
+});
+app.get('/c/:slug', (req, res) => {
     res.sendFile(path.join(BASE_DIR, 'index.html'));
 });
 

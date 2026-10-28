@@ -2,7 +2,7 @@
 
 Node.js module for encoding/decoding .ink image files for E-Ink displays.
 
-This tree is the **2.0.0** workspace package inside [microPhotoFrame](https://github.com/mamekudz/microPhotoFrame). It is **not** drop-in compatible with npm `ink-encoder@1.0.0`. Unpublished drafts `1.2.0` / `1.2.1` must not be published. See [CHANGELOG.md](CHANGELOG.md).
+This tree is the **2.1.0** workspace package inside [microPhotoFrame](https://github.com/mamekudz/microPhotoFrame). It is **not** drop-in compatible with npm `ink-encoder@1.0.0`. Unpublished drafts `1.2.0` / `1.2.1` must not be published. See [CHANGELOG.md](CHANGELOG.md).
 
 **Die Kompatibilität mit früher erzeugten .ink-Dateien ist nicht garantiert. Beim Upgrade Encoder und Firmware gemeinsam auf zueinander passende Stände aktualisieren und bestehende Shows aus den Originalbildern neu erzeugen.**
 
@@ -59,7 +59,7 @@ const options = {
   colors: ["#000000", "#FFFFFF", "#FF0000", "#FFFF00", "#0000FF", "#00FF00"], // Spectra 6 Farben
   width: 800,
   height: 480,
-  displayId: "I", // Spectra 6 7.3" / reTerminal E1002
+  displayId: "9", // Spectra 6 7.3" / reTerminal E1002 / NeoFrame
   isRound: false, // Quadratisches Display
   dither: "floyd", // Dithering: "floyd", "bayer" oder "none"
   orientation: 0, // 0=Landscape, 1=Portrait
@@ -81,8 +81,8 @@ writeFileSync('./output.ink', inkData);
 import { GetDisplayByShortId, GetAllDisplays, GetOptionsFromDisplayId } from 'ink-encoder';
 
 // Einzelnes Display abrufen
-const display = GetDisplayByShortId('I');
-console.log(display.name); // 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002'
+const display = GetDisplayByShortId('9');
+console.log(display.name); // 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame'
 console.log(display.colors); // ["#000000", "#FFFFFF", ...]
 console.log(display.width); // 800
 console.log(display.height); // 480
@@ -92,7 +92,7 @@ const allDisplays = GetAllDisplays();
 console.log(Object.keys(allDisplays));
 
 // Encoding-Optionen aus Display-ID generieren
-const options = GetOptionsFromDisplayId('I', {
+const options = GetOptionsFromDisplayId('9', {
   dither: 'bayer',
   orientation: 1
 });
@@ -124,7 +124,7 @@ const pngBuffer = await DecodeInk('./input.ink', options);
   - **colors** (Array<string>): Array von Hex-Farben (z.B. `["#FFFFFF", "#000000"]`)
   - **width** (number): Zielbreite in Pixeln
   - **height** (number): Zielhöhe in Pixeln
-  - **displayId** (string): Display-ID Zeichen (z.B. `"I"` für Spectra 6 7,3" / reTerminal E1002)
+  - **displayId** (string): Display-ID Zeichen (z.B. `"9"` für Spectra 6 7,3" / reTerminal E1002)
   - **isRound** (boolean): Ob das Display rund ist (Standard: `false`)
   - **dither** (string): Dithering-Typ: `"floyd"`, `"bayer"` oder `"none"` (Standard: `"floyd"`)
   - **orientation** (number): Orientierung: `0`=Landscape, `1`=Portrait (Standard: `0`)
@@ -150,31 +150,35 @@ const pngBuffer = await DecodeInk('./input.ink', options);
 
 Das Modul enthält alle Display-Definitionen. Verwenden Sie einfach die Display-ID:
 
-IDs follow `src/inkEncoder.mjs` (not the npm 1.0.0 README):
+IDs follow `docs/technical_overview.md` / `src/inkEncoder.mjs` (one table, no aliases):
 
 ### Monochrome (B&W)
-- **"0"**–**"7"**: 1.54" … 13.3"
-
-### Grayscale (4-level)
-- **"A"**–**"E"**: including **"D"** Gray4 7.5" · reTerminal E1001
+- **"0"**–**"6"**: 1.54" … 13.3"; extra **"V"** = B&W 5.83"
 
 ### Spectra 6 (E6)
-- **"G"** round 1.69" … **"P"** 43"
-- **"I"**: Spectra 6 · 7.3" · 800×480 · reTerminal E1002
+- **"7"** round 1.69" … **"G"** 43"
+- **"9"**: Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame
 
-### Spectra BWR / BWY / BWRY
-- **"Q"**–**"Y"** and **"a"**–**"f"** as in `DISPLAY_LONG_ID_BY_SHORT_ID`
-- **"f"**: Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)
+### Spectra BWR / BWY
+- **"H"**–**"P"**; **"I"** = Spectra BWR 2.13"
+
+### Grayscale (4-level)
+- **"Q"**–**"U"**; **"T"** = Gray4 7.5" · reTerminal E1001
+
+### Spectra 3100 / e-Paper (G)
+- **"a"**–**"m"** as in `DISPLAY_LONG_ID_BY_SHORT_ID`
+- **"f"**: Waveshare e-Paper (G) · 1.54" · 200×200 · EPD_1in54g (not Spectra 3100)
+- **"g"**–**"m"**: official E Ink Spectra 3100 sizes from eink.com (1.64" … 9.7"); **"b"**/**"c"** remain 2.66" / 3.0"
 
 ### Beispiel: Display-Informationen abrufen
 
 ```javascript
 import { GetDisplayByShortId } from 'ink-encoder';
 
-const display = GetDisplayByShortId('I');
+const display = GetDisplayByShortId('9');
 // {
-//   id: "I",
-//   name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002',
+//   id: "9",
+//   name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame',
 //   width: 800,
 //   height: 480,
 //   colors: ["#000000", "#FFFFFF", "#FF0000", "#FFFF00", "#0000FF", "#00FF00"],
@@ -202,7 +206,7 @@ const inkData2 = await EncodeInk('./input.png', options);
 
 ```json
 {
-  "displayId": "I",
+  "displayId": "9",
   "dither": "floyd",
   "orientation": 0,
   "colorAdjust": {
@@ -247,7 +251,7 @@ Header **immer 4 Byte**, Payload ab Offset 4 (kein zusätzliches Kompressions-By
 | Byte | Inhalt |
 |------|--------|
 | 0 | Format: **1** = LZW (minCodeSize 3), **2** = zlib-Deflate Rohpixel, **3** = zlib-Deflate + Paeth (Deltas mod `numColors`) |
-| 1 | `displayId` (ASCII, z. B. `I` für Spectra 6 7,3" / reTerminal E1002) |
+| 1 | `displayId` (ASCII, z. B. `9` für Spectra 6 7,3" / reTerminal E1002) |
 | 2 | Dither: 0 = none, 1 = Bayer, 2 = Floyd-Steinberg |
 | 3 | Orientierung: 0 = Quer (Breite×Höhe), 1 = Hochkant (getauschte Abmessungen) |
 
@@ -273,14 +277,16 @@ await EncodeInkFromDisplayId('./input.png', 'I', { dither: 'floyd' }, './output.
 GetDisplayByShortId('I');
 ```
 
-| Thema | npm 1.0.0 | 2.0.0 |
-|--------|-----------|--------|
-| Named exports | camelCase (`encodeInk`, `getDisplay`, …) | PascalCase (`EncodeInk`, `GetDisplayByShortId`, …), keine Aliase |
-| Spectra 6 7,3" | Short-ID **`"9"`** | Short-ID **`"I"`** (`"9"` existiert nicht) |
-| `"I"` | Spectra BWR 2,13" | Spectra 6 7,3" / reTerminal E1002 |
-| `DISPLAYS` | Keys `"0"`…`"U"` | Lange Keys `EINK_…` |
-| Standard-Encode | immer `.ink` v1 LZW, Default-`displayId` `"9"` | `.ink` **v3** (Paeth+Deflate), Default-`displayId` `"0"` |
-| Firmware (microPhotoFrame) | Dateien mit Header-ID `"9"` passen nicht zu `DEVICE_DISPLAY_ID "I"` | aktuelles 4-Byte-Format v1–v3, Header-ID `"I"` |
+2.1.0 restores the overview ids: Spectra 6 7.3" is `"9"` again, `"I"` is BWR 2.13". Use `EncodeInkFromDisplayId(..., '9', ...)`.
+
+| Thema | npm 1.0.0 | 2.0.0 | 2.1.0 |
+|--------|-----------|--------|--------|
+| Named exports | camelCase (`encodeInk`, `getDisplay`, …) | PascalCase (`EncodeInk`, `GetDisplayByShortId`, …), keine Aliase | wie 2.0.0 |
+| Spectra 6 7,3" | Short-ID **`"9"`** | Short-ID **`"I"`** (`"9"` existiert nicht) | **`"9"`** |
+| `"I"` | Spectra BWR 2,13" | Spectra 6 7,3" / reTerminal E1002 | Spectra BWR 2,13" |
+| `DISPLAYS` | Keys `"0"`…`"U"` | Lange Keys `EINK_…` | wie 2.0.0 |
+| Standard-Encode | immer `.ink` v1 LZW, Default-`displayId` `"9"` | `.ink` **v3** (Paeth+Deflate), Default-`displayId` `"0"` | wie 2.0.0 |
+| Firmware (microPhotoFrame) | Header-ID `"9"` | Header-ID `"I"` | Header-ID `"9"` |
 
 **Die Kompatibilität mit früher erzeugten .ink-Dateien ist nicht garantiert. Beim Upgrade Encoder und Firmware gemeinsam auf zueinander passende Stände aktualisieren und bestehende Shows aus den Originalbildern neu erzeugen.** Es gibt keine Zusage, dass der neue Decoder sämtliche alten Dateien korrekt liest oder dass alte Software neue Dateien liest. Details: [CHANGELOG.md](CHANGELOG.md).
 

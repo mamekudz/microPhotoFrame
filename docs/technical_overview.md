@@ -21,13 +21,22 @@ Each channel can have any number of (photo) shows. A show always includes any nu
 The following e-ink screens are currently defined and usable:
 
 **Monochrome (B&W) Models**
-* **B&W 1.54"** · 200x200 (ID: 0)
+* **B&W 1.54"** · 200x200 · 2 gray (ID: 0)
 * **B&W 2.13"** · 250x122 (ID: 1)
 * **B&W 2.9"** · 296x128 (ID: 2)
 * **B&W 4.2"** · 400x300 (ID: 3)
 * **B&W 7.5"** · 800x480 (ID: 4)
 * **B&W 10.3"** · 1872x1404 · Carta/Mobius (ID: 5)
 * **B&W 13.3"** · 2200x1650 · Carta/Fina (ID: 6)
+* **B&W 5.83"** · 648x480 (ID: V)
+
+
+**Gray4 (4-Level Grayscale)**
+* **Gray4 2.13"** · 250x122 (ID: Q)
+* **Gray4 3.97"** · 800x480 (ID: R)
+* **Gray4 4.2"** · 400x300 (ID: S)
+* **Gray4 7.5"** · 800x480 · reTerminal E1001 (ID: T)
+* **Gray4 10.3"** · 1872x1404 (ID: U)
 
 
 **Spectra 6 (Full Color Models)**
@@ -55,9 +64,22 @@ The following e-ink screens are currently defined and usable:
 * **Spectra BWR 12.48"** · 1304x984 (ID: P)
 
 
-**Spectra 3100 (4-Color: BWRY)**
-* **Spectra 3100 2.13"** · 212x104 (ID: Q)
-* **Spectra 3100 2.66"** · 296x152 (ID: R)
+**Spectra 3100 (4-Color BWRY)**
+* **Spectra 3100 1.64"** · 168x168 (ID: g)
+* **Spectra 3100 2.36"** · 296x168 (ID: h)
+* **Spectra 3100 2.66"** · 296x152 (ID: b)
+* **Spectra 3100 3.0"** · 400x168 (ID: c)
+* **Spectra 3100 4.37"** · 512x368 (ID: i)
+* **Spectra 3100 5.65"** · 600x448 (ID: j)
+* **Spectra 3100 7.3"** · 800x480 (ID: k)
+* **Spectra 3100 8.14"** · 1024x576 (ID: l)
+* **Spectra 3100 9.7"** · 960x672 (ID: m)
+
+**e-Paper (G) (4-Color BWRY)**
+* **e-Paper (G) 1.54"** · 200x200 (ID: f)
+* **e-Paper (G) 2.13"** · 212x104 (ID: a)
+* **e-Paper (G) 4.2"** · 400x300 (ID: d)
+* **e-Paper (G) 7.5"** · 800x480 (ID: e)
 
 <br><br>
 
@@ -116,13 +138,22 @@ Jeder Kanal kann über beliebig viele (Foto-)Shows verfügen. Eine Show umfasst 
 Folgende e-Ink-Bildschirme sind bisher definiert und nutzbar:
 
 **Monochrome (S/W) Modelle**
-* **B&W 1,54"** · 200x200 (ID: 0)
+* **B&W 1,54"** · 200x200 · 2 Graustufen (ID: 0)
 * **B&W 2,13"** · 250x122 (ID: 1)
 * **B&W 2,9"** · 296x128 (ID: 2)
 * **B&W 4,2"** · 400x300 (ID: 3)
 * **B&W 7,5"** · 800x480 (ID: 4)
 * **B&W 10,3"** · 1872x1404 · Carta/Mobius (ID: 5)
 * **B&W 13,3"** · 2200x1650 · Carta/Fina (ID: 6)
+* **B&W 5,83"** · 648x480 (ID: V)
+
+
+**Gray4 (4 Graustufen)**
+* **Gray4 2,13"** · 250x122 (ID: Q)
+* **Gray4 3,97"** · 800x480 (ID: R)
+* **Gray4 4,2"** · 400x300 (ID: S)
+* **Gray4 7,5"** · 800x480 · reTerminal E1001 (ID: T)
+* **Gray4 10,3"** · 1872x1404 (ID: U)
 
 
 **Spectra 6 (Full Color Models)**
@@ -150,9 +181,22 @@ Folgende e-Ink-Bildschirme sind bisher definiert und nutzbar:
 * **Spectra BWR 12,48"** · 1304x984 (ID: P)
 
 
-**Spectra 3100 (4-Farben: BWRY)**
-* **Spectra 3100 2,13"** · 212x104 (ID: Q)
-* **Spectra 3100 2,66"** · 296x152 (ID: R)
+**Spectra 3100 (4-Farben BWRY)**
+* **Spectra 3100 1,64"** · 168x168 (ID: g)
+* **Spectra 3100 2,36"** · 296x168 (ID: h)
+* **Spectra 3100 2,66"** · 296x152 (ID: b)
+* **Spectra 3100 3,0"** · 400x168 (ID: c)
+* **Spectra 3100 4,37"** · 512x368 (ID: i)
+* **Spectra 3100 5,65"** · 600x448 (ID: j)
+* **Spectra 3100 7,3"** · 800x480 (ID: k)
+* **Spectra 3100 8,14"** · 1024x576 (ID: l)
+* **Spectra 3100 9,7"** · 960x672 (ID: m)
+
+**e-Paper (G) (4-Farben BWRY)**
+* **e-Paper (G) 1,54"** · 200x200 (ID: f)
+* **e-Paper (G) 2,13"** · 212x104 (ID: a)
+* **e-Paper (G) 4,2"** · 400x300 (ID: d)
+* **e-Paper (G) 7,5"** · 800x480 (ID: e)
 
 <br><br>
 

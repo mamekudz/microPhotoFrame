@@ -1,6 +1,6 @@
 {
   "name": "ink-encoder",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Node.js module for encoding/decoding .ink image files for E-Ink displays",
   "type": "module",
   "main": "src/inkEncoder.mjs",

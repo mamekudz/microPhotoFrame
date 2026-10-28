@@ -235,6 +235,12 @@ function getSafeShowName($givenName) {
     return 'show_' . $safeName;
 }
 
+function showDisplayId($showName) {
+    if ($showName === '') return '';
+    $show = readAllJSONObject(pathCorrection('./shows/' . getSafeShowName($showName) . DIRECTORY_SEPARATOR . 'show.json'));
+    return ($show !== null && isset($show['displayId'])) ? (string)$show['displayId'] : '';
+}
+
 function fileReadAllText($pathName) {
     if (!file_exists($pathName)) {
         return '';
@@ -364,6 +370,143 @@ function registerDeviceEcho(&$rest) {
     }
 }
 
+function channelSlugOk($slug) {
+    return is_string($slug) && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/', $slug);
+}
+
+function normalizeChannelSlug($raw) {
+    $s = is_string($raw) ? trim($raw) : '';
+    return channelSlugOk($s) ? $s : '';
+}
+
+function slugFromShowName($name) {
+    $s = strtolower(trim((string)$name));
+    $s = preg_replace('/[^a-z0-9_-]+/', '-', $s);
+    $s = trim($s, '-');
+    $s = substr($s, 0, 32);
+    return channelSlugOk($s) ? $s : '';
+}
+
+function uniqueChannelSlug($channels, $preferred) {
+    $slug = normalizeChannelSlug($preferred) ?: 'channel';
+    if (!isset($channels[$slug])) return $slug;
+    $base = substr($slug, 0, 28);
+    $n = 2;
+    while (isset($channels[$base . '-' . $n])) $n++;
+    return substr($base . '-' . $n, 0, 32);
+}
+
+function emptyShowsCfg() {
+    return [
+        'shows' => [],
+        'dayStart' => 7,
+        'dayEnd' => 24,
+        'activeShows' => [],
+        'channels' => [],
+        'defaultChannel' => ''
+    ];
+}
+
+function syncActiveShows(&$shows) {
+    $active = [];
+    foreach ($shows['channels'] as $ch) {
+        if (!empty($ch['displayId']) && !empty($ch['showName'])) {
+            $active[$ch['displayId']] = $ch['showName'];
+        }
+    }
+    $shows['activeShows'] = $active;
+    return $shows;
+}
+
+function migrateShowsCfg($shows) {
+    if (!is_array($shows)) $shows = emptyShowsCfg();
+    if (!isset($shows['shows']) || !is_array($shows['shows'])) $shows['shows'] = [];
+    if (!isset($shows['activeShows']) || !is_array($shows['activeShows'])) $shows['activeShows'] = [];
+    if (!isset($shows['channels']) || !is_array($shows['channels'])) {
+        $shows['channels'] = [];
+    }
+    $slugs = array_keys($shows['channels']);
+    if (empty($shows['defaultChannel']) || !isset($shows['channels'][$shows['defaultChannel']])) {
+        $shows['defaultChannel'] = $slugs[0] ?? '';
+    }
+    return syncActiveShows($shows);
+}
+
+function requestedChannelSlug($input) {
+    if (isset($_GET['channel'])) {
+        $q = normalizeChannelSlug($_GET['channel']);
+        if ($q !== '') return $q;
+    }
+    if (is_array($input) && isset($input['channel'])) {
+        $i = normalizeChannelSlug($input['channel']);
+        if ($i !== '') return $i;
+    }
+    $uri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+    if (preg_match('#/c/([A-Za-z0-9][A-Za-z0-9_-]{0,31})/?$#', (string)$uri, $m)) {
+        return $m[1];
+    }
+    return '';
+}
+
+function resolveChannelCfg($shows, $requestedSlug) {
+    $cfg = migrateShowsCfg($shows);
+    $slug = normalizeChannelSlug($requestedSlug);
+    if ($slug !== '') {
+        if (isset($cfg['channels'][$slug])) {
+            return ['shows' => $cfg, 'channel' => array_merge(['slug' => $slug], $cfg['channels'][$slug]), 'channelError' => null];
+        }
+        return ['shows' => $cfg, 'channel' => null, 'channelError' => 'unknown'];
+    }
+    $def = $cfg['defaultChannel'] ?? '';
+    if ($def !== '' && isset($cfg['channels'][$def])) {
+        return ['shows' => $cfg, 'channel' => array_merge(['slug' => $def], $cfg['channels'][$def]), 'channelError' => null];
+    }
+    return ['shows' => $cfg, 'channel' => null, 'channelError' => 'no_default'];
+}
+
+function assignShowToChannelCfg($shows, $showName, $displayId, $channel = '') {
+    $cfg = migrateShowsCfg($shows);
+    if ($showName === '') throw new Exception('showName fehlt.');
+    $did = $displayId !== '' ? (string)$displayId : '';
+    $slug = normalizeChannelSlug($channel);
+    if ($slug !== '') {
+        if (!isset($cfg['channels'][$slug])) throw new Exception('Kanal nicht gefunden.');
+        $chDid = (string)($cfg['channels'][$slug]['displayId'] ?? '');
+        if ($chDid === '') throw new Exception('Kanal hat keinen Displaytyp.');
+        if ($did === '') throw new Exception('Show-Display fehlt.');
+        if ($did !== $chDid) throw new Exception('Show-Display passt nicht zum Kanal.');
+    } else {
+        throw new Exception('Kanal fehlt — Kanäle werden nur manuell angelegt.');
+    }
+    $cfg['channels'][$slug]['showName'] = $showName;
+    return syncActiveShows($cfg);
+}
+
+function channelSlugForShow($cfg, $showName) {
+    foreach ($cfg['channels'] as $slug => $ch) {
+        if (($ch['showName'] ?? '') === $showName) return $slug;
+    }
+    return '';
+}
+
+function ensureShowHasChannel($shows, $showName, $displayId = '', $channel = '') {
+    $cfg = migrateShowsCfg($shows);
+    if ($showName === '') throw new Exception('showName fehlt.');
+    $requested = normalizeChannelSlug($channel);
+    if ($requested !== '') {
+        return assignShowToChannelCfg($cfg, $showName, $displayId, $requested);
+    }
+    $existing = channelSlugForShow($cfg, $showName);
+    if ($existing !== '') {
+        $chDid = $cfg['channels'][$existing]['displayId'] ?? '';
+        if ($displayId !== '' && $chDid !== '' && $chDid !== $displayId) {
+            throw new Exception('Show-Display passt nicht zum Kanal.');
+        }
+        return syncActiveShows($cfg);
+    }
+    return $cfg;
+}
+
 function getDevices(&$rest) {
     $devicesPathName = pathCorrection('./shows/devices.json');
     $devices = readAllJSONObject($devicesPathName);
@@ -385,22 +528,17 @@ function createShow(&$rest) {
     if (isValidDirectoryName($showName)) {
         $shows = readAllJSONObject($showsPathName);
         if ($shows === null) {
-            $shows = [
-                'shows' => [],
-                'dayStart' => 7,
-                'dayEnd' => 24,
-                'activeShows' => []
-            ];
+            $shows = emptyShowsCfg();
         }
+        $shows = migrateShowsCfg($shows);
         
         if (!in_array($orgShowName, $shows['shows'])) {
             $shows['shows'][] = $orgShowName;
         }
-        
-        if (!isset($shows['activeShows'][$displayId])) {
-            $shows['activeShows'][$displayId] = $orgShowName;
-        } else {
-            $shows['activeShows'][$displayId] = $orgShowName;
+
+        $channel = $rest['input']['channel'] ?? '';
+        if ($channel !== '') {
+            $shows = assignShowToChannelCfg($shows, $orgShowName, $displayId, $channel);
         }
         
         writeAllJSONNoFormat($showsPathName, $shows);
@@ -471,33 +609,26 @@ function deleteShow(&$rest) {
                 return $s !== $orgShowName;
             }));
             
-            // Remove from activeShows if this show was active
-            $wasActive = false;
-            if ($showDisplayId !== null && isset($shows['activeShows'][$showDisplayId])) {
-                if ($shows['activeShows'][$showDisplayId] === $orgShowName) {
-                    unset($shows['activeShows'][$showDisplayId]);
-                    $wasActive = true;
-                }
-            }
-            
-            // If this was the active show, try to activate another show with the same displayId
-            if ($wasActive && $showDisplayId !== null) {
-                $newActiveShow = null;
+            $shows = migrateShowsCfg($shows);
+            $replacementByDisplay = [];
+            if ($showDisplayId !== null) {
                 foreach ($shows['shows'] as $candidateShowName) {
                     $candidateSafeName = getSafeShowName($candidateShowName);
                     $candidateShowPath = pathCorrection('./shows/' . $candidateSafeName . DIRECTORY_SEPARATOR . 'show.json');
                     $candidateShow = readAllJSONObject($candidateShowPath);
-                    if ($candidateShow !== null && isset($candidateShow['displayId'])) {
-                        if ($candidateShow['displayId'] === $showDisplayId) {
-                            $newActiveShow = $candidateShowName;
-                            break;
-                        }
+                    if ($candidateShow !== null && isset($candidateShow['displayId']) && $candidateShow['displayId'] === $showDisplayId) {
+                        $replacementByDisplay[$showDisplayId] = $candidateShowName;
+                        break;
                     }
                 }
-                if ($newActiveShow !== null) {
-                    $shows['activeShows'][$showDisplayId] = $newActiveShow;
+            }
+            foreach ($shows['channels'] as $slug => $ch) {
+                if (($ch['showName'] ?? '') === $orgShowName) {
+                    $next = ($showDisplayId !== null && isset($replacementByDisplay[$showDisplayId])) ? $replacementByDisplay[$showDisplayId] : '';
+                    $shows['channels'][$slug]['showName'] = $next;
                 }
             }
+            syncActiveShows($shows);
         }
         writeAllJSONNoFormat($showsPathName, $shows);
         $rest['output']['shows'] = $shows;
@@ -617,21 +748,15 @@ function getShow(&$rest) {
 
 function setActiveShow(&$rest) {
     $showsPathName = pathCorrection('./shows/shows.json');
-    $orgShowName = $rest['input']['showName'];
-    $displayId = $rest['input']['displayId'];
-    $shows = readAllJSONObject($showsPathName);
-    if ($shows === null) {
-        $shows = [
-            'shows' => [],
-            'dayStart' => 7,
-            'dayEnd' => 24,
-            'activeShows' => []
-        ];
+    $orgShowName = $rest['input']['showName'] ?? '';
+    $displayId = $rest['input']['displayId'] ?? '';
+    $channel = $rest['input']['channel'] ?? '';
+    if ($displayId === '' && $orgShowName !== '') {
+        $show = readAllJSONObject(pathCorrection('./shows/' . getSafeShowName($orgShowName) . DIRECTORY_SEPARATOR . 'show.json'));
+        if ($show !== null && isset($show['displayId'])) $displayId = $show['displayId'];
     }
-    if (!isset($shows['activeShows'])) {
-        $shows['activeShows'] = [];
-    }
-    $shows['activeShows'][$displayId] = $orgShowName;
+    $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+    $shows = assignShowToChannelCfg($shows, $orgShowName, $displayId, $channel);
     writeAllJSONNoFormat($showsPathName, $shows);
     $rest['output']['shows'] = $shows;
     $rest['ok'] = true;
@@ -658,21 +783,103 @@ function getShows(&$rest) {
     try {
         registerDeviceEcho($rest);
         $showsPathName = pathCorrection('./shows/shows.json');
-        $shows = readAllJSONObject($showsPathName);
-        if ($shows === null) {
-            $shows = [
-                'shows' => [],
-                'dayStart' => 7,
-                'dayEnd' => 24,
-                'activeShows' => []
-            ];
-        }
-        $rest['output']['shows'] = $shows;
+        $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+        writeAllJSONNoFormat($showsPathName, $shows);
+        $resolved = resolveChannelCfg($shows, requestedChannelSlug($rest['input'] ?? []));
+        $rest['output']['shows'] = $resolved['shows'];
+        $rest['output']['channel'] = $resolved['channel'];
+        $rest['output']['channelError'] = $resolved['channelError'];
         $rest['ok'] = true;
     } catch (Exception $e) {
         $rest['ok'] = false;
         $rest['error'] = ['msg' => 'Error in GetShows: ' . $e->getMessage(), 'code' => -1];
     }
+}
+
+function createChannel(&$rest) {
+    $showsPathName = pathCorrection('./shows/shows.json');
+    $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+    $slug = normalizeChannelSlug($rest['input']['slug'] ?? '');
+    $displayId = $rest['input']['displayId'] ?? '';
+    if ($slug === '') throw new Exception('Ungültiger Kanal-Slug.');
+    if (isset($shows['channels'][$slug])) throw new Exception('Kanal existiert bereits.');
+    if ($displayId === '') throw new Exception('displayId fehlt.');
+    $assignedShow = (string)($rest['input']['showName'] ?? '');
+    if ($assignedShow !== '') {
+        $showDid = showDisplayId($assignedShow);
+        if ($showDid !== '' && $showDid !== (string)$displayId) {
+            throw new Exception('Show-Display passt nicht zum Kanal.');
+        }
+    }
+    $shows['channels'][$slug] = ['displayId' => (string)$displayId, 'showName' => $assignedShow];
+    if (empty($shows['defaultChannel'])) $shows['defaultChannel'] = $slug;
+    syncActiveShows($shows);
+    writeAllJSONNoFormat($showsPathName, $shows);
+    $rest['output']['shows'] = $shows;
+    $rest['ok'] = true;
+}
+
+function updateChannel(&$rest) {
+    $showsPathName = pathCorrection('./shows/shows.json');
+    $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+    $slug = normalizeChannelSlug($rest['input']['slug'] ?? '');
+    if ($slug === '' || !isset($shows['channels'][$slug])) throw new Exception('Kanal nicht gefunden.');
+    if (isset($rest['input']['displayId']) && $rest['input']['displayId'] !== '') {
+        $existingDid = (string)($shows['channels'][$slug]['displayId'] ?? '');
+        if ($existingDid !== '' && $existingDid !== (string)$rest['input']['displayId']) {
+            throw new Exception('Displaytyp des Kanals ist fest.');
+        }
+    }
+    if (array_key_exists('showName', $rest['input'])) {
+        $nextShow = (string)$rest['input']['showName'];
+        if ($nextShow !== '') {
+            $showDid = showDisplayId($nextShow);
+            $chDid = (string)($shows['channels'][$slug]['displayId'] ?? '');
+            if ($showDid !== '' && $chDid !== '' && $showDid !== $chDid) {
+                throw new Exception('Show-Display passt nicht zum Kanal.');
+            }
+        }
+        $shows['channels'][$slug]['showName'] = $nextShow;
+    }
+    $newSlug = normalizeChannelSlug($rest['input']['newSlug'] ?? '');
+    if ($newSlug !== '' && $newSlug !== $slug) {
+        if (isset($shows['channels'][$newSlug])) throw new Exception('Neuer Slug ist schon vergeben.');
+        $shows['channels'][$newSlug] = $shows['channels'][$slug];
+        unset($shows['channels'][$slug]);
+        if (($shows['defaultChannel'] ?? '') === $slug) $shows['defaultChannel'] = $newSlug;
+    }
+    syncActiveShows($shows);
+    writeAllJSONNoFormat($showsPathName, $shows);
+    $rest['output']['shows'] = $shows;
+    $rest['ok'] = true;
+}
+
+function deleteChannel(&$rest) {
+    $showsPathName = pathCorrection('./shows/shows.json');
+    $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+    $slug = normalizeChannelSlug($rest['input']['slug'] ?? '');
+    if ($slug === '' || !isset($shows['channels'][$slug])) throw new Exception('Kanal nicht gefunden.');
+    unset($shows['channels'][$slug]);
+    if (($shows['defaultChannel'] ?? '') === $slug) {
+        $keys = array_keys($shows['channels']);
+        $shows['defaultChannel'] = $keys[0] ?? '';
+    }
+    syncActiveShows($shows);
+    writeAllJSONNoFormat($showsPathName, $shows);
+    $rest['output']['shows'] = $shows;
+    $rest['ok'] = true;
+}
+
+function setDefaultChannel(&$rest) {
+    $showsPathName = pathCorrection('./shows/shows.json');
+    $shows = migrateShowsCfg(readAllJSONObject($showsPathName));
+    $slug = normalizeChannelSlug($rest['input']['slug'] ?? '');
+    if ($slug === '' || !isset($shows['channels'][$slug])) throw new Exception('Kanal nicht gefunden.');
+    $shows['defaultChannel'] = $slug;
+    syncActiveShows($shows);
+    writeAllJSONNoFormat($showsPathName, $shows);
+    $rest['output']['shows'] = $shows;
+    $rest['ok'] = true;
 }
 
 function exportShow(&$rest) {
@@ -853,6 +1060,18 @@ switch ($action) {
         break;
     case 'setActiveShow':
         setActiveShow($rest);
+        break;
+    case 'createChannel':
+        createChannel($rest);
+        break;
+    case 'updateChannel':
+        updateChannel($rest);
+        break;
+    case 'deleteChannel':
+        deleteChannel($rest);
+        break;
+    case 'setDefaultChannel':
+        setDefaultChannel($rest);
         break;
     case 'setShowSettings':
         setShowSettings($rest);

@@ -19,6 +19,7 @@ import replace from 'gulp-replace';
 import glob from 'fast-glob';
 import pngToIco from 'png-to-ico';
 import { fetchInstallerRedistributables } from './tools/installer-redistributables.mjs';
+import { fetchAiModel } from './tools/ai-model.mjs';
 import {
 	AssertNasDestination,
 	BuildRobocopyArgs,
@@ -30,9 +31,6 @@ import {
 	RunRobocopy,
 } from './tools/nas-backup.mjs';
 import {
-	AssertStagedInkEncoderPaths,
-	GitAddArgs,
-	GitCommitArgs,
 	InkReleaseError,
 	NpmPublishArgs,
 	ParseFlag,
@@ -164,7 +162,7 @@ const TMP_DIR = './tmp';
 const PACKAGE_TASKS = ['BUILD_SERVER_PACKAGES', 'BUILD_ALL_SERVER_PACKAGES', 'BUILD_INSTALLER'];
 const FIRMWARE_IO_TASKS = ['FIRMWARE_UPLOAD', 'FIRMWARE_UPLOAD_MONITOR', 'FIRMWARE_MONITOR', 'FIRMWARE_RESTORE_FACTORY'];
 const FIRMWARE_DIR = path.join(PROJECT_ROOT, 'firmware');
-const INK_RELEASE_TASKS = ['COMMIT_INK_ENCODER', 'PUBLISH_INK_ENCODER'];
+const INK_RELEASE_TASKS = ['PUBLISH_INK_ENCODER'];
 
 const SERVER_TYPE_PARAMETERS = [
 	{
@@ -491,6 +489,30 @@ function _buildSelectedPackage(cb) {
 // NSIS INSTALLER
 // ==============================================
 
+async function _init(cb) {
+	try {
+		const force = ParseFlag(GetParameter('force', process.env.FORCE_AI_MODEL), false);
+		const progress = CreateProgress(Translate('First-time setup<context="task log"/>'));
+		Log('Checking local COCO-SSD model…<context="task section"/>');
+		const result = await fetchAiModel({
+			root: PROJECT_ROOT,
+			force,
+			log: (msg) => Log(msg),
+			progress: (n, msg) => progress.Update(n, msg),
+		});
+		progress.Done();
+		if (result.downloaded.length) {
+			Log('Downloaded AI model files: <count/><context="task log"/>', { count: String(result.downloaded.length) });
+		} else {
+			Log('Local AI model is already installed.<context="task log"/>');
+		}
+		cb();
+	} catch (err) {
+		LogError('AI model setup failed: <message/><context="task error"/>', { message: err.message });
+		cb(err);
+	}
+}
+
 async function _fetchInstallerRedistributables(cb) {
  try {
   await _spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(PROJECT_ROOT, 'tools', 'build-server-runtimes.ps1'), '-Server', process.env.PHOTOFRAME_INSTALLER_SERVER || 'all'], { cwd: PROJECT_ROOT, shell: false });
@@ -570,6 +592,7 @@ function _activeFirmwareMeta() {
 }
 
 async function _prepareFirmwareSources() {
+	await import('./tools/embed-firmware-i18n.mjs');
 	const meta = _activeFirmwareMeta();
 	const dest = path.join(FIRMWARE_DIR, '.generated');
 	fs.rmSync(dest, { recursive: true, force: true });
@@ -1008,16 +1031,8 @@ function _logInkReleaseError(err) {
 			LogError('Confirmation is required. On the CLI set MICROGULP_PARAM_CONFIRM=true.<context="task error"/>');
 			return;
 		}
-		if (err.reason === 'message') {
-			LogError('A commit message is required (MICROGULP_PARAM_MESSAGE).<context="task error"/>');
-			return;
-		}
 		if (err.reason === 'package') {
 			LogError('Not the ink-encoder workspace package: <path/><context="task error"/>', { path: err.detail || err.message });
-			return;
-		}
-		if (err.reason === 'staged') {
-			LogError('Refusing to commit a path outside ink-encoder/: <path/><context="task error"/>', { path: err.detail });
 			return;
 		}
 		if (err.reason === 'otp') {
@@ -1040,46 +1055,6 @@ async function _confirmInkRelease(kind, summary) {
 		return;
 	}
 	if (!_flagParam('confirm')) throw new InkReleaseError('confirm');
-}
-
-async function _commitInkEncoder(cb) {
-	try {
-		const encoderDir = ResolveInkEncoderDir(PROJECT_ROOT);
-		const pkg = ReadInkEncoderPackage(encoderDir);
-		const message = String(GetParameter('message') || '').trim();
-		if (!message) throw new InkReleaseError('message');
-
-		const progress = CreateProgress(Translate('ink-encoder git commit<context="task log"/>'));
-		Log('Committing workspace package <name/>@<version/> (paths under ink-encoder/ only).<context="task log"/>', pkg);
-		progress.Update(0.15);
-
-		const status = await _runCaptured('git', ['status', '--short', '--', 'ink-encoder']);
-		const statusText = status.stdout.trim();
-		if (!statusText) {
-			throw new Error('Nothing to commit under ink-encoder/.');
-		}
-		Log(statusText + '<context="task log"/>');
-		await _confirmInkRelease(
-			Translate('git commit<context="task parameter"/>'),
-			Translate('Stage and commit only ink-encoder/ with message: <message/><context="task log"/>', { message }),
-		);
-		progress.Update(0.4, Translate('Staging ink-encoder/…<context="task log"/>'));
-		await _runCaptured('git', GitAddArgs());
-		const staged = await _runCaptured('git', ['diff', '--cached', '--name-only', '--', 'ink-encoder']);
-		const files = staged.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-		AssertStagedInkEncoderPaths(files);
-		if (files.length === 0) throw new Error('Nothing to commit under ink-encoder/.');
-		progress.Update(0.7, Translate('Creating git commit…<context="task log"/>'));
-		const committed = await _runCaptured('git', GitCommitArgs(message));
-		if (committed.stdout.trim()) Log(committed.stdout.trim() + '<context="task log"/>');
-		const head = await _runCaptured('git', ['log', '-1', '--oneline']);
-		progress.Done();
-		Log('Committed: <rev/><context="task log"/>', { rev: head.stdout.trim() });
-		cb();
-	} catch (err) {
-		_logInkReleaseError(err);
-		cb(err);
-	}
 }
 
 async function _publishInkEncoder(cb) {
@@ -1139,9 +1114,10 @@ async function _publishInkEncoder(cb) {
 // COMPOSED / EXPORTED TASKS
 // ==============================================
 
-const Build_Server_Packages = gulp.series(_cleanDist, _selectServerType, _buildSelectedPackage);
+const Build_Server_Packages = gulp.series(_init, _cleanDist, _selectServerType, _buildSelectedPackage);
 
 const Build_All_Server_Packages = gulp.series(
+	_init,
 	_cleanDist,
 	_buildNodePackage,
 	_buildIISPackage,
@@ -1151,6 +1127,7 @@ const Build_All_Server_Packages = gulp.series(
 );
 
 const Build_Installer = gulp.series(
+	_init,
 	_fetchInstallerRedistributables,
 	_cleanDist,
 	_buildNodePackage,
@@ -1166,6 +1143,7 @@ const Build_Installer = gulp.series(
 // ==============================================
 
 export {
+	_init                      as INIT,
 	Build_Server_Packages      as BUILD_SERVER_PACKAGES,
 	Build_All_Server_Packages  as BUILD_ALL_SERVER_PACKAGES,
 	Build_Installer            as BUILD_INSTALLER,
@@ -1179,9 +1157,23 @@ export {
 	_buildIco                  as BUILD_ICO,
 	_copyRawmediaToWebassets   as COPY_RAWMEDIA_WEBASSETS,
 	_backupToNas               as BACKUP_TO_NAS,
-	_commitInkEncoder          as COMMIT_INK_ENCODER,
 	_publishInkEncoder         as PUBLISH_INK_ENCODER,
 };
+
+_init.µDisplayName = 'Init (download AI model)<context="µDisplayName"/>'.i18xRegister();
+_init.µDescription = 'First-time setup: downloads the local COCO-SSD model used for auto-center if it is missing.<context="µDescription"/>'.i18xRegister();
+_init.µTooltip = 'Writes src/libs/models/. Skips files that already match the manifest. FORCE_AI_MODEL=1 redownloads.<context="µTooltip"/>'.i18xRegister();
+_init.µGroup = 'Setup<context="µGroup"/>'.i18xRegister();
+_init.µIcon = '\uE902';
+_init.µOrder = 1;
+_init.µParameters = [
+	{
+		id: 'force',
+		type: 'boolean',
+		default: false,
+		label: 'Redownload even if present<context="task parameter"/>'.i18xRegister(),
+	},
+];
 
 Build_Server_Packages.µDisplayName = 'Build One Server Package V<version/><context="µDisplayName"/>'.i18xRegister();
 Build_Server_Packages.µDescription = 'Creates a zip for one server type (or all) after asking which target to build.<context="µDescription"/>'.i18xRegister();
@@ -1359,30 +1351,6 @@ _backupToNas.µParameters = [
 		type: 'text',
 		default: NAS_BACKUP_DEFAULT,
 		label: 'NAS destination<context="task parameter"/>'.i18xRegister(),
-	},
-];
-
-_commitInkEncoder.µDisplayName = 'Commit ink-encoder V<inkEncoder/><context="µDisplayName"/>'.i18xRegister();
-_commitInkEncoder.µDescription = 'Stages and commits only the ink-encoder/ workspace package. Does not push.<context="µDescription"/>'.i18xRegister();
-_commitInkEncoder.µTooltip = 'CLI requires MICROGULP_PARAM_MESSAGE and MICROGULP_PARAM_CONFIRM=true. Other staged files are not included.<context="µTooltip"/>'.i18xRegister();
-_commitInkEncoder.µGroup = 'Publish<context="µGroup"/>'.i18xRegister();
-_commitInkEncoder.µIcon = '\uE90A';
-_commitInkEncoder.µOrder = 10;
-_commitInkEncoder.µExecutionConcurrency = false;
-_commitInkEncoder.µExecutionRestrictions = { deny: INK_RELEASE_TASKS.filter((n) => n !== 'COMMIT_INK_ENCODER') };
-_commitInkEncoder.µParameters = [
-	{
-		id: 'message',
-		type: 'textarea',
-		required: true,
-		label: 'Commit message<context="task parameter"/>'.i18xRegister(),
-		placeholder: 'Release ink-encoder <inkEncoder/><context="task parameter"/>'.i18xRegister(),
-	},
-	{
-		id: 'confirm',
-		type: 'boolean',
-		default: false,
-		label: 'Create the git commit<context="task parameter"/>'.i18xRegister(),
 	},
 ];
 

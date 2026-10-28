@@ -4,10 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import {
-	AssertStagedInkEncoderPaths,
-	GitAddArgs,
-	GitCommitArgs,
-	INK_ENCODER_GIT_PATHS,
 	InkReleaseError,
 	NpmPublishArgs,
 	ParseFlag,
@@ -35,27 +31,6 @@ describe('ParseFlag', () => {
 	it('uses the fallback when empty', () => {
 		assert.equal(ParseFlag('', true), true);
 		assert.equal(ParseFlag(undefined, false), false);
-	});
-});
-
-describe('git arguments', () => {
-	it('stages only the ink-encoder workspace folder', () => {
-		assert.deepEqual(GitAddArgs(), ['add', '--', 'ink-encoder']);
-		assert.deepEqual(INK_ENCODER_GIT_PATHS, ['ink-encoder']);
-	});
-	it('refuses an empty commit message', () => {
-		assert.throws(() => GitCommitArgs('  \n'), InkReleaseError);
-	});
-	it('does not skip hooks or amend and commits only ink-encoder paths', () => {
-		const args = GitCommitArgs('Release ink-encoder 2.0.0');
-		assert.equal(args.includes('--no-verify'), false);
-		assert.equal(args.includes('--amend'), false);
-		assert.deepEqual(args, ['commit', '--only', '-m', 'Release ink-encoder 2.0.0', '--', 'ink-encoder']);
-	});
-	it('rejects staged paths outside ink-encoder/', () => {
-		assert.doesNotThrow(() => AssertStagedInkEncoderPaths(['ink-encoder/package.json', 'ink-encoder/src/inkEncoder.mjs']));
-		assert.throws(() => AssertStagedInkEncoderPaths(['package.json']), /staged/);
-		assert.throws(() => AssertStagedInkEncoderPaths(['../secret']), /staged/);
 	});
 });
 

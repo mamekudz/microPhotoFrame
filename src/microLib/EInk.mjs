@@ -7,7 +7,7 @@
 /** E-Ink Display Image Functions.
  * @module EInk
  */
-import EInkDef from "./EInkDef.mjs";
+import EInkDef from "./EInkDef.mjs?v=21";
 
 /** Class with image helper functions.
  * @class EInk
@@ -32,7 +32,7 @@ export default class EInk {
   #ditherType = "floyd";
   #aspect = EInkDef.LANDSCAPE;
 
-  constructor(_imgRef = "", _displayID = "EINK_E6_730_sq_800x480") {
+  constructor(_imgRef = "", _displayID = "EINK_SPECTRA6_730_sq_800x480") {
     this.#imgRef = _imgRef;
     this.displayID = _displayID;
     this.#display = EInkDef.DISPLAYS[this.displayID];

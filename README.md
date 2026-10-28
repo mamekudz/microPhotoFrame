@@ -37,11 +37,12 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, GooDi
 #### 🖼️ Display Support
 - ✅ **reTerminal E1001:** 7.5" Grayscale (4-Level)
 - ✅ **reTerminal E1002:** 7.3" Spectra 6 (Full Color)
-- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7.3" 800×480 (GDEP073E01, display ID `I`, same shows as E1002)
+- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7.3" 800×480 (GDEP073E01, display ID `9`, same shows as E1002)
 - ✅ **Waveshare 1.54G:** ESP32-S3 AIoT · 200×200 · Red/Yellow/Black/White (display ID `f`, no battery)
 - ✅ **Auto-Rotation (E1002):** MPU6050 sensor support; NeoFrame and Waveshare have no accelerometer
 - ✅ **Keep last image:** If the photo server is offline, the last loaded photo stays on the panel
-- ✅ **Low Power:** Optimized for E-Ink displays with configurable rest periods; buttonless boards default deep sleep off
+- ✅ **Low Power:** Configurable rest periods. Deep sleep is on by default on reTerminal and Waveshare; NeoFrame stays off so USB power banks do not cut out
+- ✅ **Languages:** Web UI and firmware config via i18x — English, German, Chinese (browser default, changeable)
 
 #### 📡 WiFi Management
 - ✅ Remote management via web interface
@@ -51,7 +52,7 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, GooDi
 
 #### 🎨 Image Processing
 - ✅ Fully automated image processing in browser
-- ✅ AI-powered cropping (TensorFlow.js / COCO-SSD via CDN when online — see `docs/BUILD_INSTALLER.md`)
+- ✅ AI-powered cropping (local TensorFlow.js / COCO-SSD — `npm run init` / `gulp INIT`)
 - ✅ Extreme compression with highest quality
 - ✅ Support for both landscape and portrait formats
 - ✅ Custom `.ink` format for optimal storage (mimetype image/ink)
@@ -70,13 +71,37 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, GooDi
 #### 🎛️ User Controls
 - ✅ Hardware buttons on reTerminal for next/previous image and mode
 - ✅ WiFi reconfiguration on reTerminal (hold both buttons for 1 second)
-- ✅ **Boards without buttons (NeoFrame, Waveshare 1.54G):** 5-minute open AP `microPhotoFrame` after power-on → `http://192.168.4.1/`, or the config page on the home-LAN IP
+- ✅ **Boards without buttons (NeoFrame, Waveshare 1.54G):** open AP `microPhotoFrame` after a cold start → `http://192.168.4.1/`, or the config page on the home-LAN IP. With deep sleep on (Waveshare default) the AP lasts 5 minutes; NeoFrame keeps it open while deep sleep stays off
 - ✅ Low battery warning display
 
-### 🚀 Quick Start
+### 🚀 First installation
 
-#### 1. Flash Firmware
-The easiest way for end users:
+Full handbook: [INSTALLATION.md](INSTALLATION.md). Server variants: [docs/](docs/).
+
+#### 1. Install the server
+
+```bash
+git clone https://github.com/mamekudz/microPhotoFrame.git
+cd microPhotoFrame
+npm install
+npm run init
+```
+
+`npm run init` (or `npx gulp INIT`) downloads the local COCO-SSD model into `src/libs/models/` for AI crop. Run it once after a fresh clone.
+
+Start a server. Default on this project is **IIS on port 888**. Node Express: see [INSTALLATION.md](INSTALLATION.md). Open the web UI, e.g. `http://192.168.0.69:888/`.
+
+#### 2. Create a channel
+
+A channel is **User ID / Group ID / display**. Shows live under `shows/{userId}/{groupId}/{displayId}/`.
+
+Example: User ID `mamekudz`, Group ID `family`, Spectra 6 7.3" (id `9`) → `http://192.168.0.69:888/shows/mamekudz/family/9`
+
+In the web UI header choose **+ New Channel**, enter User ID and Group ID, pick the display, create the channel, then activate a show. The **Default** checkbox is used when the URL has no channel path. The UI always shows the real `/shows/…` URL.
+
+The display type is fixed after create. The device panel comes from the firmware; you do not type it on the frame.
+
+#### 3. Flash firmware
 
 **👉 [Open Web Flasher](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
@@ -85,33 +110,19 @@ The easiest way for end users:
 3. `FIRMWARE_UPLOAD` picks a live USB serial port. Typical IDs: native ESP32-S3 CDC `303A:1001` (XIAO / often E1002 or Waveshare), CH340 `1A86:7523` (UART adapter).
 4. Wait until complete (~2 minutes)
 
-If the task says no USB serial device, unplug power, try another data cable, and avoid charge-only or power-only sockets on the frame.
-
 More options: [Firmware README](firmware/README.md)
 
-#### 2. Setup Server
+#### 4. Configure the device
 
-```bash
-# Clone repository
-git clone https://github.com/mamekudz/microPhotoFrame.git
-cd microPhotoFrame
+After first boot (or the open AP on buttonless boards — 5 minutes when deep sleep is on):
 
-# Setup IIS or Apache as web server
-# Point webroot to project directory
+1. Connect the phone to WiFi **"microPhotoFrame"** (open, 2.4 GHz), then open `http://192.168.4.1`
+2. Enter home WiFi credentials
+3. Enter only the **server URL** (`http://192.168.0.69:888`) and the **User ID**
+4. Load **Group IDs** — the server lists groups that match that User ID and this device’s display
+5. Pick a Group ID, save, restart
 
-# Or for development:
-npx http-server -p 8080
-```
-
-#### 3. Configure Device
-
-After first boot:
-
-1. Connect to WiFi **"microPhotoFrame"**
-2. Open browser: `http://192.168.4.1`
-3. Enter WiFi credentials
-4. Specify server URL (e.g., `http://192.168.0.107:888`)
-5. Save and restart
+A frame whose panel does not match the channel shows that the URL is not intended.
 
 ### 🛠️ Hardware Expansion
 
@@ -130,6 +141,7 @@ Add automatic orientation detection with 3D-printed case:
 
 ### 📚 Documentation
 
+- **[Installation handbook](INSTALLATION.md)** - First install, channels (User ID / Group ID), server variants
 - **[Firmware README](firmware/README.md)** - Detailed firmware documentation
 - **[ink-encoder Package](ink-encoder/README.md)** - NPM package documentation
 - **[Technical Overview](docs/technical_overview.md)** - Architecture and design
@@ -150,18 +162,18 @@ These tasks are **repository development/build helpers**. They do not flash or c
 
 The gulpfile is prepared for [µGulp™](https://microgulp.dev/en/): `µParameters` forms (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), task-reported progress (`CreateProgress` / `ReportProgress`), a `LogTable` artifact listing after server packages, and `µWatch` on firmware sources, favicon PNGs and branding copies. Display names and groups are i18n’d via `i18x/gulp/`. This is maintainer self-certification against the published [µGulp™ Ready](https://microgulp.dev/en/ready/) requirements, not an independent audit.
 
-**Prerequisites:** Node.js 22+, `npm install` in the repo root (workspace package `ink-encoder/` 2.0.0 is linked automatically). Windows for `BACKUP_TO_NAS` (robocopy) and NSIS installer builds. PlatformIO (`pio`) for firmware tasks. `gulp-mu-gulp-api` is a devDependency. A neighbor checkout of `../ink-encoder` is **not** required. Config fallback `./config/ink-encode-config.json` is not in the repo — use `config/ink-encode-config.example.json` or a local copy.
+**Prerequisites:** Node.js 22+, `npm install` in the repo root (workspace package `ink-encoder/` 2.1.0 is linked automatically), then `npm run init` once to download the local COCO-SSD model into `src/libs/models/`. Windows for `BACKUP_TO_NAS` (robocopy) and NSIS installer builds. PlatformIO (`pio`) for firmware tasks. `gulp-mu-gulp-api` is a devDependency. A neighbor checkout of `../ink-encoder` is **not** required. Config fallback `./config/ink-encode-config.json` is not in the repo — use `config/ink-encode-config.example.json` or a local copy.
 
 **CLI (plain Gulp does not apply `µParameters` defaults).** Set `MICROGULP_PARAM_<ID>` or `MICROGULP_PARAMS` JSON, or use the task-coded fallbacks below:
 
 | Command | Inputs / defaults | Result |
 | :--- | :--- | :--- |
 | `npx gulp --tasks` | — | Lists exported task names |
+| `npx gulp INIT` / `npm run init` | optional `MICROGULP_PARAM_FORCE=true` or `FORCE_AI_MODEL=1` | Downloads the COCO-SSD auto-center model into `src/libs/models/` |
 | `npx gulp COPY_RAWMEDIA_WEBASSETS` | none | Copies `rawmedia/Logo.png` and `LogoText.png` to `webassets/` when present |
 | `npx gulp BUILD_SERVER_PACKAGES` | `MICROGULP_PARAM_SERVERTYPE=node\|iis\|apache\|nginx\|all`. Without it the CLI may prompt (`RequestSelectInput`, default `all` on that prompt). The `µParameters` default is **not** applied automatically. | Zip(s) in `dist/` |
 | `npx gulp BUILD_ALL_SERVER_PACKAGES` | none | All four zips in `dist/` |
 | `npx gulp ENCODE_INK` | **required** `MICROGULP_PARAM_INPUT` or `input`; optional `MICROGULP_PARAM_OUTPUT` / `MICROGULP_PARAM_CONFIG` (code fallback `./config/ink-encode-config.json`, not shipped; example: `./config/ink-encode-config.example.json`) | `.ink` files |
-| `npx gulp COMMIT_INK_ENCODER` | **required** `MICROGULP_PARAM_MESSAGE` and `MICROGULP_PARAM_CONFIRM=true` | git commit of `ink-encoder/` only (no push; other staged files are ignored via `git commit --only`) |
 | `npx gulp PUBLISH_INK_ENCODER` | CLI **dry-run by default**. Real upload: `MICROGULP_PARAM_DRYRUN=false` and `MICROGULP_PARAM_CONFIRM=true`. Optional `MICROGULP_PARAM_OTP`, `MICROGULP_PARAM_SKIPTESTS=true` | `npm publish` of the workspace package only (not PhotoFrame) |
 | `npx gulp BACKUP_TO_NAS` | Destination: `MICROGULP_PARAM_DESTINATION` or `MICROPHOTOFRAME_NAS_BACKUP`, else the **code** fallback `Z:\Projects\microPhotoFrame` (that folder must already exist) | robocopy `/MIR` mirror |
 
@@ -202,11 +214,12 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 #### 🖼️ Display-Unterstützung
 - ✅ **reTerminal E1001:** 7,5" Graustufen (4-Level)
 - ✅ **reTerminal E1002:** 7,3" Spectra 6 (Vollfarbe)
-- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7,3" 800×480 (GDEP073E01, Display-ID `I`, dieselben Shows wie E1002)
+- ✅ **NeoFrame:** GooDisplay GDP073EW1 · Spectra 6 7,3" 800×480 (GDEP073E01, Display-ID `9`, dieselben Shows wie E1002)
 - ✅ **Waveshare 1.54G:** ESP32-S3 AIoT · 200×200 · Rot/Gelb/Schwarz/Weiß (Display-ID `f`, ohne Akku)
 - ✅ **Auto-Rotation (E1002):** MPU6050; NeoFrame und Waveshare haben keinen Beschleunigungssensor
 - ✅ **Letztes Bild behalten:** Ist der Foto-Server aus, bleibt das zuletzt geladene Foto auf dem Panel
-- ✅ **Stromsparend:** Optimiert für E-Ink Displays mit konfigurierbaren Ruhezeiten; Boards ohne Taster haben Deep Sleep standardmäßig aus
+- ✅ **Stromsparend:** Konfigurierbare Ruhezeiten. Deep Sleep ist an reTerminal und Waveshare standardmäßig an; am NeoFrame aus, damit USB-Powerbanks nicht abschalten
+- ✅ **Sprachen:** Web-UI und Firmware-Config über i18x — Englisch, Deutsch, Chinesisch (Browser-Default, umschaltbar)
 
 #### 📡 WiFi-Verwaltung
 - ✅ Fernverwaltung über Weboberfläche
@@ -216,7 +229,7 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 
 #### 🎨 Bildverarbeitung
 - ✅ Vollautomatische Bildaufbereitung im Browser
-- ✅ KI-gestützter Zuschnitt (TensorFlow.js / COCO-SSD per CDN bei Online — siehe `docs/BUILD_INSTALLER.md`)
+- ✅ KI-gestützter Zuschnitt (lokales TensorFlow.js / COCO-SSD — `npm run init` / `gulp INIT`)
 - ✅ Extreme Kompression bei höchster Qualität
 - ✅ Unterstützung für Quer- und Hochformat
 - ✅ Eigenes `.ink` Format für optimale Speicherung (mimetype image/ink)
@@ -235,13 +248,37 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 #### 🎛️ Bedienelemente
 - ✅ Hardware-Tasten am reTerminal für nächstes/vorheriges Bild und Modus
 - ✅ WiFi-Neukonfiguration am reTerminal (beide Tasten 1 Sekunde halten)
-- ✅ **Boards ohne Taster (NeoFrame, Waveshare 1.54G):** 5 Minuten offenes WLAN `microPhotoFrame` nach dem Einschalten → `http://192.168.4.1/`, sonst die Config-Seite unter der Heimnetz-IP
+- ✅ **Boards ohne Taster (NeoFrame, Waveshare 1.54G):** offenes WLAN `microPhotoFrame` nach Kaltstart → `http://192.168.4.1/`, sonst die Config-Seite unter der Heimnetz-IP. Mit Deep Sleep (Waveshare-Standard) bleibt der AP 5 Minuten; am NeoFrame bleibt er offen, solange Deep Sleep aus ist
 - ✅ Akkustand-Warnung bei niedrigem Ladestand
 
-### 🚀 Schnellstart
+### 🚀 Erstinstallation
 
-#### 1. Firmware Flashen
-Der einfachste Weg für Endanwender:
+Ausführlich: [INSTALLATION.md](INSTALLATION.md). Servervarianten: [docs/](docs/).
+
+#### 1. Server installieren
+
+```bash
+git clone https://github.com/mamekudz/microPhotoFrame.git
+cd microPhotoFrame
+npm install
+npm run init
+```
+
+`npm run init` (oder `npx gulp INIT`) lädt einmal das lokale COCO-SSD-Modell nach `src/libs/models/` für den KI-Zuschnitt.
+
+Server starten. Standard hier ist **IIS auf Port 888**. Node Express: siehe [INSTALLATION.md](INSTALLATION.md). Web-UI öffnen, z. B. `http://192.168.0.69:888/`.
+
+#### 2. Kanal anlegen
+
+Ein Kanal ist **User ID / Group ID / Display**. Shows liegen unter `shows/{userId}/{groupId}/{displayId}/`.
+
+Beispiel: User ID `mamekudz`, Group ID `family`, Spectra 6 7,3" (ID `9`) → `http://192.168.0.69:888/shows/mamekudz/family/9`
+
+Im Header **+ New Channel**: User ID und Group ID eingeben, Display wählen, Kanal anlegen, Show aktivieren. **Default** gilt, wenn die URL keinen Kanalpfad hat. Angezeigt wird immer die echte `/shows/…`-URL.
+
+Der Displaytyp ist nach dem Anlegen fest. Das Panel kommt aus der Firmware; am Rahmen wird es nicht eingetippt.
+
+#### 3. Firmware flashen
 
 **👉 [Web-Flasher öffnen](https://mamekudz.github.io/microPhotoFrame/firmware/flasher.html)**
 
@@ -250,33 +287,19 @@ Der einfachste Weg für Endanwender:
 3. `FIRMWARE_UPLOAD` nimmt einen aktiven USB-Serial-Port. Typisch: natives ESP32-S3-CDC `303A:1001` (XIAO / oft E1002 oder Waveshare), CH340 `1A86:7523` (UART-Adapter).
 4. Warten bis fertig (~2 Minuten)
 
-Meldung „Kein USB-Serial-Gerät“: Strom trennen, anderes Datenkabel, keinen reinen Lade- oder Stromanschluss am Rahmen.
-
 Weitere Optionen: [Firmware README](firmware/README.md)
 
-#### 2. Server einrichten
+#### 4. Gerät konfigurieren
 
-```bash
-# Repository klonen
-git clone https://github.com/mamekudz/microPhotoFrame.git
-cd microPhotoFrame
+Nach dem ersten Start (oder dem offenen AP ohne Taster — 5 Minuten, wenn Deep Sleep an ist):
 
-# IIS oder Apache als Webserver einrichten
-# Webroot auf Projektverzeichnis zeigen
+1. Handy mit WLAN **"microPhotoFrame"** verbinden (offen, 2,4 GHz), dann `http://192.168.4.1`
+2. Heim-WLAN eingeben
+3. Nur die **Server-URL** (`http://192.168.0.69:888`) und die **User ID** eintragen
+4. **Group IDs laden** — der Server listet Groups, die zu User ID und Display des Geräts passen
+5. Group ID wählen, speichern, neu starten
 
-# Oder für Entwicklung:
-npx http-server -p 8080
-```
-
-#### 3. Gerät konfigurieren
-
-Nach dem ersten Start:
-
-1. Mit WiFi **"microPhotoFrame"** verbinden
-2. Browser öffnen: `http://192.168.4.1`
-3. WLAN-Zugangsdaten eingeben
-4. Server-URL angeben (z.B. `http://192.168.0.107:888`)
-5. Speichern und neu starten
+Passt das Panel nicht zum Kanal, zeigt der Rahmen, dass die URL nicht vorgesehen ist.
 
 ### 🛠️ Hardware-Erweiterung
 
@@ -302,6 +325,7 @@ Fügen Sie automatische Orientierungserkennung mit 3D-gedrucktem Gehäuse hinzu:
 
 ### 📚 Dokumentation
 
+- **[Installationshandbuch](INSTALLATION.md)** - Erstinstallation, Kanäle (User ID / Group ID), Servervarianten
 - **[Firmware README](firmware/README.md)** - Detaillierte Firmware-Dokumentation
 - **[ink-encoder Paket](ink-encoder/README.md)** - NPM-Paket Dokumentation
 - **[Technische Übersicht](docs/technical_overview.md)** - Architektur und Design
@@ -322,18 +346,18 @@ Diese Tasks sind **Entwicklungs-/Build-Helfer dieses Repositories**. Sie flashen
 
 Das Gulpfile ist für [µGulp™](https://microgulp.dev/de/ready/) vorbereitet: `µParameters`-Formulare (`BUILD_SERVER_PACKAGES`, `ENCODE_INK`, `BACKUP_TO_NAS`), gemeldeter Fortschritt (`CreateProgress` / `ReportProgress`), `LogTable` nach Serverpaketen sowie `µWatch` für Firmware-Quellen, Favicon-PNGs und Branding-Kopien. Anzeigenamen liegen unter `i18x/gulp/`. Das ist Maintainer-Selbstdeklaration gemäß den veröffentlichten [µGulp™-Ready-Anforderungen](https://microgulp.dev/en/ready/), keine unabhängige Prüfung.
 
-**Voraussetzungen:** Node.js 22+, `npm install` im Projektroot (Workspace-Paket `ink-encoder/` 2.0.0 wird automatisch verknüpft). Windows für `BACKUP_TO_NAS` (robocopy) und NSIS-Installer. PlatformIO (`pio`) für Firmware-Tasks. `gulp-mu-gulp-api` ist eine devDependency. Ein Nachbar-Checkout von `../ink-encoder` ist **nicht** nötig. Der Config-Fallback `./config/ink-encode-config.json` liegt nicht im Repo — `config/ink-encode-config.example.json` oder eine lokale Kopie verwenden.
+**Voraussetzungen:** Node.js 22+, `npm install` im Projektroot (Workspace-Paket `ink-encoder/` 2.1.0 wird automatisch verknüpft), danach einmal `npm run init` für das lokale COCO-SSD-Modell unter `src/libs/models/`. Windows für `BACKUP_TO_NAS` (robocopy) und NSIS-Installer. PlatformIO (`pio`) für Firmware-Tasks. `gulp-mu-gulp-api` ist eine devDependency. Ein Nachbar-Checkout von `../ink-encoder` ist **nicht** nötig. Der Config-Fallback `./config/ink-encode-config.json` liegt nicht im Repo — `config/ink-encode-config.example.json` oder eine lokale Kopie verwenden.
 
 **CLI (gewöhnliches Gulp übernimmt `µParameters`-Defaults nicht automatisch).** `MICROGULP_PARAM_<ID>` bzw. `MICROGULP_PARAMS` setzen oder die im Task-Code hinterlegten Fallbacks nutzen:
 
 | Aufruf | Eingaben / Defaults | Ergebnis |
 | :--- | :--- | :--- |
 | `npx gulp --tasks` | — | Exportierte Tasknamen |
+| `npx gulp INIT` / `npm run init` | optional `MICROGULP_PARAM_FORCE=true` oder `FORCE_AI_MODEL=1` | Lädt das COCO-SSD-Auto-Center-Modell nach `src/libs/models/` |
 | `npx gulp COPY_RAWMEDIA_WEBASSETS` | keine | Kopiert `rawmedia/Logo.png` und `LogoText.png` nach `webassets/`, sofern vorhanden |
 | `npx gulp BUILD_SERVER_PACKAGES` | `MICROGULP_PARAM_SERVERTYPE=node\|iis\|apache\|nginx\|all`. Ohne Wert kann die CLI nachfragen (`RequestSelectInput`, Prompt-Default `all`). Der `µParameters`-Default greift **nicht** von allein. | Zip(s) in `dist/` |
 | `npx gulp BUILD_ALL_SERVER_PACKAGES` | keine | Alle vier Zips in `dist/` |
 | `npx gulp ENCODE_INK` | **pflicht** `MICROGULP_PARAM_INPUT` oder `input`; optional Output/Config (Code-Fallback `./config/ink-encode-config.json`, nicht im Repo; Beispiel: `./config/ink-encode-config.example.json`) | `.ink`-Dateien |
-| `npx gulp COMMIT_INK_ENCODER` | **pflicht** `MICROGULP_PARAM_MESSAGE` und `MICROGULP_PARAM_CONFIRM=true` | Git-Commit nur von `ink-encoder/` (kein Push; andere gestagte Dateien über `git commit --only` ausgelassen) |
 | `npx gulp PUBLISH_INK_ENCODER` | CLI-**Standard ist Probelauf**. Echter Upload: `MICROGULP_PARAM_DRYRUN=false` und `MICROGULP_PARAM_CONFIRM=true`. Optional `MICROGULP_PARAM_OTP`, `MICROGULP_PARAM_SKIPTESTS=true` | `npm publish` nur des Workspace-Pakets (nicht PhotoFrame) |
 | `npx gulp BACKUP_TO_NAS` | Ziel: `MICROGULP_PARAM_DESTINATION` oder `MICROPHOTOFRAME_NAS_BACKUP`, sonst der **Code**-Fallback `Z:\Projects\microPhotoFrame` (Ordner muss existieren) | robocopy-`/MIR`-Spiegel |
 

@@ -65,19 +65,19 @@ esptool.py --chip esp32s3 --port COM9 --baud 460800 \
 - **Display:** 7.5" Grayscale (4-Level)
 - **Auflösung:** 800×480
 - **Farben:** Weiß, Hellgrau, Dunkelgrau, Schwarz
-- **Display ID:** `D`
+- **Display ID:** `T`
 
 ### reTerminal E1002
 - **Display:** 7.3" Spectra 6 (Full Color)
 - **Auflösung:** 800×480
 - **Farben:** Schwarz, Weiß, Rot, Gelb, Blau, Grün
-- **Display ID:** `I`
+- **Display ID:** `9`
 - **MCU:** Seeed XIAO ESP32-S3
 
 ### NeoFrame (GooDisplay GDP073EW1)
 - **Display:** gleiches Spectra-6-7,3"-Panel GDEP073E01
 - **Auflösung:** 800×480
-- **Display ID:** `I` (gleiche Shows wie E1002)
+- **Display ID:** `9` (gleiche Shows wie E1002)
 - **MCU:** ESP32-S3 (Herstellerangabe)
 - **Lagesensor:** keiner (kein MPU6050)
 - **Taster:** keine am Holzrahmen — Bedienung nur über WLAN/Web
@@ -89,6 +89,7 @@ esptool.py --chip esp32s3 --port COM9 --baud 460800 \
 - **Farben:** Schwarz, Weiß, Rot, Gelb (BWRY, Display-ID `f`)
 - **MCU:** ESP32-S3 N8R8 (8 MB Flash, 8 MB PSRAM), USB-C, WLAN+BLE, ohne Akku
 - **Taster / SD:** keine Foto-Taster; SDMMC zunächst ungenutzt
+- **Deep Sleep:** standardmäßig an (eigenes Ladekonzept, kein NeoFrame-Powerbank)
 - **Pinmap (Waveshare-Wiki):** EPD SCLK 12, SDI 13, CS 11, DC 10, RST 9, BUSY 8; EPD3V3_EN GPIO6 aktiv LOW
 - **Factory-Restore:** `firmware/factory/waveshare-154g/`
 
@@ -107,7 +108,7 @@ Nach dem ersten Flashen startet das Gerät im **Access Point Modus**:
 2. **IP-Adresse:** `192.168.4.1`
 3. Verbinden Sie sich mit dem WiFi und öffnen Sie `http://192.168.4.1`
 4. Geben Sie Ihre **WLAN-Zugangsdaten** ein
-5. Geben Sie die **Server-URL** Ihrer microPhotoFrame-Installation ein
+5. Geben Sie die **Kanal-URL** ein: Serverwurzel für den Default-Kanal oder `http://…/c/slug` für einen benannten Kanal. Display-Typ und Show legt die Web-Oberfläche unter Channels fest.
 6. Das Gerät startet neu und verbindet sich mit Ihrem WLAN
 
 ## 🎨 Features
@@ -172,7 +173,7 @@ Ziele wählt man im µGulp-Projektformular (**Target**): `reTerminal E1002`, `Ne
 Gulp filtert `firmware/src` nach `firmware/.generated` (`gulp-mu-build-filter`, `BUILD_ONLY_AT_PLATFORMS`, `mode: remove`) und ruft `pio run -e …` auf.
 
 Board-Header: `firmware/src/board.h` plus `firmware/src/boards/<id>.h`.  
-E1002-Pins stehen nur im Block `reterminal-e1002`. NeoFrame nutzt die offizielle ESP32E6-E01-Pinmap (GDEP073E01, Display-ID `I`), 8 MB PSRAM und nach dem Einschalten 5 Minuten das offene Config-WLAN `microPhotoFrame`. Waveshare 1.54G nutzt GxEPD2_4C / GDEM0154F51H (Display-ID `f`) und die Wiki-Pinmap inkl. EPD-Power GPIO6. Factory-Restore bleibt für das Hersteller-Image.
+E1002-Pins stehen nur im Block `reterminal-e1002`. NeoFrame nutzt die offizielle ESP32E6-E01-Pinmap (GDEP073E01, Display-ID `9`), 8 MB PSRAM und nach dem Einschalten 5 Minuten das offene Config-WLAN `microPhotoFrame`. Waveshare 1.54G nutzt GxEPD2_4C / GDEM0154F51H (Display-ID `f`) und die Wiki-Pinmap inkl. EPD-Power GPIO6. Factory-Restore bleibt für das Hersteller-Image.
 
 Factory-Image bei fehlgeschlagenem Flash: `firmware/factory/<ziel>/factory.bin` (oder `GDEPE073E01.ino.merged.bin` / `*.ino.merged.bin`) und Task **Restore Factory Firmware**.
 
@@ -195,7 +196,7 @@ framework = arduino
 
 ### Display-ID Anpassung
 
-Die Display-ID steht im jeweiligen Board-Header (`DEVICE_DISPLAY_ID`): `I` für E1002/NeoFrame, `f` für Waveshare 1.54G.
+Die Display-ID steht im jeweiligen Board-Header (`DEVICE_DISPLAY_ID`): `9` für E1002/NeoFrame, `f` für Waveshare 1.54G. Dieselbe ID steht im `.ink`-Header und im Kanalordner.
 
 ## 📄 Lizenz
 

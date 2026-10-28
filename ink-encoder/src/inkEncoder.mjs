@@ -33,63 +33,54 @@ const GEOMETRY_ROUND = 1;
 export const DISPLAYS = {
   EINK_NONE_DISPLAY: { id: "", name: "No Display", width: 0, height: 0, colors: [], geometry: GEOMETRY_SQUARE, size: 0 },
   // ═══════════════════════════════════════════════════════════
-  // MONOCHROME (B&W) - IDs: 0-9
+  // MONOCHROME (B&W) - IDs: 0-6, V
   // Basic black & white displays (2 colors)
   // ═══════════════════════════════════════════════════════════
-  EINK_BW_154_SQ_200x200: { id: "0", name: 'B&W 1.54" · 200×200', width: 200, height: 200, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 1.54 },
+  EINK_BW_154_SQ_200x200: { id: "0", name: 'B&W 1.54" · 200×200 · 2 gray', width: 200, height: 200, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 1.54 },
   EINK_BW_213_SQ_250x122: { id: "1", name: 'B&W 2.13" · 250×122', width: 250, height: 122, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 2.13 },
   EINK_BW_290_SQ_296x128: { id: "2", name: 'B&W 2.9" · 296×128', width: 296, height: 128, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 2.9 },
   EINK_BW_420_SQ_400x300: { id: "3", name: 'B&W 4.2" · 400×300', width: 400, height: 300, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 4.2 },
-  EINK_BW_583_SQ_648x480: { id: "4", name: 'B&W 5.83" · 648×480', width: 648, height: 480, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 5.83 },
-  EINK_BW_750_SQ_800x480: { id: "5", name: 'B&W 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 7.5 },
-  EINK_BW_1030_SQ_1872x1404: { id: "6", name: 'B&W 10.3" · 1872×1404 · Carta', width: 1872, height: 1404, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 10.3 },
-  EINK_BW_1330_SQ_2200x1650: { id: "7", name: 'B&W 13.3" · 2200×1650 · Fina', width: 2200, height: 1650, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 13.3 },
-  // ═══════════════════════════════════════════════════════════
-  // GRAYSCALE (4-LEVEL) - IDs: A-F
-  // 4-level grayscale displays (White, Light Gray, Dark Gray, Black)
-  // ═══════════════════════════════════════════════════════════
-  EINK_GRAY4_213_SQ_250x122: { id: "A", name: 'Gray4 2.13" · 250×122', width: 250, height: 122, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 2.13 },
-  EINK_GRAY4_397_SQ_800x480: { id: "B", name: 'Gray4 3.97" · 800×480', width: 800, height: 480, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 3.97 },
-  EINK_GRAY4_420_SQ_400x300: { id: "C", name: 'Gray4 4.2" · 400×300', width: 400, height: 300, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 4.2 },
-  EINK_GRAY4_750_SQ_800x480: { id: "D", name: 'Gray4 7.5" · 800×480 · reTerminal E1001', width: 800, height: 480, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 7.5 },
-  EINK_GRAY4_1030_SQ_1872x1404: { id: "E", name: 'Gray4 10.3" · 1872×1404', width: 1872, height: 1404, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 10.3 },
-  // ═══════════════════════════════════════════════════════════
-  // SPECTRA 6 (FULL COLOR) - IDs: G-P
-  // 6-color displays (Black, White, Red, Yellow, Blue, Green)
-  // ═══════════════════════════════════════════════════════════
-  EINK_SPECTRA6_169_RD_400x400: { id: "G", name: 'Spectra 6 · 1.69" Round · 400×400', width: 400, height: 400, colors: COLORS_E6, geometry: GEOMETRY_ROUND, size: 1.69 },
-  EINK_SPECTRA6_400_SQ_600x400: { id: "H", name: 'Spectra 6 · 4.0" · 600×400', width: 600, height: 400, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 4.0 },
-  EINK_SPECTRA6_730_SQ_800x480: { id: "I", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002', width: 800, height: 480, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 7.3 },
-  EINK_SPECTRA6_814_SQ_1024x576: { id: "J", name: 'Spectra 6 · 8.14" · 1024×576', width: 1024, height: 576, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 8.14 },
-  EINK_SPECTRA6_1330_SQ_1600x1200: { id: "K", name: 'Spectra 6 · 13.3" · 1600×1200', width: 1600, height: 1200, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 13.3 },
-  EINK_SPECTRA6_2530_SQ_3200x1800: { id: "L", name: 'Spectra 6 · 25.3" · 3200×1800 · Signage', width: 3200, height: 1800, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 25.3 },
-  EINK_SPECTRA6_2850_SQ_2160x3060: { id: "M", name: 'Spectra 6 · 28.5" · 2160×3060 · Poster', width: 2160, height: 3060, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 28.5 },
-  EINK_SPECTRA6_3150_SQ_2560x1440: { id: "N", name: 'Spectra 6 · 31.5" · 2560×1440', width: 2560, height: 1440, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 31.5 },
-  EINK_SPECTRA6_3200_SQ_2560x1440: { id: "O", name: 'Spectra 6 · 32.0" · 2560×1440', width: 2560, height: 1440, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 32.0 },
-  EINK_SPECTRA6_4300_SQ_3840x2160: { id: "P", name: 'Spectra 6 · 43.0" · 3840×2160 · UHD', width: 3840, height: 2160, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 43.0 },
-  // ═══════════════════════════════════════════════════════════
-  // SPECTRA 3-COLOR (BWR/BWY) - IDs: Q-Z
-  // 3-color displays (Black, White, Red) or (Black, White, Yellow)
-  // ═══════════════════════════════════════════════════════════
-  EINK_BWR_154_SQ_200x200: { id: "Q", name: 'Spectra BWR · 1.54" · 200×200', width: 200, height: 200, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 1.54 },
-  EINK_BWR_213_SQ_250x122: { id: "R", name: 'Spectra BWR · 2.13" · 250×122', width: 250, height: 122, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.13 },
-  EINK_BWR_270_SQ_264x176: { id: "S", name: 'Spectra BWR · 2.7" · 264×176', width: 264, height: 176, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.7 },
-  EINK_BWR_290_SQ_296x128: { id: "T", name: 'Spectra BWR · 2.9" · 296×128', width: 296, height: 128, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.9 },
-  EINK_BWR_420_SQ_400x300: { id: "U", name: 'Spectra BWR · 4.2" · 400×300', width: 400, height: 300, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 4.2 },
-  EINK_BWR_583_SQ_648x480: { id: "V", name: 'Spectra BWR · 5.83" · 648×480', width: 648, height: 480, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 5.83 },
-  EINK_BWR_750_SQ_800x480: { id: "W", name: 'Spectra BWR · 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 7.5 },
-  EINK_BWY_213_SQ_250x122: { id: "X", name: 'Spectra BWY · 2.13" · 250×122', width: 250, height: 122, colors: COLORS_BWY, geometry: GEOMETRY_SQUARE, size: 2.13 },
-  EINK_BWR_1248_SQ_1304x984: { id: "Y", name: 'Spectra BWR · 12.48" · 1304×984', width: 1304, height: 984, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 12.48 },
-  // ═══════════════════════════════════════════════════════════
-  // SPECTRA 4-COLOR (BWRY) - IDs: a-f
-  // Spectra 3100: 4-color displays (Black, White, Red, Yellow)
-  // ═══════════════════════════════════════════════════════════
-  EINK_BWRY_213_SQ_212x104: { id: "a", name: 'Spectra 3100 · 2.13" · 212×104', width: 212, height: 104, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.13 },
-  EINK_BWRY_266_SQ_296x152: { id: "b", name: 'Spectra 3100 · 2.66" · 296×152', width: 296, height: 152, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.66 },
-  EINK_BWRY_300_SQ_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168', width: 400, height: 168, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 3.0 },
-  EINK_BWRY_420_SQ_400x300: { id: "d", name: 'Spectra 3100 · 4.2" · 400×300', width: 400, height: 300, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 4.2 },
-  EINK_BWRY_750_SQ_800x480: { id: "e", name: 'Spectra 3100 · 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 7.5 },
-  EINK_BWRY_154_SQ_200x200: { id: "f", name: 'Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)', width: 200, height: 200, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 1.54 },
+  EINK_BW_750_SQ_800x480: { id: "4", name: 'B&W 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 7.5 },
+  EINK_BW_1030_SQ_1872x1404: { id: "5", name: 'B&W 10.3" · 1872×1404 · Carta', width: 1872, height: 1404, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 10.3 },
+  EINK_BW_1330_SQ_2200x1650: { id: "6", name: 'B&W 13.3" · 2200×1650 · Fina', width: 2200, height: 1650, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 13.3 },
+  EINK_BW_583_SQ_648x480: { id: "V", name: 'B&W 5.83" · 648×480', width: 648, height: 480, colors: COLORS_BW, geometry: GEOMETRY_SQUARE, size: 5.83 },
+  EINK_SPECTRA6_169_RD_400x400: { id: "7", name: 'Spectra 6 · 1.69" Round · 400×400', width: 400, height: 400, colors: COLORS_E6, geometry: GEOMETRY_ROUND, size: 1.69 },
+  EINK_SPECTRA6_400_SQ_600x400: { id: "8", name: 'Spectra 6 · 4.0" · 600×400', width: 600, height: 400, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 4.0 },
+  EINK_SPECTRA6_730_SQ_800x480: { id: "9", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame', width: 800, height: 480, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 7.3 },
+  EINK_SPECTRA6_814_SQ_1024x576: { id: "A", name: 'Spectra 6 · 8.14" · 1024×576', width: 1024, height: 576, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 8.14 },
+  EINK_SPECTRA6_1330_SQ_1600x1200: { id: "B", name: 'Spectra 6 · 13.3" · 1600×1200', width: 1600, height: 1200, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 13.3 },
+  EINK_SPECTRA6_2530_SQ_3200x1800: { id: "C", name: 'Spectra 6 · 25.3" · 3200×1800 · Signage', width: 3200, height: 1800, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 25.3 },
+  EINK_SPECTRA6_2850_SQ_2160x3060: { id: "D", name: 'Spectra 6 · 28.5" · 2160×3060 · Poster', width: 2160, height: 3060, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 28.5 },
+  EINK_SPECTRA6_3150_SQ_2560x1440: { id: "E", name: 'Spectra 6 · 31.5" · 2560×1440', width: 2560, height: 1440, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 31.5 },
+  EINK_SPECTRA6_3200_SQ_2560x1440: { id: "F", name: 'Spectra 6 · 32.0" · 2560×1440', width: 2560, height: 1440, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 32.0 },
+  EINK_SPECTRA6_4300_SQ_3840x2160: { id: "G", name: 'Spectra 6 · 43.0" · 3840×2160 · UHD', width: 3840, height: 2160, colors: COLORS_E6, geometry: GEOMETRY_SQUARE, size: 43.0 },
+  EINK_BWR_154_SQ_200x200: { id: "H", name: 'Spectra BWR · 1.54" · 200×200', width: 200, height: 200, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 1.54 },
+  EINK_BWR_213_SQ_250x122: { id: "I", name: 'Spectra BWR · 2.13" · 250×122', width: 250, height: 122, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.13 },
+  EINK_BWR_270_SQ_264x176: { id: "J", name: 'Spectra BWR · 2.7" · 264×176', width: 264, height: 176, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.7 },
+  EINK_BWR_290_SQ_296x128: { id: "K", name: 'Spectra BWR · 2.9" · 296×128', width: 296, height: 128, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 2.9 },
+  EINK_BWR_420_SQ_400x300: { id: "L", name: 'Spectra BWR · 4.2" · 400×300', width: 400, height: 300, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 4.2 },
+  EINK_BWR_583_SQ_648x480: { id: "M", name: 'Spectra BWR · 5.83" · 648×480', width: 648, height: 480, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 5.83 },
+  EINK_BWR_750_SQ_800x480: { id: "N", name: 'Spectra BWR · 7.5" · 800×480', width: 800, height: 480, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 7.5 },
+  EINK_BWY_213_SQ_250x122: { id: "O", name: 'Spectra BWY · 2.13" · 250×122', width: 250, height: 122, colors: COLORS_BWY, geometry: GEOMETRY_SQUARE, size: 2.13 },
+  EINK_BWR_1248_SQ_1304x984: { id: "P", name: 'Spectra BWR · 12.48" · 1304×984', width: 1304, height: 984, colors: COLORS_BWR, geometry: GEOMETRY_SQUARE, size: 12.48 },
+  EINK_GRAY4_213_SQ_250x122: { id: "Q", name: 'Gray4 2.13" · 250×122', width: 250, height: 122, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 2.13 },
+  EINK_GRAY4_397_SQ_800x480: { id: "R", name: 'Gray4 3.97" · 800×480', width: 800, height: 480, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 3.97 },
+  EINK_GRAY4_420_SQ_400x300: { id: "S", name: 'Gray4 4.2" · 400×300', width: 400, height: 300, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 4.2 },
+  EINK_GRAY4_750_SQ_800x480: { id: "T", name: 'Gray4 7.5" · 800×480 · reTerminal E1001', width: 800, height: 480, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 7.5 },
+  EINK_GRAY4_1030_SQ_1872x1404: { id: "U", name: 'Gray4 10.3" · 1872×1404', width: 1872, height: 1404, colors: COLORS_GRAY4, geometry: GEOMETRY_SQUARE, size: 10.3 },
+  EINK_BWRY_266_SQ_296x152: { id: "b", name: 'Spectra 3100 · 2.66" · 296×152 · EL026TS5', width: 296, height: 152, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.66 },
+  EINK_BWRY_300_SQ_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168 · EL030TS1', width: 400, height: 168, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 3.0 },
+  EINK_BWRY_164_SQ_168x168: { id: "g", name: 'Spectra 3100 · 1.64" · 168×168 · EL016TS1', width: 168, height: 168, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 1.64 },
+  EINK_BWRY_236_SQ_296x168: { id: "h", name: 'Spectra 3100 · 2.36" · 296×168 · EL024TS5', width: 296, height: 168, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.36 },
+  EINK_BWRY_437_SQ_512x368: { id: "i", name: 'Spectra 3100 · 4.37" · 512×368 · EB2000-DDA', width: 512, height: 368, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 4.37 },
+  EINK_BWRY_565_SQ_600x448: { id: "j", name: 'Spectra 3100 · 5.65" · 600×448 · EL057TS1', width: 600, height: 448, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 5.65 },
+  EINK_BWRY_730_SQ_800x480: { id: "k", name: 'Spectra 3100 · 7.3" · 800×480 · EB2000-GCA', width: 800, height: 480, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 7.3 },
+  EINK_BWRY_814_SQ_1024x576: { id: "l", name: 'Spectra 3100 · 8.14" · 1024×576 · EL081TS1', width: 1024, height: 576, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 8.14 },
+  EINK_BWRY_970_SQ_960x672: { id: "m", name: 'Spectra 3100 · 9.7" · 960×672 · EL097TS2', width: 960, height: 672, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 9.7 },
+  EINK_BWRY_213_SQ_212x104: { id: "a", name: 'Waveshare e-Paper (G) · 2.13" · 212×104 · EPD_2in13g', width: 212, height: 104, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 2.13 },
+  EINK_BWRY_420_SQ_400x300: { id: "d", name: 'Waveshare e-Paper (G) · 4.2" · 400×300 · EPD_4in2g', width: 400, height: 300, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 4.2 },
+  EINK_BWRY_750_SQ_800x480: { id: "e", name: 'Waveshare e-Paper (G) · 7.5" · 800×480 · EPD_7in5g', width: 800, height: 480, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 7.5 },
+  EINK_BWRY_154_SQ_200x200: { id: "f", name: 'Waveshare e-Paper (G) · 1.54" · 200×200 · EPD_1in54g', width: 200, height: 200, colors: COLORS_BWRY, geometry: GEOMETRY_SQUARE, size: 1.54 },
   // ═══════════════════════════════════════════════════════════
   // FUTURE/NEW MODELS - IDs: g-z (Reserved)
   // Space for upcoming technologies:
@@ -106,40 +97,47 @@ export const DISPLAY_LONG_ID_BY_SHORT_ID = {
   "1": "EINK_BW_213_SQ_250x122",
   "2": "EINK_BW_290_SQ_296x128",
   "3": "EINK_BW_420_SQ_400x300",
-  "4": "EINK_BW_583_SQ_648x480",
-  "5": "EINK_BW_750_SQ_800x480",
-  "6": "EINK_BW_1030_SQ_1872x1404",
-  "7": "EINK_BW_1330_SQ_2200x1650",
-  "A": "EINK_GRAY4_213_SQ_250x122",
-  "B": "EINK_GRAY4_397_SQ_800x480",
-  "C": "EINK_GRAY4_420_SQ_400x300",
-  "D": "EINK_GRAY4_750_SQ_800x480",
-  "E": "EINK_GRAY4_1030_SQ_1872x1404",
-  "G": "EINK_SPECTRA6_169_RD_400x400",
-  "H": "EINK_SPECTRA6_400_SQ_600x400",
-  "I": "EINK_SPECTRA6_730_SQ_800x480",
-  "J": "EINK_SPECTRA6_814_SQ_1024x576",
-  "K": "EINK_SPECTRA6_1330_SQ_1600x1200",
-  "L": "EINK_SPECTRA6_2530_SQ_3200x1800",
-  "M": "EINK_SPECTRA6_2850_SQ_2160x3060",
-  "N": "EINK_SPECTRA6_3150_SQ_2560x1440",
-  "O": "EINK_SPECTRA6_3200_SQ_2560x1440",
-  "P": "EINK_SPECTRA6_4300_SQ_3840x2160",
-  "Q": "EINK_BWR_154_SQ_200x200",
-  "R": "EINK_BWR_213_SQ_250x122",
-  "S": "EINK_BWR_270_SQ_264x176",
-  "T": "EINK_BWR_290_SQ_296x128",
-  "U": "EINK_BWR_420_SQ_400x300",
-  "V": "EINK_BWR_583_SQ_648x480",
-  "W": "EINK_BWR_750_SQ_800x480",
-  "X": "EINK_BWY_213_SQ_250x122",
-  "Y": "EINK_BWR_1248_SQ_1304x984",
+  "4": "EINK_BW_750_SQ_800x480",
+  "5": "EINK_BW_1030_SQ_1872x1404",
+  "6": "EINK_BW_1330_SQ_2200x1650",
+  "7": "EINK_SPECTRA6_169_RD_400x400",
+  "8": "EINK_SPECTRA6_400_SQ_600x400",
+  "9": "EINK_SPECTRA6_730_SQ_800x480",
+  "A": "EINK_SPECTRA6_814_SQ_1024x576",
+  "B": "EINK_SPECTRA6_1330_SQ_1600x1200",
+  "C": "EINK_SPECTRA6_2530_SQ_3200x1800",
+  "D": "EINK_SPECTRA6_2850_SQ_2160x3060",
+  "E": "EINK_SPECTRA6_3150_SQ_2560x1440",
+  "F": "EINK_SPECTRA6_3200_SQ_2560x1440",
+  "G": "EINK_SPECTRA6_4300_SQ_3840x2160",
+  "H": "EINK_BWR_154_SQ_200x200",
+  "I": "EINK_BWR_213_SQ_250x122",
+  "J": "EINK_BWR_270_SQ_264x176",
+  "K": "EINK_BWR_290_SQ_296x128",
+  "L": "EINK_BWR_420_SQ_400x300",
+  "M": "EINK_BWR_583_SQ_648x480",
+  "N": "EINK_BWR_750_SQ_800x480",
+  "O": "EINK_BWY_213_SQ_250x122",
+  "P": "EINK_BWR_1248_SQ_1304x984",
+  "Q": "EINK_GRAY4_213_SQ_250x122",
+  "R": "EINK_GRAY4_397_SQ_800x480",
+  "S": "EINK_GRAY4_420_SQ_400x300",
+  "T": "EINK_GRAY4_750_SQ_800x480",
+  "U": "EINK_GRAY4_1030_SQ_1872x1404",
+  "V": "EINK_BW_583_SQ_648x480",
   "a": "EINK_BWRY_213_SQ_212x104",
   "b": "EINK_BWRY_266_SQ_296x152",
   "c": "EINK_BWRY_300_SQ_400x168",
   "d": "EINK_BWRY_420_SQ_400x300",
   "e": "EINK_BWRY_750_SQ_800x480",
-  "f": "EINK_BWRY_154_SQ_200x200"
+  "f": "EINK_BWRY_154_SQ_200x200",
+  "g": "EINK_BWRY_164_SQ_168x168",
+  "h": "EINK_BWRY_236_SQ_296x168",
+  "i": "EINK_BWRY_437_SQ_512x368",
+  "j": "EINK_BWRY_565_SQ_600x448",
+  "k": "EINK_BWRY_730_SQ_800x480",
+  "l": "EINK_BWRY_814_SQ_1024x576",
+  "m": "EINK_BWRY_970_SQ_960x672"
 };
 
 /**
@@ -153,12 +151,27 @@ export function GetDisplayByLongId(_displayLongId) {
 
 /**
  * Get display definition by ID
- * @param {string} _displayShortId - Display ID (e.g., "I", "A", "7")
+ * @param {string} _displayShortId - Display ID (e.g., "9", "T", "f")
  * @returns {Object|null} Display definition or null if not found
  */
 export function GetDisplayByShortId(_displayShortId) {
   let displayLongId = DISPLAY_LONG_ID_BY_SHORT_ID[_displayShortId];
   return DISPLAYS[displayLongId] || null;
+}
+
+/**
+ * URL/directory display id is the same short id as the .ink header.
+ */
+export function GetPathDisplayId(_displayShortId) {
+  const display = GetDisplayByShortId(_displayShortId);
+  return display ? display.id : '';
+}
+
+/**
+ * Resolve a URL/directory display id. Same table as the short id.
+ */
+export function GetDisplayByPathId(_pathId) {
+  return GetDisplayByShortId(String(_pathId == null ? '' : _pathId));
 }
 
 /**
@@ -171,7 +184,7 @@ export function GetAllDisplays() {
 
 /**
  * Get encoding options from display ID
- * @param {string} _displayShortId - Display ID (e.g., "I", "A", "7")
+ * @param {string} _displayShortId - Display ID (e.g., "9", "T", "f")
  * @param {Object} _overrides - Optional overrides for default options
  * @returns {Object} Encoding options object
  */
@@ -510,7 +523,7 @@ function GetPixelIndices(imgData, palette, w, h) {
  * @param {Array<string>} options.colors - Array of hex colors (e.g., ["#FFFFFF", "#000000", "#FF0000"])
  * @param {number} options.width - Target width
  * @param {number} options.height - Target height
- * @param {string} options.displayId - Display ID character (e.g., "I" für Spectra 6 · 7,3")
+ * @param {string} options.displayId - Display ID character (e.g., "9" für Spectra 6 · 7,3")
  * @param {boolean} options.isRound - Whether display is round (default: false)
  * @param {string} options.dither - Dithering type: "floyd", "bayer", or "none" (default: "floyd")
  * @param {number} options.orientation - Orientation: 0=Quer (Breite×Höhe z.B. 800×480), 1=Hochkant (480×800)
@@ -1008,7 +1021,7 @@ export async function EncodeInkFromConfig(inputPath, configPath, outputPath = nu
 /**
  * Encode PNG image to .ink format using display ID
  * @param {string|Buffer} inputPath - Path to input PNG image or Buffer
- * @param {string} displayId - Display ID (e.g., "I", "A", "7")
+ * @param {string} displayId - Display ID (e.g., "9", "T", "f")
  * @param {Object} overrides - Optional overrides for default options
  * @param {string} outputPath - Path to output .ink file (optional, if not provided, returns Buffer)
  * @returns {Promise<Uint8Array>} Encoded .ink file data
@@ -1035,6 +1048,8 @@ export default {
   EncodeInkFromDisplayId,
   GetDisplayByLongId,
   GetDisplayByShortId,
+  GetDisplayByPathId,
+  GetPathDisplayId,
   GetAllDisplays,
   GetOptionsFromDisplayId,
   DISPLAYS,

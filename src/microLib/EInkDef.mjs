@@ -27,76 +27,77 @@ export default class EInkDef {
     EINK_NONE_DISPLAY: { id: "", name: "No Display", width: 0, height: 0, colors: [], geometry: this.GEOMETRY_SQUARE, size: 0 },
 
     // ═══════════════════════════════════════════════════════════
-    // MONOCHROME (B&W) - IDs: 0-9
+    // MONOCHROME (B&W) - IDs: 0-6, V
     // Basic black & white displays (2 colors)
     // ═══════════════════════════════════════════════════════════
-    EINK_BW_154_sq_200x200: { id: "0", name: 'B&W 1.54" · 200×200', width: 200, height: 200, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
+    EINK_BW_154_sq_200x200: { id: "0", name: 'B&W 1.54" · 200×200 · 2 gray', width: 200, height: 200, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
     EINK_BW_213_sq_250x122: { id: "1", name: 'B&W 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
     EINK_BW_290_sq_296x128: { id: "2", name: 'B&W 2.9" · 296×128', width: 296, height: 128, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 2.9 },
     EINK_BW_420_sq_400x300: { id: "3", name: 'B&W 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
-    EINK_BW_583_sq_648x480: { id: "4", name: 'B&W 5.83" · 648×480', width: 648, height: 480, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 5.83 },
-    EINK_BW_750_sq_800x480: { id: "5", name: 'B&W 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
-    EINK_BW_1030_sq_1872x1404: { id: "6", name: 'B&W 10.3" · 1872×1404 · Carta', width: 1872, height: 1404, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 10.3 },
-    EINK_BW_1330_sq_2200x1650: { id: "7", name: 'B&W 13.3" · 2200×1650 · Fina', width: 2200, height: 1650, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 13.3 },
+    EINK_BW_750_sq_800x480: { id: "4", name: 'B&W 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
+    EINK_BW_1030_sq_1872x1404: { id: "5", name: 'B&W 10.3" · 1872×1404 · Carta', width: 1872, height: 1404, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 10.3 },
+    EINK_BW_1330_sq_2200x1650: { id: "6", name: 'B&W 13.3" · 2200×1650 · Fina', width: 2200, height: 1650, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 13.3 },
+    EINK_BW_583_sq_648x480: { id: "V", name: 'B&W 5.83" · 648×480', width: 648, height: 480, colors: this.#COLORS_BW, geometry: this.GEOMETRY_SQUARE, size: 5.83 },
 
     // ═══════════════════════════════════════════════════════════
-    // GRAYSCALE (4-LEVEL) - IDs: A-F
-    // 4-level grayscale displays (White, Light Gray, Dark Gray, Black)
+    // SPECTRA 6 (FULL COLOR) - IDs: 7-G
     // ═══════════════════════════════════════════════════════════
-    EINK_GRAY4_213_sq_250x122: { id: "A", name: 'Gray4 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
-    EINK_GRAY4_397_sq_800x480: { id: "B", name: 'Gray4 3.97" · 800×480', width: 800, height: 480, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 3.97 },
-    EINK_GRAY4_420_sq_400x300: { id: "C", name: 'Gray4 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
-    EINK_GRAY4_750_sq_800x480: { id: "D", name: 'Gray4 7.5" · 800×480 · reTerminal E1001', width: 800, height: 480, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
-    EINK_GRAY4_1030_sq_1872x1404: { id: "E", name: 'Gray4 10.3" · 1872×1404', width: 1872, height: 1404, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 10.3 },
+    EINK_SPECTRA6_169_rd_400x400: { id: "7", name: 'Spectra 6 · 1.69" Round · 400×400', width: 400, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_ROUND, size: 1.69 },
+    EINK_SPECTRA6_400_sq_600x400: { id: "8", name: 'Spectra 6 · 4.0" · 600×400', width: 600, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 4.0 },
+    EINK_SPECTRA6_730_sq_800x480: { id: "9", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame', width: 800, height: 480, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 7.3 },
+    EINK_SPECTRA6_814_sq_1024x576: { id: "A", name: 'Spectra 6 · 8.14" · 1024×576', width: 1024, height: 576, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 8.14 },
+    EINK_SPECTRA6_1330_sq_1600x1200: { id: "B", name: 'Spectra 6 · 13.3" · 1600×1200', width: 1600, height: 1200, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 13.3 },
+    EINK_SPECTRA6_2530_sq_3200x1800: { id: "C", name: 'Spectra 6 · 25.3" · 3200×1800 · Signage', width: 3200, height: 1800, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 25.3 },
+    EINK_SPECTRA6_2850_sq_2160x3060: { id: "D", name: 'Spectra 6 · 28.5" · 2160×3060 · Poster', width: 2160, height: 3060, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 28.5 },
+    EINK_SPECTRA6_3150_sq_2560x1440: { id: "E", name: 'Spectra 6 · 31.5" · 2560×1440', width: 2560, height: 1440, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 31.5 },
+    EINK_SPECTRA6_3200_sq_2560x1440: { id: "F", name: 'Spectra 6 · 32.0" · 2560×1440', width: 2560, height: 1440, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 32.0 },
+    EINK_SPECTRA6_4300_sq_3840x2160: { id: "G", name: 'Spectra 6 · 43.0" · 3840×2160 · UHD', width: 3840, height: 2160, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 43.0 },
 
     // ═══════════════════════════════════════════════════════════
-    // SPECTRA 6 (FULL COLOR) - IDs: G-P
-    // 6-color displays (Black, White, Red, Yellow, Blue, Green)
+    // SPECTRA 3-COLOR (BWR/BWY) - IDs: H-P
     // ═══════════════════════════════════════════════════════════
-    EINK_SPECTRA6_169_rd_400x400: { id: "G", name: 'Spectra 6 · 1.69" Round · 400×400', width: 400, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_ROUND, size: 1.69 },
-    EINK_SPECTRA6_400_sq_600x400: { id: "H", name: 'Spectra 6 · 4.0" · 600×400', width: 600, height: 400, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 4.0 },
-    EINK_SPECTRA6_730_sq_800x480: { id: "I", name: 'Spectra 6 · 7.3" · 800×480 · reTerminal E1002 / NeoFrame', width: 800, height: 480, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 7.3 },
-    EINK_SPECTRA6_814_sq_1024x576: { id: "J", name: 'Spectra 6 · 8.14" · 1024×576', width: 1024, height: 576, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 8.14 },
-    EINK_SPECTRA6_1330_sq_1600x1200: { id: "K", name: 'Spectra 6 · 13.3" · 1600×1200', width: 1600, height: 1200, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 13.3 },
-    EINK_SPECTRA6_2530_sq_3200x1800: { id: "L", name: 'Spectra 6 · 25.3" · 3200×1800 · Signage', width: 3200, height: 1800, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 25.3 },
-    EINK_SPECTRA6_2850_sq_2160x3060: { id: "M", name: 'Spectra 6 · 28.5" · 2160×3060 · Poster', width: 2160, height: 3060, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 28.5 },
-    EINK_SPECTRA6_3150_sq_2560x1440: { id: "N", name: 'Spectra 6 · 31.5" · 2560×1440', width: 2560, height: 1440, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 31.5 },
-    EINK_SPECTRA6_3200_sq_2560x1440: { id: "O", name: 'Spectra 6 · 32.0" · 2560×1440', width: 2560, height: 1440, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 32.0 },
-    EINK_SPECTRA6_4300_sq_3840x2160: { id: "P", name: 'Spectra 6 · 43.0" · 3840×2160 · UHD', width: 3840, height: 2160, colors: this.#COLORS_E6, geometry: this.GEOMETRY_SQUARE, size: 43.0 },
+    EINK_BWR_154_sq_200x200: { id: "H", name: 'Spectra BWR · 1.54" · 200×200', width: 200, height: 200, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
+    EINK_BWR_213_sq_250x122: { id: "I", name: 'Spectra BWR · 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
+    EINK_BWR_270_sq_264x176: { id: "J", name: 'Spectra BWR · 2.7" · 264×176', width: 264, height: 176, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.7 },
+    EINK_BWR_290_sq_296x128: { id: "K", name: 'Spectra BWR · 2.9" · 296×128', width: 296, height: 128, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.9 },
+    EINK_BWR_420_sq_400x300: { id: "L", name: 'Spectra BWR · 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
+    EINK_BWR_583_sq_648x480: { id: "M", name: 'Spectra BWR · 5.83" · 648×480', width: 648, height: 480, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 5.83 },
+    EINK_BWR_750_sq_800x480: { id: "N", name: 'Spectra BWR · 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
+    EINK_BWY_213_sq_250x122: { id: "O", name: 'Spectra BWY · 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_BWY, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
+    EINK_BWR_1248_sq_1304x984: { id: "P", name: 'Spectra BWR · 12.48" · 1304×984', width: 1304, height: 984, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 12.48 },
 
     // ═══════════════════════════════════════════════════════════
-    // SPECTRA 3-COLOR (BWR/BWY) - IDs: Q-Z
-    // 3-color displays (Black, White, Red) or (Black, White, Yellow)
+    // GRAYSCALE (4-LEVEL) - IDs: Q-U
     // ═══════════════════════════════════════════════════════════
-    EINK_BWR_154_sq_200x200: { id: "Q", name: 'Spectra BWR · 1.54" · 200×200', width: 200, height: 200, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
-    EINK_BWR_213_sq_250x122: { id: "R", name: 'Spectra BWR · 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
-    EINK_BWR_270_sq_264x176: { id: "S", name: 'Spectra BWR · 2.7" · 264×176', width: 264, height: 176, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.7 },
-    EINK_BWR_290_sq_296x128: { id: "T", name: 'Spectra BWR · 2.9" · 296×128', width: 296, height: 128, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 2.9 },
-    EINK_BWR_420_sq_400x300: { id: "U", name: 'Spectra BWR · 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
-    EINK_BWR_583_sq_648x480: { id: "V", name: 'Spectra BWR · 5.83" · 648×480', width: 648, height: 480, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 5.83 },
-    EINK_BWR_750_sq_800x480: { id: "W", name: 'Spectra BWR · 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
-    EINK_BWY_213_sq_250x122: { id: "X", name: 'Spectra BWY · 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_BWY, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
-    EINK_BWR_1248_sq_1304x984: { id: "Y", name: 'Spectra BWR · 12.48" · 1304×984', width: 1304, height: 984, colors: this.#COLORS_BWR, geometry: this.GEOMETRY_SQUARE, size: 12.48 },
+    EINK_GRAY4_213_sq_250x122: { id: "Q", name: 'Gray4 2.13" · 250×122', width: 250, height: 122, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
+    EINK_GRAY4_397_sq_800x480: { id: "R", name: 'Gray4 3.97" · 800×480', width: 800, height: 480, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 3.97 },
+    EINK_GRAY4_420_sq_400x300: { id: "S", name: 'Gray4 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
+    EINK_GRAY4_750_sq_800x480: { id: "T", name: 'Gray4 7.5" · 800×480 · reTerminal E1001', width: 800, height: 480, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
+    EINK_GRAY4_1030_sq_1872x1404: { id: "U", name: 'Gray4 10.3" · 1872×1404', width: 1872, height: 1404, colors: this.#COLORS_GRAY4, geometry: this.GEOMETRY_SQUARE, size: 10.3 },
 
     // ═══════════════════════════════════════════════════════════
-    // SPECTRA 4-COLOR (BWRY) - IDs: a-f
-    // Spectra 3100: 4-color displays (Black, White, Red, Yellow)
+    // E Ink Spectra 3100 (4-COLOR BWRY)
+    // Official catalog https://www.eink.com/product/epaper — no 1.54" 3100.
+    // Closest small 3100: 1.64" 168×168. Existing ids b/c stay.
     // ═══════════════════════════════════════════════════════════
-    EINK_BWRY_213_sq_212x104: { id: "a", name: 'Spectra 3100 · 2.13" · 212×104', width: 212, height: 104, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
-    EINK_BWRY_266_sq_296x152: { id: "b", name: 'Spectra 3100 · 2.66" · 296×152', width: 296, height: 152, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 2.66 },
-    EINK_BWRY_300_sq_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168', width: 400, height: 168, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 3.0 },
-    EINK_BWRY_420_sq_400x300: { id: "d", name: 'Spectra 3100 · 4.2" · 400×300', width: 400, height: 300, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
-    EINK_BWRY_750_sq_800x480: { id: "e", name: 'Spectra 3100 · 7.5" · 800×480', width: 800, height: 480, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
-    EINK_BWRY_154_sq_200x200: { id: "f", name: 'Spectra 3100 · 1.54" · 200×200 · Waveshare ESP32-S3 e-Paper (G)', width: 200, height: 200, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
+    EINK_BWRY_266_sq_296x152: { id: "b", name: 'Spectra 3100 · 2.66" · 296×152 · EL026TS5', width: 296, height: 152, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 2.66 },
+    EINK_BWRY_300_sq_400x168: { id: "c", name: 'Spectra 3100 · 3.0" · 400×168 · EL030TS1', width: 400, height: 168, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 3.0 },
+    EINK_BWRY_164_sq_168x168: { id: "g", name: 'Spectra 3100 · 1.64" · 168×168 · EL016TS1', width: 168, height: 168, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 1.64 },
+    EINK_BWRY_236_sq_296x168: { id: "h", name: 'Spectra 3100 · 2.36" · 296×168 · EL024TS5', width: 296, height: 168, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 2.36 },
+    EINK_BWRY_437_sq_512x368: { id: "i", name: 'Spectra 3100 · 4.37" · 512×368 · EB2000-DDA', width: 512, height: 368, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 4.37 },
+    EINK_BWRY_565_sq_600x448: { id: "j", name: 'Spectra 3100 · 5.65" · 600×448 · EL057TS1', width: 600, height: 448, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 5.65 },
+    EINK_BWRY_730_sq_800x480: { id: "k", name: 'Spectra 3100 · 7.3" · 800×480 · EB2000-GCA', width: 800, height: 480, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 7.3 },
+    EINK_BWRY_814_sq_1024x576: { id: "l", name: 'Spectra 3100 · 8.14" · 1024×576 · EL081TS1', width: 1024, height: 576, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 8.14 },
+    EINK_BWRY_970_sq_960x672: { id: "m", name: 'Spectra 3100 · 9.7" · 960×672 · EL097TS2', width: 960, height: 672, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 9.7 },
 
     // ═══════════════════════════════════════════════════════════
-    // FUTURE/NEW MODELS - IDs: g-z (Reserved)
-    // Space for upcoming technologies:
-    // - ACeP (Advanced Color ePaper, 8 colors)
-    // - Gallery Palette 3 (7 colors)
-    // - 16-level Grayscale
-    // - Future innovations
+    // Waveshare / Good Display e-Paper (G) 4-COLOR BWRY
+    // Not Spectra 3100. Dev board SKU 28766 = 1.54" (G) 200×200 EPD_1in54g.
     // ═══════════════════════════════════════════════════════════
+    EINK_BWRY_213_sq_212x104: { id: "a", name: 'Waveshare e-Paper (G) · 2.13" · 212×104 · EPD_2in13g', width: 212, height: 104, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 2.13 },
+    EINK_BWRY_420_sq_400x300: { id: "d", name: 'Waveshare e-Paper (G) · 4.2" · 400×300 · EPD_4in2g', width: 400, height: 300, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 4.2 },
+    EINK_BWRY_750_sq_800x480: { id: "e", name: 'Waveshare e-Paper (G) · 7.5" · 800×480 · EPD_7in5g', width: 800, height: 480, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 7.5 },
+    EINK_BWRY_154_sq_200x200: { id: "f", name: 'Waveshare e-Paper (G) · 1.54" · 200×200 · EPD_1in54g', width: 200, height: 200, colors: this.#COLORS_BWRY, geometry: this.GEOMETRY_SQUARE, size: 1.54 },
 };
 
   static LANDSCAPE = 0;
@@ -130,8 +131,7 @@ export default class EInkDef {
 	blackPointAdjust = 10.0;
 	// ...black point adjustment
 	whitePointAdjust = 10.0;
-	// ...black point adjustment
-s
+	// ...white point adjustment
   ditherType = "floyd";
 
   

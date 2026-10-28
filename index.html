@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <title>µPhotoFrame™</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="./styles/app.css">
+    <link rel="stylesheet" href="./styles/app.css?v=i18n3">
 
-    <!-- TensorFlow.js + COCO-SSD (Apache-2.0) via jsDelivr — nicht im Repo; siehe docs/BUILD_INSTALLER.md -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js" crossorigin="anonymous"></script>
+    <!-- TensorFlow.js + COCO-SSD lokal; Gewichte: gulp INIT → src/libs/models/ -->
+    <script src="/src/libs/tf.min.js"></script>
+    <script src="/src/libs/cocossd.min.js"></script>
 
 
 </head>
@@ -20,8 +20,8 @@
     <!-- Loading Overlay -->
     <div id="loadingOverlay">
         <div class="loading-spinner"></div>
-        <div class="loading-text">Initializing µPhotoFrame™...</div>
-        <div class="loading-text" style="font-size: 0.9rem; margin-top: 10px; opacity: 0.8;">Please wait while the application starts</div>
+        <div class="loading-text" data-i18n='Initializing µPhotoFrame™...<context="ui"/>'>Initializing µPhotoFrame™...</div>
+        <div class="loading-text" style="font-size: 0.9rem; margin-top: 10px; opacity: 0.8;" data-i18n='Please wait while the application starts<context="ui"/>'>Please wait while the application starts</div>
     </div>
 
     <header class="global-header">
@@ -30,11 +30,29 @@
                 <img src="./webassets/Logo.png" alt="Logo" />
                 <img src="./webassets/LogoText.png" alt="microPhotoFrame" />
             </div>
-            <div class="header-select">
-                <label for="globalShowSelect">Available Shows:</label>
-                <select id="globalShowSelect" onchange="window.UpdatePageTitleIfNeeded(); if(window.UpdatePhotoActionButtons) window.UpdatePhotoActionButtons(); if(window.UpdateButtonStates) window.UpdateButtonStates(); if(window.UpdateActivateShowButton) window.UpdateActivateShowButton(); if(window.saveLastSelectedShow) window.saveLastSelectedShow(this.value); window.PreserveActiveShowStyles(this); window.ReloadCurrentPageIfNeeded();">
-                    <option value="">-- Loading shows... --</option>
+            <div class="header-lang">
+                <label for="appLid" data-i18n='Language<context="ui"/>'>Language</label>
+                <select id="appLid">
+                    <option value="auto" data-i18n='Auto (browser)<context="ui"/>'>Auto (browser)</option>
+                    <option value="en-US">English</option>
+                    <option value="de-DE">Deutsch</option>
+                    <option value="zh-CN">中文</option>
                 </select>
+            </div>
+            <div class="header-select">
+                <div class="header-select-group">
+                    <label for="globalChannelSelect" data-i18n='Channel:<context="ui"/>'>Channel:</label>
+                    <select id="globalChannelSelect" onchange="window.OnGlobalChannelChange()">
+                        <option value="">-- Loading channels... --</option>
+                    </select>
+                    <button type="button" class="header-new-btn" data-i18n-title="New Channel<context=&quot;ui&quot;/>" title="New Channel" onclick="window.ShowNewChannel()">+</button>
+                </div>
+                <div class="header-select-group">
+                    <label for="globalShowSelect" data-i18n='Available Shows:<context="ui"/>'>Available Shows:</label>
+                    <select id="globalShowSelect" onchange="window.UpdatePageTitleIfNeeded(); if(window.UpdatePhotoActionButtons) window.UpdatePhotoActionButtons(); if(window.UpdateButtonStates) window.UpdateButtonStates(); if(window.UpdateActivateShowButton) window.UpdateActivateShowButton(); if(window.saveLastSelectedShow) window.saveLastSelectedShow(this.value); window.PreserveActiveShowStyles(this); window.ReloadCurrentPageIfNeeded();">
+                        <option value="">-- Loading shows... --</option>
+                    </select>
+                </div>
             </div>
         </div>
         <span class="copyright">© 2025-2026 Meinolf Amekudzi</span>
@@ -42,27 +60,33 @@
 
     <div id="TopMenu" class="page">
         <div class="page-header">
-            <h2 class="page-title">Main Menu</h2>
+            <h2 class="page-title" data-i18n='Main Menu<context="ui"/>'>Main Menu</h2>
         </div>
         <div class="menu-grid">
+            <button id="btnChannels"></button>
             <button id="btnAddNewShow"></button><button id="btnDeleteShow"></button>
-            <button id="btnShowSettings"></button><button id="btnActivateShow"></button>
+            <button id="btnShowSettings"></button>
             <button id="btnAddShowPhotos"></button><button id="btnManageShowPhotos"></button>
             <button id="btnPhotoSettings"></button><button id="btnExportShow"></button>
-            <button id="btnImportShow"></button><button id="btnDevices"></button>
+            <button id="btnImportShow"></button>
+            <button id="btnDevices"></button>
         </div>
     </div>
 
     <div id="PhotoSettings" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
-            <h2 class="page-title">Photo Settings</h2>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
+            <h2 class="page-title" data-i18n='Photo Settings<context="ui"/>'>Photo Settings</h2>
         </div>
 
         <div class="controls">
-            <button class="btn-action save-btn" id="photoSettingsFileBtn" onclick="document.getElementById('inputimg').click(); return false;">📄 Datei auswählen</button>
+            <button class="btn-action save-btn drop-target" id="photoSettingsFileBtn" onclick="document.getElementById('inputimg').click(); return false;">📄 Datei auswählen oder hierher ziehen</button>
             <input type="file" id="inputimg" accept="image/*" onchange="window.InputImageChange(event)" class="file-input-hidden" />
-            <div class="control-row"><label>Display:</label><select id="displayID" onchange="window.UpdateDisplay(); if(window.UpdatePhotoActionButtons) window.UpdatePhotoActionButtons();" style="flex:1"></select></div>
+            <div class="control-row">
+                <label data-i18n='Display:<context="ui"/>'>Display:</label>
+                <span id="photoSettingsDisplayLabel" style="flex:1; font-weight:600;">–</span>
+            </div>
+            <input type="hidden" id="displayID" value="EINK_SPECTRA6_730_sq_800x480" />
             <div class="control-row"><label>Background:</label><input type="color" id="bgrdColor" value="#ffffff" oninput="window.UpdatePreview()" /></div>
             <hr>
             <div class="control-row"><label>Saturation:</label><input type="range" id="saturation" min="0" max="5" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-saturation">1.8</span></div>
@@ -128,27 +152,32 @@
 
     <div id="AddNewShow" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title">Add New Show</h2>
         </div>
 
         <div class="controls">
             <div class="control-row">
-                <label>Show Name:</label>
+                <label data-i18n='Show Name:<context="ui"/>'>Show Name:</label>
                 <input type="text" id="newShowName" placeholder="Enter show name..." style="flex:1; padding:8px; font-size:1rem;" />
             </div>
             <div class="control-row">
-                <label>Display Type:</label>
-                <select id="newShowDisplayId" style="flex:1; padding:8px; font-size:1rem;"></select>
+                <label data-i18n='Channel:<context="ui"/>'>Channel:</label>
+                <span id="newShowChannelLabel" style="flex:1; font-weight:600;">–</span>
             </div>
-            <button class="btn-action save-btn" onclick="window.CreateNewShow()">Create Show</button>
+            <div class="control-row">
+                <label data-i18n='Display:<context="ui"/>'>Display:</label>
+                <span id="newShowDisplayLabel" style="flex:1; font-weight:600;">–</span>
+            </div>
+            <p style="font-size:0.8rem; color:#666; margin:0 0 12px;">Uses the channel from the header. The display type cannot be changed later.</p>
+            <button class="btn-action save-btn" onclick="window.CreateNewShow()" data-i18n='Create Show<context="ui"/>'>Create Show</button>
             <div id="newShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
 
     <div id="DeleteShow" class="page">
         <div class="page-header">
-            <button class="back-btn" id="deleteShowBackBtn" onclick="window._currentPageId='TopMenu'; window.ShowPage('TopMenu'); return false;">⬅ Back</button>
+            <button class="back-btn" id="deleteShowBackBtn" onclick="window._currentPageId='TopMenu'; window.ShowPage('TopMenu'); return false;">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
@@ -161,26 +190,30 @@
 
     <div id="ActivateShow" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
         <div class="controls">
-            <p style="margin-bottom: 20px;">This will activate the currently selected show: <strong id="activateShowNameDisplay">(no show selected)</strong></p>
-            <button id="activateShowBtn" class="btn-action save-btn" onclick="window.ActivateSelectedShow()">✅ Activate Show</button>
+            <p style="margin-bottom: 12px;">Assign the selected show to a channel of the same display type: <strong id="activateShowNameDisplay">(no show selected)</strong></p>
+            <div class="control-row">
+                <label for="activateChannelSelect">Channel:</label>
+                <select id="activateChannelSelect" style="flex:1; padding:8px; font-size:1rem;"></select>
+            </div>
+            <button id="activateShowBtn" class="btn-action save-btn" onclick="window.ActivateSelectedShow()">✅ Assign to Channel</button>
             <div id="activateShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
 
     <div id="ShowSettings" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
         <div class="controls">
             <div class="control-row">
-                <label>Mode:</label>
+                <label data-i18n='Mode:<context="ui"/>'>Mode:</label>
                 <select id="showMode" style="flex:1; padding:8px; font-size:1rem;">
                     <option value="random">Random</option>
                     <option value="forwardsequence">Forward Sequence</option>
@@ -198,12 +231,12 @@
 
     <div id="AddShowPhotos" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
         <div class="controls">
-            <button class="btn-action ai-btn" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 Dateien auswählen</button>
+            <button class="btn-action ai-btn drop-target" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 Dateien auswählen oder hierher ziehen</button>
             <input type="file" id="addPhotosInput" accept="image/*" multiple class="file-input-hidden" />
             <div class="control-row"><label>Save versions:</label>
                 <select id="saveAspectAdd" onchange="window.SyncSaveAspect('saveAspectAdd')" style="flex:1">
@@ -233,7 +266,7 @@
 
     <div id="ManageShowPhotos" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
@@ -248,7 +281,7 @@
 
     <div id="ExportShow" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title"></h2>
         </div>
 
@@ -263,12 +296,12 @@
 
     <div id="ImportShow" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title">Import Show</h2>
         </div>
 
         <div class="controls">
-            <button class="btn-action save-btn" id="importShowFileBtn" onclick="document.getElementById('importShowInput').click()">📄 Datei auswählen</button>
+            <button class="btn-action save-btn drop-target" id="importShowFileBtn" onclick="document.getElementById('importShowInput').click()">📄 Datei auswählen oder hierher ziehen</button>
             <input type="file" id="importShowInput" accept=".zip,.show" class="file-input-hidden" />
             <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
                 Select a ZIP file (.zip or .show) containing a show export. The show will be imported with all its settings and images.
@@ -278,9 +311,72 @@
         </div>
     </div>
 
+    <div id="Channels" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
+            <h2 class="page-title">Channels</h2>
+        </div>
+
+        <div class="controls">
+            <p style="font-size:0.9rem; color:#666; margin-bottom:16px;">
+                A channel is <code>User ID / Group ID / display</code>, URL
+                <code>/shows/mamekudz/family/9</code>. The default channel is set with the
+                <strong>Default</strong> checkbox below. The server root uses that channel;
+                the URL shown here is always the real path.
+            </p>
+            <div id="channelCreateBlock">
+                <h3 style="margin-bottom:12px;">New Channel</h3>
+                <div class="control-row">
+                    <label for="newChannelUser" data-i18n='User ID:<context="ui"/>'>User ID:</label>
+                    <input type="text" id="newChannelUser" list="channelUserList" placeholder="mamekudz" />
+                    <datalist id="channelUserList"></datalist>
+                </div>
+                <div class="control-row">
+                    <label for="newChannelTarget" data-i18n='Group ID:<context="ui"/>'>Group ID:</label>
+                    <input type="text" id="newChannelTarget" list="channelTargetList" placeholder="family" />
+                    <datalist id="channelTargetList"></datalist>
+                </div>
+                <div class="control-row">
+                    <label for="newChannelDisplay">Display:</label>
+                    <select id="newChannelDisplay"></select>
+                </div>
+                <button class="btn-action save-btn" type="button" onclick="window.CreateChannel()" data-i18n='Create Channel<context="ui"/>'>Create Channel</button>
+            </div>
+            <div id="channelEditBlock" style="display:none;">
+                <h3 id="channelEditTitle" style="margin-bottom:12px;">Channel</h3>
+                <div class="control-row">
+                    <label>URL:</label>
+                    <code id="editChannelUrl" style="flex:1; word-break:break-all;"></code>
+                    <button class="btn-action" type="button" onclick="window.CopySelectedChannelUrl()" style="width:auto; padding:8px 12px;">Copy URL</button>
+                </div>
+                <div class="control-row">
+                    <label for="editChannelDefault">Default:</label>
+                    <input type="checkbox" id="editChannelDefault" style="width:auto;" />
+                    <span style="font-size:0.85rem; color:#666;">Server root uses this channel</span>
+                </div>
+                <div class="control-row">
+                    <label>Display:</label>
+                    <span id="editChannelDisplayLabel" style="flex:1; font-weight:600;">–</span>
+                </div>
+                <div class="control-row">
+                    <label for="editChannelShow">Active show:</label>
+                    <select id="editChannelShow"></select>
+                </div>
+                <button class="btn-action save-btn" type="button" onclick="window.SaveSelectedChannel()">Save</button>
+                <button class="btn-action reset-btn" type="button" onclick="window.DeleteSelectedChannel()" style="margin-top:8px;">Delete this channel</button>
+                <button class="btn-action reset-btn" type="button" onclick="window.DeleteSelectedTarget()" style="margin-top:8px;">Delete group</button>
+                <button class="btn-action reset-btn" type="button" onclick="window.DeleteSelectedUser()" style="margin-top:8px;">Delete User ID</button>
+            </div>
+            <div id="channelMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+            <hr style="margin:22px 0;">
+            <h3 style="margin-bottom:12px;">All Channels</h3>
+            <div id="channelList"></div>
+        </div>
+    </div>
+
     <div id="Devices" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title">Device Manager</h2>
         </div>
 
@@ -319,7 +415,7 @@
 
     <div id="PlaceholderPage" class="page">
         <div class="page-header">
-            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ Back</button>
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
             <h2 class="page-title" id="placeholder-title">Page</h2>
         </div>
         <p>This module is currently under development...</p>
@@ -329,6 +425,6 @@
 
 
     <!-- Application module -->
-    <script type="module" src="./src/app.mjs"></script>
+    <script type="module" src="./src/app.mjs?v=i18n1"></script>
 
 </html>

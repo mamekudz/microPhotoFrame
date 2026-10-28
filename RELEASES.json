@@ -1,6 +1,31 @@
 [
 	{
 		"main": 1,
+		"minor": 5,
+		"revision": 0,
+		"date": "2026-10-28 09:15",
+		"beta": false,
+		"info": [
+			"Web UI and firmware config use i18x for en-US, de-DE and zh-CN. Language defaults to the browser and can be changed in the header or the frame AP.",
+			"The firmware stores Server URL and User ID when groups are loaded, so the config form keeps them after a page reload.",
+			"Config and status text refresh the full native panel. Spectra 6 no longer leaves color noise on the right from a rotated partial update.",
+			"Waveshare 1.54G enables deep sleep by default (own charge circuit). NeoFrame stays off so USB power banks do not cut out."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 4,
+		"revision": 0,
+		"date": "2026-10-27 18:30",
+		"beta": false,
+		"info": [
+			"One display-ID table everywhere (docs/technical_overview.md). Spectra 6 7.3\" is 9 (E1002 / NeoFrame); I is BWR 2.13\" again. No aliases or path remapping.",
+			"A channel is User ID / Group ID / display. The firmware AP takes Server URL and User ID; the server lists Group IDs for that display.",
+			"ink-encoder 2.1.0 on npm uses the same catalog. Existing shows must be recreated from original photos."
+		]
+	},
+	{
+		"main": 1,
 		"minor": 3,
 		"revision": 2,
 		"date": "2026-10-19 12:10",

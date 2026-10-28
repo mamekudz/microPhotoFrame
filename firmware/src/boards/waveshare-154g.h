@@ -4,8 +4,9 @@
  * Waveshare ESP32-S3 1.54" e-Paper (G) AIoT — platform ID `waveshare-154g`
  * (exact gulp-mu-build-filter match).
  *
- * Official Waveshare docs (ESP32-S3-ePaper-1.54G):
- * GDEY0154F51 · 200×200 · Black/White/Red/Yellow
+ * Official Waveshare docs (ESP32-S3-ePaper-1.54G / EPD_1in54g):
+ * 1.54inch e-Paper (G) · GDEY0154F51 · 200×200 · Black/White/Red/Yellow
+ * SKU 26565/26566 (panel), 28766 (ESP32-S3 AIoT board). Not Spectra 3100.
  * EPD SPI 12/13/11/10/9/8, EPD3V3_EN GPIO6 active-low (LOW = panel on).
  * No photo-frame buttons; USB-C native CDC. Battery connector unused.
  */
@@ -15,6 +16,7 @@
 #define PHOTOFRAME_PLATFORM_ID "waveshare-154g"
 #define PHOTOFRAME_HAS_MPU6050 0
 #define PHOTOFRAME_HAS_BUTTONS 0
+#define PHOTOFRAME_DEEP_SLEEP_DEFAULT 1
 #define PHOTOFRAME_HAS_BUZZER 0
 #define PHOTOFRAME_HAS_SD 0
 #define PHOTOFRAME_HAS_SD_EN 0

@@ -4,9 +4,12 @@ NSIS installieren und `MAKENSIS` auf makensis.exe setzen. Dann:
 
 ```powershell
 npm ci
+npm run init
 $env:PHOTOFRAME_INSTALLER_SERVER = 'node' # iis, apache, nginx; leer fuer Auswahl-Installer
 npm run build:installer
 ```
+
+`gulp INIT` lädt das lokale COCO-SSD-Modell nach `src/libs/models/` (Apache-2.0, offizielle tfjs-models-Gewichte). Schon vorhandene Dateien mit passendem Hash werden übersprungen. `BUILD_INSTALLER` ruft INIT selbst auf.
 
 Der Build lädt die benötigten Laufzeiten anhand von `installer/assets/server-runtimes.json`, prüft ihre SHA256-Hashes und integriert sie in die EXE. Node-Abhängigkeiten werden beim Build installiert und mitgeliefert. Download-Cache: `installer/assets/runtime-cache`; vorbereitete Dateien: `tmp/runtime`. Beide sind nicht versioniert. Die früheren SQL-Server- und Desktop-.NET-Downloads werden nicht mehr verwendet.
 

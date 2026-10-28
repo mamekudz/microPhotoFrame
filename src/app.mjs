@@ -1,5 +1,5 @@
 import "./microLib/Config.mjs";
-import EInkDef from "./microLib/EInkDef.mjs";
+import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
 import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs";
 import RESTX from "./microLib/RESTX.mjs";
@@ -7,13 +7,14 @@ import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
 import "./microLib/ArrayUtils.mjs";
 import "./microLib/StringUtils.mjs";
+import { initI18n, t, setLid } from "./i18n.mjs";
 
 
 Config.APPID = "µPhotoFrame";
 // Use root URL with query string - web.config rewrite will route to aspx/microPhotoFrame.aspx
 RESTX.hostUrl = "/";
 
-let defaultDisplayId = "EINK_E6_730_sq_800x480";
+let defaultDisplayId = "EINK_SPECTRA6_730_sq_800x480";
 let shows = [];
 let currentInk = null;
 let currentFile = null;
@@ -38,14 +39,16 @@ const stdEInkConvert = new EInkDef({
 });
 
 const pageTitles = {
-    "TopMenu": "Main Menu", "AddNewShow": "Add New Show", "DeleteShow": "Delete Show '<showName/>'",
-    "ShowSettings": "Edit Settings of '<showName/>'", "ActivateShow": "Activate Show '<showName/>'", "AddShowPhotos": "Add Photos to '<showName/>'",
-    "ManageShowPhotos": "Manage Photos of '<showName/>'", "PhotoSettings": "Photo Settings", "ExportShow": "Export Show '<showName/>'",
-    "ImportShow": "Import Show", "Devices": "Device Manager"
+    "TopMenu": "Main Menu<context=\"ui\"/>", "AddNewShow": "Add New Show<context=\"ui\"/>", "DeleteShow": "Delete Show '<showName/>'<context=\"ui\"/>",
+    "ShowSettings": "Edit Settings of '<showName/>'<context=\"ui\"/>", "ActivateShow": "Activate Show '<showName/>'<context=\"ui\"/>", "AddShowPhotos": "Add Photos to '<showName/>'<context=\"ui\"/>",
+    "ManageShowPhotos": "Manage Photos of '<showName/>'<context=\"ui\"/>", "PhotoSettings": "Photo Settings<context=\"ui\"/>", "ExportShow": "Export Show '<showName/>'<context=\"ui\"/>",
+    "ImportShow": "Import Show<context=\"ui\"/>", "Channels": "Manage Channel '<channelName/>'<context=\"ui\"/>", "Devices": "Device Manager<context=\"ui\"/>"
 };
 
 const SETTINGS_KEY = "microPhotoFrame_LastSettings";
 const LAST_SELECTED_SHOW_KEY = "microPhotoFrame_LastSelectedShow";
+const LAST_SELECTED_CHANNEL_KEY = "microPhotoFrame_LastSelectedChannel";
+const NEW_CHANNEL_VALUE = '__new__';
 
 function saveLastSelectedShow(showName) {
     if (showName) {
@@ -55,6 +58,68 @@ function saveLastSelectedShow(showName) {
 
 function loadLastSelectedShow() {
     return localStorage.getItem(LAST_SELECTED_SHOW_KEY) || '';
+}
+
+function saveLastSelectedChannel(slug) {
+    if (slug && slug !== NEW_CHANNEL_VALUE) {
+        localStorage.setItem(LAST_SELECTED_CHANNEL_KEY, slug);
+    }
+}
+
+function loadLastSelectedChannel() {
+    return localStorage.getItem(LAST_SELECTED_CHANNEL_KEY) || '';
+}
+
+function getSelectedChannelSlug() {
+    return document.getElementById('globalChannelSelect')?.value || '';
+}
+
+function getSelectedShowName() {
+    return document.getElementById('globalShowSelect')?.value || '';
+}
+
+const PAGES_NEED_SHOW = ['DeleteShow', 'ShowSettings', 'ActivateShow', 'AddShowPhotos', 'ManageShowPhotos', 'ExportShow'];
+
+function titleWithShow(template, showName) {
+    if (!template || !template.includes('<showName/>')) return template;
+    if (showName) return template.replace(/<showName\/>/g, showName);
+    return template
+        .replace(/ to '<showName\/>'/g, '')
+        .replace(/ of '<showName\/>'/g, '')
+        .replace(/ '<showName\/>'/g, '')
+        .replace(/<showName\/>/g, '')
+        .trim();
+}
+
+function selectedChannelLabel() {
+    const slug = getSelectedChannelSlug();
+    if (!slug || slug === NEW_CHANNEL_VALUE) return t('(none)<context="ui"/>');
+    return channelLabel(slug, currentChannels[slug], true);
+}
+
+function resolvePageTitle(pageId) {
+    let title = t(pageTitles[pageId] || 'Page<context="ui"/>', {
+        showName: getSelectedShowName() || t('(no show selected)<context="ui"/>'),
+        channelName: selectedChannelLabel()
+    });
+    title = titleWithShow(title, getSelectedShowName());
+    if (title.includes('<channelName/>')) {
+        title = title.replace(/<channelName\/>/g, selectedChannelLabel());
+    }
+    return title;
+}
+
+function setPageTitle(titleEl, pageId) {
+    if (!titleEl) return;
+    const template = pageTitles[pageId] || '';
+    if (pageId === 'Channels' || template.includes('<channelName/>')) {
+        titleEl.replaceChildren();
+        titleEl.append(document.createTextNode(t('Manage Channel<context="ui"/>')));
+        titleEl.append(document.createElement('br'));
+        titleEl.append(document.createTextNode("'" + selectedChannelLabel() + "'"));
+        return;
+    }
+    titleEl.textContent = resolvePageTitle(pageId);
 }
 
 // Make functions globally available
@@ -117,7 +182,7 @@ function loadSettingsFromStorage() {
     if (!saved) return;
     const settings = JSON.parse(saved);
     Object.keys(settings).forEach(id => {
-        if (id === 'autoOptimize') return;
+        if (id === 'autoOptimize' || id === 'displayID') return;
         const el = document.getElementById(id);
         if (el) el.value = settings[id];
     });
@@ -132,6 +197,16 @@ function loadSettingsFromStorage() {
 }
 
 window.ShowPage = function (pageId) {
+    if (PAGES_NEED_SHOW.includes(pageId) && !getSelectedShowName()) {
+        if (pageId === 'AddShowPhotos' || pageId === 'ManageShowPhotos') {
+            window.ShowPage('AddNewShow');
+            return;
+        }
+        if (pageId !== 'TopMenu') {
+            window.ShowPage('TopMenu');
+        }
+        return;
+    }
     // Clear original images when navigating to TopMenu
     if (pageId === 'TopMenu') {
         window.originalImages = {};
@@ -144,21 +219,7 @@ window.ShowPage = function (pageId) {
     // Store the current page ID immediately to prevent race conditions
     window._currentPageId = pageId;
     const titleEl = target.querySelector('.page-title') || document.getElementById('placeholder-title');
-    if (titleEl) {
-        let title = pageTitles[pageId] || "Page";
-        // Replace <showName/> with the currently selected show name
-        const globalSelect = document.getElementById('globalShowSelect');
-        const selectedShow = globalSelect ? globalSelect.value : '';
-        if (title.includes('<showName/>')) {
-            if (selectedShow) {
-                title = title.replace(/<showName\/>/g, selectedShow);
-            } else {
-                title = title.replace(/<showName\/>/g, '(no show selected)');
-            }
-        }
-        // Always set the title, even if it was empty in HTML
-        titleEl.innerText = title;
-    }
+    setPageTitle(titleEl, pageId);
     window.scrollTo(0, 0);
     
     // Load page-specific data
@@ -167,6 +228,9 @@ window.ShowPage = function (pageId) {
     }
     if (pageId === 'ActivateShow') {
         window.LoadActivateShowPage();
+    }
+    if (pageId === 'Channels') {
+        window.LoadChannelsPage();
     }
     if (pageId === 'ShowSettings') {
         window.LoadShowSettingsPage();
@@ -231,8 +295,10 @@ window.ShowPage = function (pageId) {
             window.UpdatePhotoActionButtons();
         }
         // Update preview to show placeholder if no image is loaded
-        if (pageId === 'PhotoSettings' && window.UpdatePreview) {
-            window.UpdatePreview();
+        if (pageId === 'PhotoSettings') {
+            syncPhotoSettingsDisplayFromContext();
+            if (currentFile) window.UpdateDisplay();
+            else if (window.UpdatePreview) window.UpdatePreview();
         }
         // Setup drag and drop and click handlers together
         setTimeout(() => {
@@ -314,256 +380,402 @@ if (!window._dragDropHandlers) {
     window._dragDropHandlers = {};
 }
 
+function isDropPageId(id) {
+    return id === 'AddShowPhotos' || id === 'PhotoSettings' || id === 'ImportShow';
+}
+
+function isAcceptedDropFile(file, kinds) {
+    const n = (file && file.name ? file.name : '').toLowerCase();
+    const img = (file.type && file.type.startsWith('image/')) ||
+        ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].some((ext) => n.endsWith(ext));
+    const ink = n.endsWith('.ink');
+    const zip = n.endsWith('.zip') || n.endsWith('.show');
+    if (kinds === 'images') return img || ink;
+    if (kinds === 'show') return zip;
+    return false;
+}
+
+function assignDroppedFiles(input, files, kinds, multi) {
+    if (!input || !files || !files.length) return false;
+    const dt = new DataTransfer();
+    for (const file of files) {
+        if (!isAcceptedDropFile(file, kinds)) continue;
+        dt.items.add(file);
+        if (!multi) break;
+    }
+    if (!dt.files.length) return false;
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}
+
+function bindDropZone(zone, input, kinds, multi, onFiles) {
+    if (!zone || !input) return;
+    const hid = zone.id || kinds;
+    const overKey = hid + 'Over';
+    const leaveKey = hid + 'Leave';
+    const dropKey = hid + 'Drop';
+    if (window._dragDropHandlers[overKey]) {
+        zone.removeEventListener('dragover', window._dragDropHandlers[overKey], true);
+        zone.removeEventListener('dragleave', window._dragDropHandlers[leaveKey], true);
+        zone.removeEventListener('drop', window._dragDropHandlers[dropKey], true);
+    }
+    window._dragDropHandlers[overKey] = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        zone.classList.add('drag-over');
+        return false;
+    };
+    window._dragDropHandlers[leaveKey] = (e) => {
+        e.preventDefault();
+        if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
+        zone.classList.remove('drag-over');
+        return false;
+    };
+    window._dragDropHandlers[dropKey] = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        zone.classList.remove('drag-over');
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (assignDroppedFiles(input, files, kinds, multi) && onFiles) onFiles();
+        return false;
+    };
+    zone.addEventListener('dragover', window._dragDropHandlers[overKey], true);
+    zone.addEventListener('dragleave', window._dragDropHandlers[leaveKey], true);
+    zone.addEventListener('drop', window._dragDropHandlers[dropKey], true);
+}
+
+if (!window._dropNavGuard) {
+    window._dropNavGuard = true;
+    document.addEventListener('dragover', (e) => {
+        if (isDropPageId(window._currentPageId)) e.preventDefault();
+    });
+    document.addEventListener('drop', (e) => {
+        if (isDropPageId(window._currentPageId)) e.preventDefault();
+    });
+}
+
 window.SetupDragAndDrop = function() {
-    // Drag & Drop für AddShowPhotos Button
     const addPhotosFilesBtn = document.getElementById('addPhotosFilesBtn');
     const addPhotosInput = document.getElementById('addPhotosInput');
-    
+    const addPhotosPage = document.getElementById('AddShowPhotos');
     if (addPhotosFilesBtn && addPhotosInput) {
-        // Remove old event listeners if they exist
-        if (window._dragDropHandlers.addPhotosDragover) {
-            addPhotosFilesBtn.removeEventListener('dragover', window._dragDropHandlers.addPhotosDragover, true);
-            addPhotosFilesBtn.removeEventListener('dragleave', window._dragDropHandlers.addPhotosDragleave, true);
-            addPhotosFilesBtn.removeEventListener('drop', window._dragDropHandlers.addPhotosDrop, true);
-        }
-        
-        // Create new handlers
-        window._dragDropHandlers.addPhotosDragover = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            addPhotosFilesBtn.classList.add('drag-over');
-            console.log('AddPhotos: dragover');
-            return false;
+        const afterAdd = () => {
+            if (window.UpdateAddPhotosButtonText) window.UpdateAddPhotosButtonText();
         };
-        
-        window._dragDropHandlers.addPhotosDragleave = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            addPhotosFilesBtn.classList.remove('drag-over');
-            console.log('AddPhotos: dragleave');
-            return false;
-        };
-        
-        window._dragDropHandlers.addPhotosDrop = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            addPhotosFilesBtn.classList.remove('drag-over');
-            console.log('AddPhotos: drop', e.dataTransfer.files.length, 'files');
-            
-            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                const dt = new DataTransfer();
-                let addedCount = 0;
-                for (let file of e.dataTransfer.files) {
-                    console.log('AddPhotos: checking file', file.name, 'type:', file.type);
-                    // Accept both image files and .ink files
-                    if ((file.type && file.type.startsWith('image/')) || 
-                        file.name.toLowerCase().endsWith('.ink') ||
-                        file.name.toLowerCase().endsWith('.jpg') ||
-                        file.name.toLowerCase().endsWith('.jpeg') ||
-                        file.name.toLowerCase().endsWith('.png') ||
-                        file.name.toLowerCase().endsWith('.gif') ||
-                        file.name.toLowerCase().endsWith('.bmp') ||
-                        file.name.toLowerCase().endsWith('.webp')) {
-                        dt.items.add(file);
-                        addedCount++;
-                    }
-                }
-                console.log('AddPhotos: added', addedCount, 'files to DataTransfer');
-                if (dt.files.length > 0) {
-                    addPhotosInput.files = dt.files;
-                    console.log('AddPhotos: input.files set, length:', addPhotosInput.files.length);
-                    const changeEvent = new Event('change', { bubbles: true });
-                    addPhotosInput.dispatchEvent(changeEvent);
-                    console.log('AddPhotos: change event dispatched');
-                    // Update button text to show selected files
-                    if (window.UpdateAddPhotosButtonText) {
-                        window.UpdateAddPhotosButtonText();
-                    }
-                    console.log('AddPhotos: files set, count:', dt.files.length);
-                } else {
-                    console.log('AddPhotos: No valid files found in dropped files');
-                }
-            } else {
-                console.log('AddPhotos: No files in dataTransfer');
-            }
-            return false;
-        };
-        
-        // Add new event listeners - use capture phase to ensure they fire before onclick
-        addPhotosFilesBtn.addEventListener('dragover', window._dragDropHandlers.addPhotosDragover, true);
-        addPhotosFilesBtn.addEventListener('dragleave', window._dragDropHandlers.addPhotosDragleave, true);
-        addPhotosFilesBtn.addEventListener('drop', window._dragDropHandlers.addPhotosDrop, true);
-        console.log('AddPhotos: Drag & Drop listeners registered');
+        bindDropZone(addPhotosFilesBtn, addPhotosInput, 'images', true, afterAdd);
+        bindDropZone(addPhotosPage, addPhotosInput, 'images', true, afterAdd);
     }
 
-    // Drag & Drop für ImportShow Button
     const importShowFileBtn = document.getElementById('importShowFileBtn');
     const importShowInput = document.getElementById('importShowInput');
-    
+    const importShowPage = document.getElementById('ImportShow');
     if (importShowFileBtn && importShowInput) {
-        // Remove old event listeners if they exist
-        if (window._dragDropHandlers.importShowDragover) {
-            importShowFileBtn.removeEventListener('dragover', window._dragDropHandlers.importShowDragover, true);
-            importShowFileBtn.removeEventListener('dragleave', window._dragDropHandlers.importShowDragleave, true);
-            importShowFileBtn.removeEventListener('drop', window._dragDropHandlers.importShowDrop, true);
-        }
-        
-        // Create new handlers
-        window._dragDropHandlers.importShowDragover = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            importShowFileBtn.classList.add('drag-over');
-            return false;
-        };
-        
-        window._dragDropHandlers.importShowDragleave = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            importShowFileBtn.classList.remove('drag-over');
-            return false;
-        };
-        
-        window._dragDropHandlers.importShowDrop = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            importShowFileBtn.classList.remove('drag-over');
-            
-            if (e.dataTransfer.files.length > 0) {
-                const file = e.dataTransfer.files[0];
-                if (file.name.endsWith('.zip') || file.name.endsWith('.show')) {
-                    const dt = new DataTransfer();
-                    dt.items.add(file);
-                    importShowInput.files = dt.files;
-                    importShowInput.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-            return false;
-        };
-        
-        // Add new event listeners - use capture phase to ensure they fire before onclick
-        importShowFileBtn.addEventListener('dragover', window._dragDropHandlers.importShowDragover, true);
-        importShowFileBtn.addEventListener('dragleave', window._dragDropHandlers.importShowDragleave, true);
-        importShowFileBtn.addEventListener('drop', window._dragDropHandlers.importShowDrop, true);
-        
-        // Update button text when file is selected (via drag & drop or file picker)
-        importShowInput.addEventListener('change', function() {
+        const afterImport = () => {
             if (importShowInput.files && importShowInput.files.length > 0) {
-                const fileName = importShowInput.files[0].name;
-                importShowFileBtn.innerText = '📄 ' + fileName;
+                importShowFileBtn.innerText = '📄 ' + importShowInput.files[0].name;
             } else {
-                importShowFileBtn.innerText = '📄 Datei auswählen';
+                importShowFileBtn.innerText = '📄 Datei auswählen oder hierher ziehen';
             }
-        });
+        };
+        bindDropZone(importShowFileBtn, importShowInput, 'show', false, afterImport);
+        bindDropZone(importShowPage, importShowInput, 'show', false, afterImport);
+        importShowInput.addEventListener('change', afterImport);
     }
 
-    // Drag & Drop für PhotoSettings Button
     const photoSettingsFileBtn = document.getElementById('photoSettingsFileBtn');
     const photoSettingsInput = document.getElementById('inputimg');
-    
+    const photoSettingsPage = document.getElementById('PhotoSettings');
     if (photoSettingsFileBtn && photoSettingsInput) {
-        // Remove old event listeners if they exist
-        if (window._dragDropHandlers.photoSettingsDragover) {
-            photoSettingsFileBtn.removeEventListener('dragover', window._dragDropHandlers.photoSettingsDragover, true);
-            photoSettingsFileBtn.removeEventListener('dragleave', window._dragDropHandlers.photoSettingsDragleave, true);
-            photoSettingsFileBtn.removeEventListener('drop', window._dragDropHandlers.photoSettingsDrop, true);
-        }
-        
-        // Create new handlers
-        window._dragDropHandlers.photoSettingsDragover = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            photoSettingsFileBtn.classList.add('drag-over');
-            console.log('PhotoSettings: dragover');
-            return false;
-        };
-        
-        window._dragDropHandlers.photoSettingsDragleave = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            photoSettingsFileBtn.classList.remove('drag-over');
-            console.log('PhotoSettings: dragleave');
-            return false;
-        };
-        
-        window._dragDropHandlers.photoSettingsDrop = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            photoSettingsFileBtn.classList.remove('drag-over');
-            console.log('PhotoSettings: drop', e.dataTransfer.files.length, 'files');
-            
-            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                const file = e.dataTransfer.files[0];
-                console.log('PhotoSettings: checking file', file.name, 'type:', file.type);
-                // Accept both image files and .ink files
-                if ((file.type && file.type.startsWith('image/')) ||
-                    file.name.toLowerCase().endsWith('.ink') ||
-                    file.name.toLowerCase().endsWith('.jpg') ||
-                    file.name.toLowerCase().endsWith('.jpeg') ||
-                    file.name.toLowerCase().endsWith('.png') ||
-                    file.name.toLowerCase().endsWith('.gif') ||
-                    file.name.toLowerCase().endsWith('.bmp') ||
-                    file.name.toLowerCase().endsWith('.webp')) {
-                    const dt = new DataTransfer();
-                    dt.items.add(file);
-                    photoSettingsInput.files = dt.files;
-                    // Trigger change event to load the image
-                    const changeEvent = new Event('change', { bubbles: true });
-                    photoSettingsInput.dispatchEvent(changeEvent);
-                    console.log('PhotoSettings: file set');
-                } else {
-                    console.log('PhotoSettings: file not accepted, name:', file.name, 'type:', file.type);
-                }
-            }
-            return false;
-        };
-        
-        // Add new event listeners - use capture phase to ensure they fire before onclick
-        photoSettingsFileBtn.addEventListener('dragover', window._dragDropHandlers.photoSettingsDragover, true);
-        photoSettingsFileBtn.addEventListener('dragleave', window._dragDropHandlers.photoSettingsDragleave, true);
-        photoSettingsFileBtn.addEventListener('drop', window._dragDropHandlers.photoSettingsDrop, true);
-        console.log('PhotoSettings: Drag & Drop listeners registered');
+        bindDropZone(photoSettingsFileBtn, photoSettingsInput, 'images', false);
+        bindDropZone(photoSettingsPage, photoSettingsInput, 'images', false);
     }
 };
 
 // Store active shows globally (mapping: displayId -> showName)
 let currentActiveShows = {};
+let currentChannels = {};
+let currentDefaultChannel = '';
+let currentShowDisplays = {};
+
+function displayDefForId(displayId) {
+    const id = String(displayId ?? '').trim();
+    if (!id) return null;
+    if (EInkDef.DISPLAYS[id]) return EInkDef.DISPLAYS[id];
+    const found = Object.entries(EInkDef.DISPLAYS).find(([, value]) =>
+        String(value.id) === id
+    );
+    return found ? found[1] : null;
+}
+
+function displayNameForId(displayId) {
+    const def = displayDefForId(displayId);
+    return def ? (def.name || displayId) : (displayId || '');
+}
+
+function shortDisplayName(displayId) {
+    const def = displayDefForId(displayId);
+    if (!def) return displayId || '';
+    const family = String(def.name || '').split(' · ')[0].trim();
+    if (def.size) return family + ' · ' + def.size + '"';
+    return family || displayId;
+}
+
+function paletteTag(def) {
+    const colors = (def && def.colors) || [];
+    const n = colors.length;
+    if (n === 2) return 'BW';
+    if (n === 3) return colors.some((c) => String(c).toUpperCase() === '#FFFF00') ? 'BWY' : 'BWR';
+    if (n === 4) return colors.some((c) => /^#A{2}/i.test(c) || /^#55/i.test(c)) ? 'Gray4' : 'BWRY';
+    if (n === 6) return 'E6';
+    return n ? n + 'c' : '';
+}
+
+function displayOptionText(def, key) {
+    const name = (def && def.name) || key || '';
+    const pal = paletteTag(def);
+    return name + (pal ? ' · ' + pal : '');
+}
+
+function colorsForSelectValue(val) {
+    if (val && EInkDef.DISPLAYS[val]) return EInkDef.DISPLAYS[val].colors || [];
+    const def = displayDefForId(val);
+    return (def && def.colors) || [];
+}
+
+function swatchesHtml(colors) {
+    return (colors || []).map((c) =>
+        '<span class="eink-swatch" title="' + c + '" style="background:' + c + '"></span>'
+    ).join('');
+}
+
+function bindDisplaySwatches(sel) {
+    if (!sel) return;
+    let box = sel.nextElementSibling;
+    if (!box || !box.classList.contains('eink-swatches')) {
+        box = document.createElement('span');
+        box.className = 'eink-swatches';
+        sel.insertAdjacentElement('afterend', box);
+        sel.addEventListener('change', () => {
+            box.innerHTML = swatchesHtml(colorsForSelectValue(sel.value));
+        });
+    }
+    box.innerHTML = swatchesHtml(colorsForSelectValue(sel.value));
+}
+
+function channelBaseUrl() {
+    const path = location.pathname
+        .replace(/\/shows\/[^/]+\/[^/]+\/[0-9A-Za-z]\/?$/, '/')
+        .replace(/\/c\/[^/]+(\/[^/]+\/[0-9A-Za-z])?\/?$/, '/')
+        .replace(/index\.html$/i, '');
+    const base = location.origin + (path.endsWith('/') ? path : path + '/');
+    return base.replace(/\/$/, '');
+}
+
+function urlForChannel(slug) {
+    const root = channelBaseUrl();
+    if (!slug) return root;
+    return root + '/shows/' + slug;
+}
+
+function channelLabel(id, ch, short) {
+    const rec = ch || currentChannels[id] || {};
+    const user = rec.userId || rec.user || (id || '').split('/')[0] || id;
+    const target = rec.groupId || rec.group || rec.target || (id || '').split('/')[1] || '';
+    const path = user + (target ? '/' + target : '');
+    const dname = short ? shortDisplayName(rec.displayId) : displayNameForId(rec.displayId);
+    return path + (dname ? ' · ' + dname : '');
+}
+
+function applyShowsConfig(raw) {
+    currentChannels = (raw && raw.channels && typeof raw.channels === 'object') ? raw.channels : {};
+    currentDefaultChannel = (raw && raw.defaultChannel) || '';
+    const activeShows = (raw && raw.activeShows) || {};
+    const activeShowsMap = {};
+    if (activeShows && typeof activeShows === 'object') {
+        if (activeShows.Properties) {
+            for (let prop of activeShows.Properties) {
+                activeShowsMap[prop.Name] = prop.Value;
+            }
+        } else {
+            for (let key in activeShows) {
+                if (Object.prototype.hasOwnProperty.call(activeShows, key)) {
+                    activeShowsMap[key] = activeShows[key];
+                }
+            }
+        }
+    }
+    currentActiveShows = activeShowsMap;
+    return activeShowsMap;
+}
+
+function fillDisplaySelect(sel, selectedId) {
+    if (!sel) return;
+    const keep = selectedId || sel.value;
+    sel.innerHTML = '';
+    Object.entries(EInkDef.DISPLAYS).forEach(([key, def]) => {
+        if (!def.id) return;
+        const o = document.createElement('option');
+        o.value = def.id;
+        o.text = displayOptionText(def, key);
+        sel.appendChild(o);
+    });
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    else if (EInkDef.DISPLAYS[defaultDisplayId]?.id) sel.value = EInkDef.DISPLAYS[defaultDisplayId].id;
+    bindDisplaySwatches(sel);
+}
+
+function fillShowNameSelect(sel, names, selectedName, displayId) {
+    if (!sel) return;
+    const keep = selectedName !== undefined ? selectedName : sel.value;
+    const filtered = displayId
+        ? (names || []).filter((name) => currentShowDisplays[name] === displayId)
+        : (names || []);
+    sel.innerHTML = '<option value="">— none —</option>';
+    filtered.forEach((name) => {
+        const o = document.createElement('option');
+        o.value = name;
+        o.text = name;
+        sel.appendChild(o);
+    });
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+async function loadShowDisplays(showList) {
+    const names = showList || [];
+    await Promise.all(names.map(async (showName) => {
+        try {
+            const showRes = await new RESTX().promiseCall('getShow', { showName });
+            currentShowDisplays[showName] = (showRes.ok && showRes.output.show)
+                ? (showRes.output.show.displayId || '')
+                : '';
+        } catch (e) {
+            if (currentShowDisplays[showName] == null) currentShowDisplays[showName] = '';
+        }
+    }));
+}
+
+function selectedChannelDisplayId() {
+    const slug = getSelectedChannelSlug();
+    if (!slug || slug === NEW_CHANNEL_VALUE) return '';
+    return (currentChannels[slug] && currentChannels[slug].displayId) || '';
+}
+
+function displayKeyForId(displayId) {
+    const id = String(displayId ?? '').trim();
+    if (!id) return defaultDisplayId;
+    if (EInkDef.DISPLAYS[id]) return id;
+    const found = Object.entries(EInkDef.DISPLAYS).find(([, value]) =>
+        String(value.id) === id
+    );
+    return found ? found[0] : defaultDisplayId;
+}
+
+function applyPhotoSettingsDisplay(charOrKey) {
+    const key = displayKeyForId(charOrKey);
+    const el = document.getElementById('displayID');
+    if (el) el.value = key;
+    const def = EInkDef.DISPLAYS[key];
+    const label = document.getElementById('photoSettingsDisplayLabel');
+    if (label) {
+        const pal = paletteTag(def);
+        label.innerHTML = ((def && def.name) || key) +
+            (pal ? ' · ' + pal : '') +
+            ' <span class="eink-swatches">' + swatchesHtml((def && def.colors) || []) + '</span>';
+    }
+    stdEInkConvert.displayID = key;
+}
+
+function syncPhotoSettingsDisplayFromContext() {
+    const showName = getSelectedShowName();
+    let id = selectedChannelDisplayId();
+    if (showName && currentShowDisplays[showName]) id = currentShowDisplays[showName];
+    applyPhotoSettingsDisplay(id);
+}
+
+window.UpdateGlobalChannelSelect = function () {
+    const sel = document.getElementById('globalChannelSelect');
+    if (!sel) return;
+    const prev = sel.value;
+    const slugs = Object.keys(currentChannels);
+    sel.innerHTML = '';
+    if (!slugs.length) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.text = 'No channel — tap +';
+        sel.appendChild(empty);
+        return;
+    }
+    slugs.forEach((slug) => {
+        const ch = currentChannels[slug] || {};
+        const o = document.createElement('option');
+        o.value = slug;
+        o.text = channelLabel(slug, ch, true);
+        sel.appendChild(o);
+    });
+    let pick = loadLastSelectedChannel();
+    if (!pick || !currentChannels[pick]) pick = prev;
+    if (!pick || !currentChannels[pick]) pick = currentDefaultChannel || slugs[0] || '';
+    sel.value = pick;
+    if (pick) saveLastSelectedChannel(pick);
+};
+
+window.ShowNewChannel = function () {
+    window._forceNewChannel = true;
+    window.ShowPage('Channels');
+};
+
+window.OnGlobalChannelChange = function () {
+    const slug = getSelectedChannelSlug();
+    if (slug && slug !== NEW_CHANNEL_VALUE) {
+        saveLastSelectedChannel(slug);
+    }
+    if (!slug) {
+        window.ShowNewChannel();
+        return;
+    }
+    const after = () => {
+        if (window.UpdateButtonTitles) window.UpdateButtonTitles();
+        if (window.UpdateButtonStates) window.UpdateButtonStates();
+        if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+        syncPhotoSettingsDisplayFromContext();
+        if (window._currentPageId === 'PhotoSettings' && currentFile) window.UpdateDisplay();
+        if (window._currentPageId === 'Channels') window.LoadChannelsPage();
+        if (window._currentPageId === 'AddNewShow') window.LoadAddNewShowPage();
+        if (window._currentPageId === 'ActivateShow') window.LoadActivateShowPage();
+    };
+    if (window.UpdateGlobalShowSelect) {
+        window.UpdateGlobalShowSelect().then(after);
+        return;
+    }
+    after();
+};
+
+window.selectChannelInHeader = function (slug) {
+    const sel = document.getElementById('globalChannelSelect');
+    if (!sel) return;
+    sel.value = slug || '';
+    window.OnGlobalChannelChange();
+};
 
 // Update global show select with active show highlighting and display IDs
 window.UpdateGlobalShowSelect = async function () {
     const sel = document.getElementById('globalShowSelect');
     if (!sel) return;
+    if (window._updatingShowSelect) return;
+    window._updatingShowSelect = true;
     
     try {
         const _res = await new RESTX().promiseCall('getShows');
         const raw = _res.output.shows;
-        const showList = raw.shows || raw;
-        // activeShows is now a JObject mapping displayId -> showName
-        const activeShows = raw.activeShows || {};
+        const activeShowsMap = applyShowsConfig(raw);
+        if (window.UpdateGlobalChannelSelect) window.UpdateGlobalChannelSelect();
+        const channelSlug = getSelectedChannelSlug();
+        const selectedChannel = currentChannels[channelSlug] || null;
+        const showList = selectedChannel ? (selectedChannel.shows || []) : [];
         
         if (showList && showList.length > 0) {
             sel.innerHTML = "";
-            
-            // Convert activeShows to a plain object if it's a JObject-like structure
-            const activeShowsMap = {};
-            if (activeShows && typeof activeShows === 'object') {
-                // Handle both JObject (from Newtonsoft.Json) and plain objects
-                if (activeShows.Properties) {
-                    // JObject structure
-                    for (let prop of activeShows.Properties) {
-                        activeShowsMap[prop.Name] = prop.Value;
-                    }
-                } else {
-                    // Plain object - iterate keys
-                    for (let key in activeShows) {
-                        if (activeShows.hasOwnProperty(key)) {
-                            activeShowsMap[key] = activeShows[key];
-                        }
-                    }
-                }
-            }
-            
-            // Store active shows globally
-            currentActiveShows = activeShowsMap;
             
             // Load display IDs for all shows in parallel
             const showPromises = showList.map(async (showName) => {
@@ -584,23 +796,36 @@ window.UpdateGlobalShowSelect = async function () {
             const orderedShows = showList.map(showName => {
                 return showsWithDisplay.find(s => s.name === showName) || { name: showName, displayId: null };
             });
+            orderedShows.forEach((show) => {
+                currentShowDisplays[show.name] = show.displayId || '';
+            });
+            const filterDid = selectedChannel && selectedChannel.displayId ? selectedChannel.displayId : '';
+            const visibleShows = filterDid
+                ? orderedShows.filter((show) => show.displayId === filterDid)
+                : orderedShows;
+            const assignedShow = (selectedChannel && selectedChannel.showName) || '';
             
-            // Determine which show to select: last selected first, then first show
-            let showToSelect = loadLastSelectedShow();
-            // Verify the show still exists
-            if (showToSelect && !showList.includes(showToSelect)) {
+            // Channel picks the show. Fallback: last selected, then first visible.
+            let showToSelect = assignedShow;
+            if (showToSelect && !visibleShows.some((show) => show.name === showToSelect)) {
                 showToSelect = '';
             }
-            // If still no show, select the first one (guaranteed fallback)
             if (!showToSelect) {
-                if (showList.length > 0) {
-                    showToSelect = showList[0];
-                } else if (orderedShows.length > 0) {
-                    showToSelect = orderedShows[0].name;
-                }
+                const last = loadLastSelectedShow();
+                if (last && visibleShows.some((show) => show.name === last)) showToSelect = last;
+            }
+            if (!showToSelect && visibleShows.length > 0) {
+                showToSelect = visibleShows[0].name;
             }
             
-            orderedShows.forEach(show => {
+            if (!visibleShows.length) {
+                const empty = document.createElement('option');
+                empty.value = '';
+                empty.text = filterDid ? 'No show for this display' : 'No shows';
+                sel.appendChild(empty);
+            }
+
+            visibleShows.forEach(show => {
                 let o = document.createElement('option');
                 o.value = show.name;
                 
@@ -608,23 +833,15 @@ window.UpdateGlobalShowSelect = async function () {
                 // displayId is a single character (0-z), convert it back to display name
                 let displayText = '';
                 if (show.displayId) {
-                    // Find the display entry by ID
-                    const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === show.displayId);
-                    if (displayEntry) {
-                        const displayName = displayEntry[1].name || displayEntry[0].replace(/^EINK_/, '');
-                        displayText = ' (' + displayName + ')';
-                    } else {
-                        // Fallback: just show the ID if not found
-                        displayText = ' (' + show.displayId + ')';
-                    }
+                    const displayName = displayNameForId(show.displayId);
+                    displayText = displayName ? ' (' + displayName + ')' : '';
                 }
                 
-                // Check if this show is active for its displayId
-                const isActiveForDisplay = show.displayId && activeShowsMap[show.displayId] === show.name;
+                const isActiveForChannel = !!assignedShow && show.name === assignedShow;
                 
-                // Mark active show with visual indicator
+                // Mark only the show assigned to the selected channel
                 let activeIndicator = '';
-                if (isActiveForDisplay) {
+                if (isActiveForChannel) {
                     activeIndicator = '⭐ ';
                     o.setAttribute('data-active', 'true');
                     o.setAttribute('data-display-id', show.displayId);
@@ -662,8 +879,8 @@ window.UpdateGlobalShowSelect = async function () {
                     return found;
                 } else {
                     // If no show to select, at least select the first one
-                    if (orderedShows.length > 0) {
-                        const firstShow = orderedShows[0].name;
+                    if (visibleShows.length > 0) {
+                        const firstShow = visibleShows[0].name;
                         sel.value = firstShow;
                         sel.selectedIndex = 0;
                         if (sel.options[0]) {
@@ -740,6 +957,9 @@ window.UpdateGlobalShowSelect = async function () {
             // Update shows array
             shows = showList;
             
+            if (window.UpdateGlobalChannelSelect) {
+                window.UpdateGlobalChannelSelect();
+            }
             // Update button titles and states
             if (window.UpdateButtonTitles) {
                 window.UpdateButtonTitles();
@@ -764,9 +984,15 @@ window.UpdateGlobalShowSelect = async function () {
             }, 100);
         } else {
             sel.innerHTML = '<option value="">-- No shows available --</option>';
+            if (window.UpdateGlobalChannelSelect) window.UpdateGlobalChannelSelect();
+            if (window.UpdateButtonTitles) window.UpdateButtonTitles();
+            if (window.UpdateButtonStates) window.UpdateButtonStates();
         }
     } catch (err) {
         console.error("Error updating global show select:", err);
+    } finally {
+        window._updatingShowSelect = false;
+        syncPhotoSettingsDisplayFromContext();
     }
 };
 
@@ -791,7 +1017,7 @@ window.UpdateButtonStates = async function () {
     const selectedShow = globalSelect ? globalSelect.value : '';
     
     // Buttons that modify the current show
-    const modifyButtons = ['btnDeleteShow', 'btnActivateShow', 'btnShowSettings', 'btnAddShowPhotos', 'btnManageShowPhotos', 'btnExportShow'];
+    const modifyButtons = ['btnDeleteShow', 'btnShowSettings', 'btnAddShowPhotos', 'btnManageShowPhotos', 'btnExportShow'];
     
     // Get the displayId of the selected show
     let selectedShowDisplayId = null;
@@ -808,13 +1034,26 @@ window.UpdateButtonStates = async function () {
     
     // Check if the selected show is active for its displayId
     const selectedShowTrimmed = selectedShow ? selectedShow.trim() : '';
-    const isActive = selectedShowDisplayId && 
-                   currentActiveShows[selectedShowDisplayId] && 
+    const isActive = !!selectedShowTrimmed && !!selectedShowDisplayId &&
+                   currentActiveShows[selectedShowDisplayId] &&
                    currentActiveShows[selectedShowDisplayId].trim() === selectedShowTrimmed;
     
     modifyButtons.forEach(btnId => {
         const btn = document.getElementById(btnId);
         if (btn) {
+            if (!selectedShow) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+                btn.title = 'Create or select a show first.';
+                btn.style.backgroundColor = '';
+                btn.style.borderColor = '';
+                btn.style.color = '';
+                return;
+            }
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
             if (isActive) {
                 // Current show is selected and active for its displayId - highlight button with light red tint
                 btn.style.backgroundColor = '#ffe0e0';
@@ -876,6 +1115,11 @@ window.ReloadCurrentPageIfNeeded = function () {
     ];
     
     if (showSpecificPages.includes(currentPageId)) {
+        if (!getSelectedShowName()) {
+            window.ShowPage(currentPageId === 'AddShowPhotos' || currentPageId === 'ManageShowPhotos'
+                ? 'AddNewShow' : 'TopMenu');
+            return;
+        }
         // Reload the page by calling ShowPage again (which will call the appropriate Load function)
         // Use a small delay to ensure the show selection is fully updated
         setTimeout(() => {
@@ -904,15 +1148,7 @@ window.UpdatePageTitleIfNeeded = function () {
             const pageId = page.id;
             const titleEl = page.querySelector('.page-title');
             if (titleEl && pageTitles[pageId]) {
-                let title = pageTitles[pageId];
-                if (title.includes('<showName/>')) {
-                    if (selectedShow) {
-                        title = title.replace(/<showName\/>/g, selectedShow);
-                    } else {
-                        title = title.replace(/<showName\/>/g, '(no show selected)');
-                    }
-                    titleEl.innerText = title;
-                }
+                setPageTitle(titleEl, pageId);
             }
             
             // Update delete show name display if on DeleteShow page
@@ -1164,57 +1400,9 @@ window.ResetToDefault = async function () {
     if (autoEl) autoEl.checked = true;
     if (autoAddEl) autoAddEl.checked = true;
     document.getElementById('bgrdColor').value = "#ffffff";
-    
-    // Set displayID to the display type of the active show
-    const displaySelect = document.getElementById('displayID');
-    if (displaySelect) {
-        let displayIdToUse = defaultDisplayId; // Fallback to default
-        
-        // Get the active show from globalShowSelect
-        const globalSelect = document.getElementById('globalShowSelect');
-        const showName = globalSelect ? globalSelect.value : '';
-        
-        if (showName) {
-            try {
-                // Get the displayId of the active show
-                const showRes = await new RESTX().promiseCall('getShow', { showName: showName });
-                if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
-                    const showDisplayId = showRes.output.show.displayId;
-                    
-                    // Convert single character displayId to display key (e.g., "EINK_E6_730_sq_800x480")
-                    const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === showDisplayId);
-                    if (displayEntry) {
-                        displayIdToUse = displayEntry[0];
-                    }
-                }
-            } catch (e) {
-                console.warn("Could not load displayId for active show:", showName, e);
-            }
-        }
-        
-        // Check if the displayId exists in options
-        let optionExists = false;
-        for (let i = 0; i < displaySelect.options.length; i++) {
-            if (displaySelect.options[i].value === displayIdToUse) {
-                optionExists = true;
-                break;
-            }
-        }
-        
-        if (optionExists) {
-            displaySelect.value = displayIdToUse;
-        } else if (displaySelect.options.length > 0) {
-            // If displayId doesn't exist, use first option
-            displaySelect.value = displaySelect.options[0].value;
-        }
-        
-        // Force update by triggering change event
-        displaySelect.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    
-    // Only update preview if an image is loaded
+    syncPhotoSettingsDisplayFromContext();
     if (currentInk) {
-        window.UpdatePreview();
+        window.UpdateDisplay();
     }
 };
 
@@ -1473,9 +1661,18 @@ async function LoadKIModel() {
             console.warn("AI: Backend test failed, but we'll still try to load the model...");
         }
 
-        // Standard-MobileNet-Modell (lädt Gewichte von TensorFlow-Hosting / CDN — Internet nötig)
-        console.log("AI: Loading COCO-SSD model…");
-        detectorModel = await cocoSsd.load();
+        const root = (typeof channelBaseUrl === 'function' ? channelBaseUrl() : '') || location.origin;
+        const localUrl = root + '/src/libs/models/model.json';
+        console.log("AI: Loading local COCO-SSD model…", localUrl);
+        try {
+            detectorModel = await cocoSsd.load({
+                base: 'lite_mobilenet_v2',
+                modelUrl: localUrl
+            });
+        } catch (localErr) {
+            console.warn("AI: Local model failed, trying CDN:", localErr);
+            detectorModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        }
         console.log("AI: Model loaded.");
 
         if (!detectorModel) {
@@ -1491,15 +1688,18 @@ async function LoadKIModel() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    const dSel = document.getElementById('displayID');
-    for (let k in EInkDef.DISPLAYS) {
-        if (k === "EINK_NONE_DISPLAY") continue;
-        let o = document.createElement('option');
-        o.value = k;
-        o.text = EInkDef.DISPLAYS[k].name || k.replace("EINK_", "");
-        dSel.appendChild(o);
-    }
+    initI18n().then(() => {
+        if (window.UpdateButtonTitles) window.UpdateButtonTitles();
+        if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+    });
+    const lidSel = document.getElementById('appLid');
+    if (lidSel) lidSel.addEventListener('change', () => {
+        setLid(lidSel.value);
+        if (window.UpdateButtonTitles) window.UpdateButtonTitles();
+        if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+    });
     loadSettingsFromStorage();
+    syncPhotoSettingsDisplayFromContext();
     // Load AI model and hide overlay when done
     Promise.all([
         window.UpdateGlobalShowSelect().then(() => {
@@ -1608,17 +1808,13 @@ window.addEventListener('DOMContentLoaded', () => {
     Object.keys(pageTitles).forEach(id => {
         const btn = document.getElementById('btn' + id);
         if (btn) {
-                let title = pageTitles[id];
-                // Replace <showName/> with the currently selected show name
-                if (title.includes('<showName/>')) {
-                    if (selectedShow) {
-                        title = title.replace(/<showName\/>/g, selectedShow);
-                    } else {
-                        title = title.replace(/<showName\/>/g, '(no show selected)');
-                    }
+                let title = t(pageTitles[id], { showName: selectedShow, channelName: selectedChannelLabel() });
+                title = titleWithShow(title, selectedShow);
+                if (title.includes('<channelName/>')) {
+                    title = title.replace(/<channelName\/>/g, selectedChannelLabel());
                 }
                 btn.innerText = title;
-            btn.onclick = () => window.ShowPage(id);
+                btn.onclick = () => window.ShowPage(id);
         }
     });
     };
@@ -1729,7 +1925,6 @@ window.SaveCurImage = function () {
 // Enable/disable photo settings controls based on whether we have an original image
 window.SetPhotoSettingsControlsEnabled = function(enabled) {
     const controls = [
-        'displayID',
         'bgrdColor',
         'saturation',
         'contrast',
@@ -1833,11 +2028,7 @@ window.LoadImageFromBase64 = async function () {
         const decodedDisplayName = displayEntry[1].name || decodedDisplayID.replace(/^EINK_/, '');
         const decodedOrientation = storedOrient === 1 ? EInkDef.PORTRAIT : EInkDef.LANDSCAPE;
         
-        // Update UI elements with decoded values
-        const displayIDSelect = document.getElementById('displayID');
-        if (displayIDSelect && displayIDSelect.value !== decodedDisplayID) {
-            displayIDSelect.value = decodedDisplayID;
-        }
+        applyPhotoSettingsDisplay(decodedDisplayID);
         
         const orientationSelect = document.getElementById('orientation');
         if (orientationSelect) {
@@ -2176,10 +2367,10 @@ window.ProcessAndAddPhotos = async function () {
         setTimeout(() => {
             messageDiv.style.display = 'none';
         }, 3000);
+        window.EndOperation();
         return;
     }
     
-    // Ensure AI model is loaded
     if (!detectorModel) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#3498db';
@@ -2188,14 +2379,9 @@ window.ProcessAndAddPhotos = async function () {
         try {
             await LoadKIModel();
         } catch (loadErr) {
-            messageDiv.style.background = '#e74c3c';
-            messageDiv.innerText = "AI could not be loaded: " + loadErr.message;
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 5000);
-            // End operation - re-enable back buttons
-            window.EndOperation();
-            return;
+            console.warn("AI unavailable, adding photos without subject detection:", loadErr);
+            messageDiv.style.background = '#f39c12';
+            messageDiv.innerText = "AI unavailable — adding photos without subject detection.";
         }
     }
     
@@ -2220,12 +2406,7 @@ window.ProcessAndAddPhotos = async function () {
     let displayIDKey = defaultDisplayId;
     if (showDisplayId) {
         // Find the display entry by ID
-        const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === showDisplayId);
-        if (displayEntry) {
-            displayIDKey = displayEntry[0];
-        } else {
-            console.warn("Show displayId not found in DISPLAYS, using default:", showDisplayId);
-        }
+        displayIDKey = displayKeyForId(showDisplayId);
     }
     
     // Get current photo settings (but use displayId from show, not from Photo Settings)
@@ -2260,7 +2441,14 @@ window.ProcessAndAddPhotos = async function () {
                 originalImg.src = imgUrl;
             });
             
-            const predictions = await detectorModel.detect(originalImg);
+            let predictions = [];
+            if (detectorModel) {
+                try {
+                    predictions = await detectorModel.detect(originalImg);
+                } catch (detectErr) {
+                    console.warn("AI detect skipped:", detectErr);
+                }
+            }
             URL.revokeObjectURL(imgUrl);
 
             let imageSettings = { ...settings };
@@ -2417,7 +2605,8 @@ window.LoadManageShowPhotosPage = function () {
     
     // Load show photos - use original show name for getShow (it will convert internally)
     new RESTX().promiseCall('getShow', {
-        showName: originalShowName
+        showName: originalShowName,
+        channel: getSelectedChannelSlug()
     }).then(_res => {
         if (_res.ok && _res.output.show && _res.output.show.imgs) {
             const imgs = _res.output.show.imgs;
@@ -2480,10 +2669,8 @@ window.LoadManageShowPhotosPage = function () {
             let thumbnailHeight = 120; // Default height
             let isRoundDisplay = false; // Default to square
             if (show.displayId) {
-                // Find the display entry by ID
-                const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === show.displayId);
-                if (displayEntry) {
-                    const display = displayEntry[1];
+                const display = displayDefForId(show.displayId);
+                if (display) {
                     if (display.width && display.height) {
                         displayAspectRatio = display.width / display.height;
                         // Calculate thumbnail height based on aspect ratio (width is 100%, so height = width / aspectRatio)
@@ -2592,7 +2779,7 @@ window.LoadManageShowPhotosPage = function () {
                     // Load and decode the .ink file to display as thumbnail on canvas
                     // Images are stored as .ink files in /shows/show_{showName}/{imgName}
                     // Use safeShowNameForPaths (with show_ prefix) for file paths
-                    const imgUrl = `/shows/${safeShowNameForPaths}/${imgName}`;
+                    const imgUrl = `/shows/${show.relDir || safeShowNameForPaths}/${imgName}`;
                     fetch(imgUrl)
                         .then(response => {
                             if (!response.ok) {
@@ -2605,10 +2792,7 @@ window.LoadManageShowPhotosPage = function () {
                             // Use displayId from show, not from Photo Settings
                             let displayIDKey = defaultDisplayId;
                             if (show && show.displayId) {
-                                const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === show.displayId);
-                                if (displayEntry) {
-                                    displayIDKey = displayEntry[0];
-                                }
+                                displayIDKey = displayKeyForId(show.displayId);
                             }
                             const ink = new EInk(uint8Array, displayIDKey);
                             ink.Load().then(() => {
@@ -2959,19 +3143,47 @@ window.LoadDeleteShowPage = function () {
     if (messageDiv) messageDiv.style.display = 'none';
 };
 
-window.LoadActivateShowPage = function () {
-    // Update the display of the show name to be activated
+window.LoadActivateShowPage = async function () {
     const displayEl = document.getElementById('activateShowNameDisplay');
     const globalSelect = document.getElementById('globalShowSelect');
     const selectedShow = globalSelect ? globalSelect.value : '';
     if (displayEl) {
         displayEl.innerText = selectedShow || '(no show selected)';
     }
-    // Clear message
     const messageDiv = document.getElementById('activateShowMessage');
     if (messageDiv) messageDiv.style.display = 'none';
-    
-    // Update button state based on whether show is already active
+
+    let selectedShowDisplayId = null;
+    if (selectedShow) {
+        try {
+            const showRes = await new RESTX().promiseCall('getShow', { showName: selectedShow });
+            if (showRes.ok && showRes.output.show) selectedShowDisplayId = showRes.output.show.displayId || null;
+        } catch (e) { /* ignore */ }
+    }
+    const chSel = document.getElementById('activateChannelSelect');
+    if (chSel) {
+        chSel.innerHTML = '';
+        const matching = Object.entries(currentChannels).filter(([, ch]) =>
+            selectedShowDisplayId && ch.displayId === selectedShowDisplayId
+        );
+        if (!matching.length) {
+            const o = document.createElement('option');
+            o.value = '';
+            o.text = selectedShowDisplayId
+                ? 'No channel for this display — create one first'
+                : 'No channels yet';
+            chSel.appendChild(o);
+        } else {
+            matching.forEach(([slug, ch]) => {
+                const o = document.createElement('option');
+                o.value = slug;
+                o.text = channelLabel(slug, ch, true) +
+                    (ch.showName ? ' → ' + ch.showName : '');
+                if (slug === currentDefaultChannel) o.selected = true;
+                chSel.appendChild(o);
+            });
+        }
+    }
     window.UpdateActivateShowButton();
 };
 
@@ -3003,20 +3215,26 @@ window.UpdateActivateShowButton = async function () {
     
     // Check if the selected show is active for its displayId
     const selectedShowTrimmed = selectedShow ? selectedShow.trim() : '';
-    const isActive = selectedShowDisplayId && 
-                   currentActiveShows[selectedShowDisplayId] && 
-                   currentActiveShows[selectedShowDisplayId].trim() === selectedShowTrimmed;
+    const chSel = document.getElementById('activateChannelSelect');
+    const channelSlug = chSel ? chSel.value : '';
+    const assigned = channelSlug && currentChannels[channelSlug] &&
+        currentChannels[channelSlug].showName === selectedShowTrimmed;
     
-    if (isActive) {
+    if (!channelSlug) {
         activateBtn.disabled = true;
         activateBtn.style.opacity = '0.5';
         activateBtn.style.cursor = 'not-allowed';
-        activateBtn.title = 'This show is already active for its display.';
+        activateBtn.title = 'Create a matching channel first.';
+    } else if (assigned) {
+        activateBtn.disabled = true;
+        activateBtn.style.opacity = '0.5';
+        activateBtn.style.cursor = 'not-allowed';
+        activateBtn.title = 'This show is already assigned to the channel.';
     } else {
         activateBtn.disabled = false;
         activateBtn.style.opacity = '1';
         activateBtn.style.cursor = 'pointer';
-        activateBtn.title = 'Activate this show.';
+        activateBtn.title = 'Assign this show to the channel.';
     }
 };
 
@@ -3051,8 +3269,10 @@ window.ActivateSelectedShow = function () {
     messageDiv.style.color = 'white';
     messageDiv.innerText = "Activating show...";
     
+    const channelSlug = document.getElementById('activateChannelSelect')?.value || '';
     new RESTX().promiseCall('setActiveShow', {
-        showName: showName
+        showName: showName,
+        channel: channelSlug
     }).then(async _res => {
         if (_res.ok) {
             // Update global show select to reflect the new active show
@@ -3357,36 +3577,29 @@ window.ImportShow = function () {
 };
 
 window.LoadAddNewShowPage = function () {
-    // Populate display dropdown
-    const displaySelect = document.getElementById('newShowDisplayId');
-    if (displaySelect) {
-        displaySelect.innerHTML = '';
-        for (let k in EInkDef.DISPLAYS) {
-            if (k === "EINK_NONE_DISPLAY") continue;
-            let o = document.createElement('option');
-            o.value = k;
-            o.text = EInkDef.DISPLAYS[k].name || k.replace("EINK_", "");
-            displaySelect.appendChild(o);
-        }
-        
-        // Set default from localStorage (Photo Settings)
-        const saved = localStorage.getItem(SETTINGS_KEY);
-        if (saved) {
-            try {
-                const settings = JSON.parse(saved);
-                if (settings.displayID) {
-                    displaySelect.value = settings.displayID;
-                } else {
-                    displaySelect.value = defaultDisplayId;
-                }
-            } catch (e) {
-                displaySelect.value = defaultDisplayId;
-            }
-        } else {
-            displaySelect.value = defaultDisplayId;
-        }
+    const slug = getSelectedChannelSlug();
+    const ch = currentChannels[slug];
+    const chLabel = document.getElementById('newShowChannelLabel');
+    if (chLabel) {
+        chLabel.textContent = (slug && ch) ? channelLabel(slug, ch, true) : 'Choose a channel in the header first';
     }
+    updateNewShowDisplayFromChannel();
 };
+
+function updateNewShowDisplayFromChannel() {
+    const slug = getSelectedChannelSlug();
+    const label = document.getElementById('newShowDisplayLabel');
+    if (!label) return;
+    const ch = currentChannels[slug];
+    if (!ch || !ch.displayId) {
+        label.innerHTML = '–';
+        return;
+    }
+    const def = displayDefForId(ch.displayId);
+    label.innerHTML = (displayNameForId(ch.displayId) || ch.displayId) +
+        (paletteTag(def) ? ' · ' + paletteTag(def) : '') +
+        ' <span class="eink-swatches">' + swatchesHtml((def && def.colors) || []) + '</span>';
+}
 
 // Check if current show's displayId matches Photo Settings displayId
 window.CheckShowDisplayIdMatch = async function () {
@@ -3442,10 +3655,7 @@ window.UpdatePhotoActionButtons = async function () {
     // Convert show displayId (single char) to display name for messages
     let showDisplayName = checkResult.showDisplayId || '';
     if (checkResult.showDisplayId) {
-        const displayEntry = Object.entries(EInkDef.DISPLAYS).find(([key, value]) => value.id === checkResult.showDisplayId);
-        if (displayEntry) {
-            showDisplayName = displayEntry[1].name || displayEntry[0].replace(/^EINK_/, '');
-        }
+        showDisplayName = displayNameForId(checkResult.showDisplayId);
     }
     
     // For Save Image button: only enable if show is selected AND displayId matches
@@ -3495,18 +3705,8 @@ window.CreateNewShow = function () {
     const showNameInput = document.getElementById('newShowName');
     const messageDiv = document.getElementById('newShowMessage');
     const showName = showNameInput.value.trim();
-    const displayIDKey = document.getElementById('newShowDisplayId')?.value || defaultDisplayId;
-    
-    // Get the single character ID from the display definition
-    let displayId = '';
-    if (displayIDKey && EInkDef.DISPLAYS[displayIDKey]) {
-        displayId = EInkDef.DISPLAYS[displayIDKey].id;
-    } else {
-        // Fallback: try to get from default
-        if (EInkDef.DISPLAYS[defaultDisplayId]) {
-            displayId = EInkDef.DISPLAYS[defaultDisplayId].id;
-        }
-    }
+    const channelPick = getSelectedChannelSlug();
+    const displayId = (currentChannels[channelPick] && currentChannels[channelPick].displayId) || '';
     
     if (!showName) {
         messageDiv.style.display = 'block';
@@ -3516,11 +3716,11 @@ window.CreateNewShow = function () {
         return;
     }
     
-    if (!displayId) {
+    if (!channelPick || !currentChannels[channelPick] || !displayId) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#e74c3c';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Please select a display type!";
+        messageDiv.innerText = "Choose a channel first. The channel sets the display type.";
         return;
     }
     
@@ -3531,10 +3731,8 @@ window.CreateNewShow = function () {
     messageDiv.style.color = 'white';
     messageDiv.innerText = "Creating show...";
     
-    new RESTX().promiseCall('createShow', {
-        showName: showName,
-        displayId: displayId
-    }).then(_res => {
+    const createPayload = { showName: showName, displayId: displayId, channel: channelPick };
+    new RESTX().promiseCall('createShow', createPayload).then(_res => {
         if (_res.ok) {
             // Update global show select and set the new show as selected
             window.UpdateGlobalShowSelect().then(() => {
@@ -3554,12 +3752,6 @@ window.CreateNewShow = function () {
                 showNameInput.value = '';
                 showNameInput.disabled = false;
                 
-                // Also re-enable display select if it exists
-                const displaySelect = document.getElementById('newShowDisplayId');
-                if (displaySelect) {
-                    displaySelect.disabled = false;
-                }
-                
                 // Return to menu after a short delay - ONLY AFTER UpdateGlobalShowSelect is done!
                 setTimeout(() => {
                     window.Return2TopMenu();
@@ -3569,27 +3761,253 @@ window.CreateNewShow = function () {
             messageDiv.style.background = '#e74c3c';
             messageDiv.innerText = "Error: Could not create show. The name may be invalid.";
             showNameInput.disabled = false;
-            // Also re-enable display select if it exists
-            const displaySelect = document.getElementById('newShowDisplayId');
-            if (displaySelect) {
-                displaySelect.disabled = false;
-            }
         }
     }).catch(err => {
         messageDiv.style.background = '#e74c3c';
         messageDiv.innerText = "Error: " + (err.message || err.toString());
         showNameInput.disabled = false;
-        // Also re-enable display select if it exists
-        const displaySelect = document.getElementById('newShowDisplayId');
-        if (displaySelect) {
-            displaySelect.disabled = false;
-        }
     });
 };
 
 // ===============================================================
 // DEVICE MANAGER & OTA FIRMWARE UPDATE
 // ===============================================================
+
+function showChannelMessage(text, ok) {
+    const el = document.getElementById('channelMessage');
+    if (!el) return;
+    el.style.display = 'block';
+    el.style.background = ok ? '#27ae60' : '#e74c3c';
+    el.style.color = 'white';
+    el.innerText = text;
+    if (ok) setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+window.LoadChannelsPage = async function () {
+    const listEl = document.getElementById('channelList');
+    const createBlock = document.getElementById('channelCreateBlock');
+    const editBlock = document.getElementById('channelEditBlock');
+    try {
+        const _res = await new RESTX().promiseCall('getShows');
+        const raw = _res.output.shows || {};
+        applyShowsConfig(raw);
+        if (window.UpdateGlobalChannelSelect) window.UpdateGlobalChannelSelect();
+        fillDisplaySelect(document.getElementById('newChannelDisplay'));
+        const users = [...new Set(Object.values(currentChannels).map((c) => c.userId || c.user).filter(Boolean))];
+        const targets = [...new Set(Object.values(currentChannels).map((c) => c.groupId || c.group || c.target).filter(Boolean))];
+        const userList = document.getElementById('channelUserList');
+        const targetList = document.getElementById('channelTargetList');
+        if (userList) userList.innerHTML = users.map((u) => `<option value="${u}">`).join('');
+        if (targetList) targetList.innerHTML = targets.map((t) => `<option value="${t}">`).join('');
+
+        const slug = getSelectedChannelSlug();
+        const isNew = window._forceNewChannel || !slug || !currentChannels[slug];
+        window._forceNewChannel = false;
+        if (createBlock) createBlock.style.display = isNew ? 'block' : 'none';
+        if (editBlock) editBlock.style.display = isNew ? 'none' : 'block';
+
+        if (!isNew) {
+            const ch = currentChannels[slug] || {};
+            const isDef = slug === currentDefaultChannel;
+            const titleEl = document.getElementById('channelEditTitle');
+            if (titleEl) titleEl.textContent = channelLabel(slug, ch, true) + (isDef ? ' (default)' : '');
+            const urlEl = document.getElementById('editChannelUrl');
+            if (urlEl) urlEl.textContent = urlForChannel(slug);
+            const dLabel = document.getElementById('editChannelDisplayLabel');
+            if (dLabel) {
+                const def = displayDefForId(ch.displayId);
+                dLabel.innerHTML = (displayNameForId(ch.displayId) || ch.displayId || '–') +
+                    (paletteTag(def) ? ' · ' + paletteTag(def) : '') +
+                    ' <span class="eink-swatches">' + swatchesHtml((def && def.colors) || []) + '</span>';
+            }
+            fillShowNameSelect(document.getElementById('editChannelShow'), ch.shows || [], ch.showName || '');
+            const defBox = document.getElementById('editChannelDefault');
+            if (defBox) defBox.checked = isDef;
+        }
+
+        const slugs = Object.keys(currentChannels);
+        if (!listEl) return;
+        if (!slugs.length) {
+            listEl.innerHTML = '<p style="color:#888;">No channels yet. Choose + New Channel in the header.</p>';
+            return;
+        }
+        let html = '<table style="width:100%; border-collapse:collapse; font-size:0.92rem;">';
+        html += '<tr style="text-align:left; border-bottom:1px solid var(--border);"><th style="padding:6px;">Channel</th><th>Display</th><th>Show</th><th></th></tr>';
+        slugs.forEach((s) => {
+            const ch = currentChannels[s] || {};
+            const isDef = s === currentDefaultChannel;
+            const current = s === slug;
+            html += '<tr style="border-bottom:1px solid var(--border);' + (current ? ' background:rgba(230,126,34,0.12);' : '') + '">';
+            html += `<td style="padding:8px 6px;"><strong>${s}</strong>${isDef ? ' <span style="color:#d32f2f;">default</span>' : ''}</td>`;
+            const def = displayDefForId(ch.displayId);
+            html += `<td>${displayNameForId(ch.displayId) || ch.displayId || '–'}${paletteTag(def) ? ' · ' + paletteTag(def) : ''} <span class="eink-swatches">${swatchesHtml((def && def.colors) || [])}</span></td>`;
+            html += `<td>${ch.showName || '—'}</td>`;
+            html += '<td style="white-space:nowrap; padding:8px 0;">';
+            html += `<button class="btn-action" type="button" onclick="window.selectChannelInHeader('${s}')" style="padding:4px 8px; font-size:0.8rem;">Edit</button>`;
+            html += '</td></tr>';
+        });
+        html += '</table>';
+        listEl.innerHTML = html;
+        if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+        if (window.UpdateButtonTitles) window.UpdateButtonTitles();
+    } catch (err) {
+        if (listEl) listEl.innerHTML = '<p style="color:#c00;">Could not load channels: ' + (err.message || err) + '</p>';
+    }
+};
+
+window.CreateChannel = async function () {
+    const user = document.getElementById('newChannelUser')?.value.trim();
+    const target = document.getElementById('newChannelTarget')?.value.trim();
+    const displayId = document.getElementById('newChannelDisplay')?.value;
+    if (!user || !target || !displayId) {
+        showChannelMessage('User ID, Group ID and display are required.', false);
+        return;
+    }
+    try {
+        const res = await new RESTX().promiseCall('createChannel', { userId: user, groupId: target, displayId });
+        if (!res.ok) throw new Error(res.error?.msg || 'Create failed');
+        const created = (res.output.shows && res.output.shows.channels) || {};
+        const id = Object.keys(created).find((k) => {
+            const c = created[k] || {};
+            return (c.userId || c.user) === user && (c.groupId || c.group || c.target) === target && c.displayId === displayId;
+        }) || (user + '/' + target + '/' + displayId);
+        showChannelMessage('Channel "' + id + '" created.', true);
+        saveLastSelectedChannel(id);
+        await window.UpdateGlobalShowSelect();
+        const hdr = document.getElementById('globalChannelSelect');
+        if (hdr) hdr.value = id;
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.SaveSelectedChannel = async function () {
+    const slug = getSelectedChannelSlug();
+    if (!slug || !currentChannels[slug]) {
+        showChannelMessage('Select a channel first.', false);
+        return;
+    }
+    const showName = document.getElementById('editChannelShow')?.value || '';
+    const makeDefault = !!document.getElementById('editChannelDefault')?.checked;
+    try {
+        if (showName) {
+            const res = await new RESTX().promiseCall('setActiveShow', { showName, channel: slug });
+            if (!res.ok) throw new Error(res.error?.msg || 'Activate failed');
+        }
+        if (makeDefault && slug !== currentDefaultChannel) {
+            const dres = await new RESTX().promiseCall('setDefaultChannel', { channel: slug });
+            if (!dres.ok) throw new Error(dres.error?.msg || 'Default failed');
+        }
+        showChannelMessage('Channel updated.', true);
+        await window.UpdateGlobalShowSelect();
+        const hdr = document.getElementById('globalChannelSelect');
+        if (hdr) hdr.value = slug;
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.DeleteSelectedChannel = async function () {
+    const slug = getSelectedChannelSlug();
+    if (!slug || slug === NEW_CHANNEL_VALUE) {
+        showChannelMessage('Select a channel first.', false);
+        return;
+    }
+    await window.DeleteChannel(slug);
+};
+
+window.AssignChannelShow = async function (slug, showName) {
+    try {
+        const res = await new RESTX().promiseCall('updateChannel', { slug, showName });
+        if (!res.ok) throw new Error(res.error?.msg || 'Update failed');
+        await window.UpdateGlobalShowSelect();
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.SetDefaultChannel = async function (slug) {
+    if (!slug) {
+        showChannelMessage('Select a channel first.', false);
+        return;
+    }
+    try {
+        const res = await new RESTX().promiseCall('setDefaultChannel', { slug });
+        if (!res.ok) throw new Error(res.error?.msg || 'Default failed');
+        showChannelMessage('Default channel is now "' + slug + '".', true);
+        await window.UpdateGlobalShowSelect();
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.DeleteChannel = async function (slug) {
+    if (!confirm('Delete channel "' + slug + '" and all its shows?')) return;
+    try {
+        const res = await new RESTX().promiseCall('deleteChannel', { channel: slug });
+        if (!res.ok) throw new Error(res.error?.msg || 'Delete failed');
+        showChannelMessage('Channel "' + slug + '" deleted.', true);
+        if (loadLastSelectedChannel() === slug) {
+            localStorage.removeItem(LAST_SELECTED_CHANNEL_KEY);
+        }
+        await window.UpdateGlobalShowSelect();
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.DeleteSelectedTarget = async function () {
+    const slug = getSelectedChannelSlug();
+    const ch = currentChannels[slug];
+    if (!ch) return;
+    if (!confirm('Delete all channels and shows of group "' + (ch.userId || ch.user) + '/' + (ch.groupId || ch.group || ch.target) + '"?')) return;
+    try {
+        const res = await new RESTX().promiseCall('deleteTarget', { userId: ch.userId || ch.user, groupId: ch.groupId || ch.group || ch.target });
+        if (!res.ok) throw new Error(res.error?.msg || 'Delete failed');
+        localStorage.removeItem(LAST_SELECTED_CHANNEL_KEY);
+        await window.UpdateGlobalShowSelect();
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.DeleteSelectedUser = async function () {
+    const slug = getSelectedChannelSlug();
+    const ch = currentChannels[slug];
+    if (!ch) return;
+    if (!confirm('Delete User ID "' + (ch.userId || ch.user) + '" and all groups and shows?')) return;
+    try {
+        const res = await new RESTX().promiseCall('deleteUser', { userId: ch.userId || ch.user });
+        if (!res.ok) throw new Error(res.error?.msg || 'Delete failed');
+        localStorage.removeItem(LAST_SELECTED_CHANNEL_KEY);
+        await window.UpdateGlobalShowSelect();
+        await window.LoadChannelsPage();
+    } catch (err) {
+        showChannelMessage(err.message || String(err), false);
+    }
+};
+
+window.CopySelectedChannelUrl = async function () {
+    const slug = getSelectedChannelSlug();
+    if (!slug || slug === NEW_CHANNEL_VALUE) return;
+    await window.CopyChannelUrl(slug);
+};
+
+window.CopyChannelUrl = async function (slug) {
+    const url = urlForChannel(slug);
+    try {
+        await navigator.clipboard.writeText(url);
+        showChannelMessage('Copied ' + url, true);
+    } catch {
+        showChannelMessage(url, true);
+    }
+};
 
 window.RefreshDevices = async function () {
     const listEl = document.getElementById('deviceList');
@@ -3611,7 +4029,7 @@ window.RefreshDevices = async function () {
             const d = devices[key];
             const ip = d.ip || key.split('_').pop();
             const name = d.name || key;
-            const display = d.displayId || d.display || '–';
+            const display = displayNameForId(d.displayId || d.display) || d.displayId || d.display || '–';
             const lastSeen = d.lastEcho ? new Date(d.lastEcho).toLocaleString() : '–';
             html += `<tr style="border-bottom:1px solid #eee;">`;
             html += `<td style="padding:8px;">${name}</td>`;

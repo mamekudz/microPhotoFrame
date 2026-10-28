@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0
+
+One short-id table, same as `docs/technical_overview.md`. No aliases and no path remapping.
+
+- Spectra 6 7.3" is **`"9"`** only. `"I"` is Spectra BWR 2.13" again.
+- B&W: `"0"`–`"6"` as in the overview; extra B&W 5.83" is `"V"`.
+- Gray4: `"Q"`–`"U"` (`"T"` = reTerminal E1001).
+- New encodes write the same header id as the channel folder. `GetPathDisplayId` / `GetDisplayByPathId` are identity helpers.
+- Spectra 6 7.3" display name includes NeoFrame.
+- Short id `"f"` is Waveshare e-Paper (G) 1.54" · 200×200 · EPD_1in54g (not Spectra 3100). Spectra 3100 starts at 1.64" (`"g"`).
+
 ## 2.0.0
 
 Breaking release versus the **published** npm package `ink-encoder@1.0.0`. Unpublished local `1.2.0` / workspace `1.2.1` were never on the registry; **do not publish `1.2.1`**.
