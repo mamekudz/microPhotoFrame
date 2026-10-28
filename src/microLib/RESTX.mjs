@@ -254,7 +254,7 @@ export default class RESTX extends XMLHttpRequest {
     //log("REST ACTION=",CONF_WEBSERVICE_URL+"?action="+_action,rest);
     //log("Request size:",JSON.stringify(rest).length);
     //JSON.isCyclic(rest);
-    //console.Log("call rest ",this.isRunning);
+    //console.log("call rest ",this.isRunning);
     this.isRunning = true;
     this.send(JSON.stringify(rest));
     RESTX.lastRestRequestTime = Date.now();
@@ -271,7 +271,7 @@ export default class RESTX extends XMLHttpRequest {
    *   rest.promiseCall("getMyText")
    *       .then(_res => document.getElementById("myText").innerText = _res.output,
    *           function(_res){throw new Error("_res");})
-   *       .catch(_err => console.Log("Error on rest call 'getMyText'!",_err));
+   *       .catch(_err => console.log("Error on rest call 'getMyText'!",_err));
    * }
    */
   promiseCall = function (_serviceName, _input = {}, _preMessageCallback = null) {
@@ -282,9 +282,9 @@ export default class RESTX extends XMLHttpRequest {
         self.onprogress = function (_ev) {
         }
         self.onreadystatechange = function (_ev) {
-          //console.Log("A");
+          //console.log("A");
           if (_preMessageCallback != null) {
-            //console.Log("B");
+            //console.log("B");
             if (true) {
               let pms = self.getPreMsgsStrs();
               if (oldmsgNo != pms.length) {
@@ -296,13 +296,13 @@ export default class RESTX extends XMLHttpRequest {
               oldmsgNo = pms.length - 1;
             } else {
               let output = self.getLastPreMsg();
-              //console.Log(self.responseText);
+              //console.log(self.responseText);
               if (output != null) {
-                //console.Log("C");
+                //console.log("C");
                 if (oldmsgNo != output.no) {
-                  //console.Log(output.msg)
+                  //console.log(output.msg)
                   _preMessageCallback(JSON.parse(output.msg));
-                  //console.Log(output.msg.output);
+                  //console.log(output.msg.output);
                   //ClientLog.Html(output.msg.output);
                   oldmsgNo = output.no;
                 }
@@ -310,9 +310,14 @@ export default class RESTX extends XMLHttpRequest {
             }
           }
           if (self.readyState == RESTX.DONE) {
-            let res = self.finish();
+            let res;
+            try {
+              res = self.finish();
+            } catch (finErr) {
+              res = { ok: false, error: { msg: String(finErr && finErr.message ? finErr.message : finErr), code: -1 }, output: {} };
+            }
             if (res.hasOwnProperty("maintenances")) {
-              //console.Log("readyState",res);
+              //console.log("readyState",res);
               let oma = Config.maintenanceActive;
               Config.maintenanceActive = res.maintenances != null;
               if (oma != Config.maintenanceActive) {
@@ -349,7 +354,7 @@ export default class RESTX extends XMLHttpRequest {
         }
         self.onabort = function () {
           self.wasAbortedBySystem = true;
-          //console.Log("aborted",self);
+          //console.log("aborted",self);
           let res = self.finish();
           res.wasAbort = true;
           _reject(res);
@@ -359,6 +364,10 @@ export default class RESTX extends XMLHttpRequest {
           let res = self.finish();
           _reject(res);
         }
+        self.ontimeout = function () {
+          self.isRunning = false;
+          _reject({ ok: false, error: { msg: 'Request timed out', code: -1 }, output: {}, status: 0 });
+        };
       }
     )
     self.call(_serviceName, _input);
@@ -433,10 +442,7 @@ export default class RESTX extends XMLHttpRequest {
       /*-- @<BUILD_NEVER_AT_RELEASES:Production,Test --*/
       if (this.action != "startUpCheck") {
         if (this.responseText.trim() != "") {
-          //#let w = window.open("REST Errors", APPID + ":REST Errors", "resizable=yes,scrollbars=yes");
-          let w = window.open("", "REST_ERROR", "resizable=yes,scrollbars=yes");
-          if (w !== undefined && w !== null && typeof (w) !== "undefined") w.document.write(this.responseText);
-          console.error(this.status, ret, this.responseText);
+          console.error(this.status, ret, this.responseText.slice(0, 400));
         }
       }
       /*-- @>BUILD_NEVER_AT_RELEASES --*/
@@ -528,13 +534,17 @@ export default class RESTX extends XMLHttpRequest {
               }
             } catch (err) {
               console.error("!!!!PARSE RESTX.ERROR ON MESSAGE!!!!!", msg.substr(0, 20) + "....");
-              console.Log(msg);
+              console.log(msg);
               console.error(err);
             }
           }
         }
-      }else{
-        ret.mainmsg = this.responseText.JsonParse();
+      } else {
+        try {
+          ret.mainmsg = this.responseText.JsonParse();
+        } catch (parseErr) {
+          ret.mainmsg = { ok: false, error: { msg: 'Invalid server response', code: -1 } };
+        }
       }
     }
     return ret;
@@ -702,7 +712,7 @@ export default class RESTX extends XMLHttpRequest {
       }
     }
 
-    console.Log(_ret);
+    console.log(_ret);
 
     return _ret;
   }
@@ -729,7 +739,7 @@ export default class RESTX extends XMLHttpRequest {
     RESTX.serverRequest = new RESTX();
     RESTX.serverRequest.onreadystatechange = function () {
       let output = this.getLastPreMsg();
-      //console.Log(this.responseText);
+      //console.log(this.responseText);
       if (output != null) {
         if (oldmsgNo != output.no) {
           if (output.msg.hasOwnProperty("output")) {
@@ -761,7 +771,7 @@ export default class RESTX extends XMLHttpRequest {
   }
 
   static #restartRest = function (_this, _serviceName, _input, _timeout, _limit, _async, _cache) {
-    //console.Log("RESTX RestartRest");
+    //console.log("RESTX RestartRest");
     _this.call(_serviceName, _input, _timeout, _limit, _async, _cache, true);
   }
 

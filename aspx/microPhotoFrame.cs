@@ -124,9 +124,36 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     if (string.IsNullOrEmpty(_givenName)) {
       return "show_unknown";
     }
-    string safeName = Regex.Replace(_givenName, @"[^a-zA-Z0-9\-_]", "_");
-    safeName = safeName.Trim('_');
+    string safeName = Regex.Replace(_givenName, @"[^a-zA-Z0-9\-_.]", "_");
+    safeName = Regex.Replace(safeName, @"\.{2,}", ".");
+    safeName = safeName.Trim('.', '_');
+    if (string.IsNullOrEmpty(safeName) || safeName.Contains("..")) return "show_unknown";
     return "show_" + safeName;
+  }
+
+  private Dictionary<string, string> _displaySlugs;
+
+  public string DisplaySlugForId(string displayId) {
+    string key = displayId == null ? "" : displayId.Trim();
+    if (key.Length == 0) return "";
+    if (_displaySlugs == null) {
+      _displaySlugs = new Dictionary<string, string>();
+      try {
+        string slugPath = PathCorrection("./src/microLib/display-slugs.json");
+        JObject map = JObject.Parse(File.ReadAllText(slugPath));
+        foreach (var p in map.Properties()) _displaySlugs[p.Name] = (string)p.Value;
+      } catch { }
+    }
+    string slug;
+    return _displaySlugs.TryGetValue(key, out slug) ? slug : key;
+  }
+
+  public string ShowPackageFileName(string showName, string displayId) {
+    string baseName = string.IsNullOrEmpty(showName) ? "show" : Regex.Replace(showName, @"[^a-zA-Z0-9\-_.]", "_");
+    baseName = Regex.Replace(baseName, @"\.{2,}", ".").Trim('.', '_');
+    if (string.IsNullOrEmpty(baseName)) baseName = "show";
+    string slug = DisplaySlugForId(displayId);
+    return string.IsNullOrEmpty(slug) ? baseName + ".show" : baseName + "_" + slug + ".show";
   }
 
   private string ShowDisplayId(string showName) {
@@ -386,29 +413,36 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     *         output.showName, name of the created show (without "show_" prefix, perhaps corrected and cleaned)
     */
   public void CreateShow(dynamic _r) {
-    string orgShowName = (string)_r.input.showName;
-    string channel = _r.input.channel != null ? (string)_r.input.channel : "";
-    string user, target, displayId;
-    if (!TryParseChannelId(channel, out user, out target, out displayId)) {
-      throw new Exception("Kanal fehlt — zuerst einen Kanal anlegen.");
+    try {
+      string orgShowName = (string)_r.input.showName;
+      string channel = _r.input.channel != null ? (string)_r.input.channel : "";
+      string user, target, displayId;
+      if (!TryParseChannelId(channel, out user, out target, out displayId)) {
+        throw new Exception("Kanal fehlt — zuerst einen Kanal anlegen.");
+      }
+      string safe = GetSafeShowName(orgShowName);
+      string showPath = Path.Combine(ShowsRoot(), user, target, displayId, safe);
+      if (Directory.Exists(showPath)) throw new Exception("Show existiert bereits.");
+      Directory.CreateDirectory(showPath);
+      JObject show = new JObject();
+      show["name"] = orgShowName;
+      show["timer"] = 1;
+      show["mode"] = "random";
+      show["restStart"] = 22;
+      show["restEnd"] = 6;
+      show["imgs"] = new JArray();
+      show["displayId"] = displayId;
+      WriteAllJSONNoFormat(Path.Combine(showPath, "show.json"), show);
+      JObject shows = LoadShowsCfg();
+      _r.output.shows = shows;
+      _r.output.showName = orgShowName;
+      _r.ok = true;
+    } catch (Exception ex) {
+      _r.ok = false;
+      if (_r.error == null) _r.error = new JObject();
+      _r.error.msg = ex.Message;
+      _r.error.code = -1;
     }
-    string safe = GetSafeShowName(orgShowName);
-    string showPath = Path.Combine(ShowsRoot(), user, target, displayId, safe);
-    if (Directory.Exists(showPath)) throw new Exception("Show existiert bereits.");
-    Directory.CreateDirectory(showPath);
-    JObject show = new JObject();
-    show["name"] = orgShowName;
-    show["timer"] = 1;
-    show["mode"] = "random";
-    show["restStart"] = 22;
-    show["restEnd"] = 6;
-    show["imgs"] = new JArray();
-    show["displayId"] = displayId;
-    WriteAllJSONNoFormat(Path.Combine(showPath, "show.json"), show);
-    JObject shows = LoadShowsCfg();
-    _r.output.shows = shows;
-    _r.output.showName = orgShowName;
-    _r.ok = true;
   }
 
   /** Deletes a show.
@@ -452,6 +486,7 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     *       "1" if it is in portrait format.
     */
   public void SaveShowImage(dynamic _r) {
+    try {
     string orgShowName = (string)_r.input.showName;
     string channel = _r.input.channel != null ? (string)_r.input.channel : RequestedChannelId(_r);
     string showName = GetSafeShowName(orgShowName);
@@ -571,13 +606,19 @@ public partial class microPhotoFrame : System.Web.UI.Page {
           if (_r.output == null) _r.output = new { };
           _r.output.imgName = imageName;
         }else{
-          _r.error = "Display ID mismatch";
+          _r.error.msg = "Display ID mismatch";
         }
       }else{
-        _r.error = "Show not found";
+        _r.error.msg = "Show not found";
       }
     }
     _r.output.show = show;
+    } catch (Exception ex) {
+      _r.ok = false;
+      if (_r.error == null) _r.error = new JObject();
+      _r.error.msg = "saveShowImage: " + ex.Message;
+      _r.error.code = 5;
+    }
   }
 
   /** Deletes the given image in show.
@@ -771,6 +812,7 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       JObject shows = LoadShowsCfg();
       _r.output.shows = shows;
       AttachChannelOutput(_r, shows);
+      AttachPendingOta(_r);
       _r.ok = true;
     } catch (Exception ex) {
       _r.ok = false;
@@ -893,11 +935,133 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       }
       export.Add("imgsdata", imgsdata);
       string exportStr = JsonConvert.SerializeObject(export, Newtonsoft.Json.Formatting.None);
-      byte[] zip = CreateZippedBufferByString(exportStr, showName + ".show");
+      string packageName = ShowPackageFileName(orgShowName, show.displayId != null ? (string)show.displayId : "");
+      byte[] zip = CreateZippedBufferByString(exportStr, packageName);
       _r.output.showZip = Convert.ToBase64String(zip);
+      _r.output.showFile = packageName;
       _r.ok = true;
     } else {
       _r.ok = false;
+    }
+  }
+
+  private string ResolveReadyShowPath(string rawUrl) {
+    string rel = (rawUrl ?? "").Trim().Replace("\\", "/").TrimStart('/');
+    if (rel.StartsWith("readyToGoShows/")) rel = rel.Substring("readyToGoShows/".Length);
+    if (rel.Length == 0 || rel.Contains("..")) return null;
+    string root = PathCorrection("./readyToGoShows");
+    string abs = Path.GetFullPath(Path.Combine(root, rel.Replace("/", "\\")));
+    string rootFull = Path.GetFullPath(root);
+    if (!abs.Equals(rootFull, StringComparison.OrdinalIgnoreCase) &&
+        !abs.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) {
+      return null;
+    }
+    return abs;
+  }
+
+  public void ListReadyShows(dynamic _r) {
+    JArray catalogs = new JArray();
+    string root = PathCorrection("./readyToGoShows");
+    if (Directory.Exists(root)) {
+      foreach (string dir in Directory.GetDirectories(root)) {
+        string name = Path.GetFileName(dir);
+        string jsonPath = Path.Combine(dir, name + "_orgimgs.json");
+        if (!File.Exists(jsonPath)) continue;
+        string title = name;
+        int count = 0;
+        try {
+          JObject cat = JObject.Parse(File.ReadAllText(jsonPath));
+          if (cat["name"] != null) title = (string)cat["name"];
+          JArray imgs = cat["images"] as JArray;
+          if (imgs != null) count = imgs.Count;
+        } catch { }
+        JObject row = new JObject();
+        row["name"] = name;
+        row["title"] = title;
+        row["count"] = count;
+        row["path"] = "readyToGoShows/" + name + "/" + name + "_orgimgs.json";
+        catalogs.Add(row);
+      }
+    }
+    _r.output.catalogs = catalogs;
+    _r.ok = true;
+  }
+
+  private static void EnsureHttpTls() {
+    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+  }
+
+  private static byte[] DownloadHttpBytes(string url, out string contentType) {
+    EnsureHttpTls();
+    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+    req.Method = "GET";
+    req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) microPhotoFrame/1.5";
+    req.Accept = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8";
+    req.AllowAutoRedirect = true;
+    req.Timeout = 30000;
+    req.ReadWriteTimeout = 30000;
+    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse()) {
+      contentType = resp.ContentType ?? "";
+      using (Stream s = resp.GetResponseStream()) {
+        MemoryStream ms = new MemoryStream();
+        byte[] chunk = new byte[8192];
+        int n;
+        while ((n = s.Read(chunk, 0, chunk.Length)) > 0) {
+          ms.Write(chunk, 0, n);
+          if (ms.Length > 12 * 1024 * 1024) throw new Exception("image too large");
+        }
+        return ms.ToArray();
+      }
+    }
+  }
+
+  public void FetchShowSource(dynamic _r) {
+    try {
+      string raw = _r.input.url != null ? ((string)_r.input.url).Trim() : "";
+      string name = _r.input.name != null ? Regex.Replace((string)_r.input.name, @"[^a-zA-Z0-9\-_]", "_") : "image";
+      if (string.IsNullOrEmpty(name)) name = "image";
+      if (string.IsNullOrEmpty(raw)) {
+        _r.ok = false;
+        _r.error.msg = "url fehlt";
+        return;
+      }
+      byte[] buf;
+      string mime = "image/jpeg";
+      string ext = ".jpg";
+      if (raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) {
+        string contentType;
+        buf = DownloadHttpBytes(raw, out contentType);
+        if (contentType.IndexOf("png", StringComparison.OrdinalIgnoreCase) >= 0) { mime = "image/png"; ext = ".png"; }
+        else if (contentType.IndexOf("webp", StringComparison.OrdinalIgnoreCase) >= 0) { mime = "image/webp"; ext = ".webp"; }
+        else if (contentType.IndexOf("gif", StringComparison.OrdinalIgnoreCase) >= 0) { mime = "image/gif"; ext = ".gif"; }
+      } else {
+        string filePath = ResolveReadyShowPath(raw);
+        if (filePath == null || !File.Exists(filePath)) {
+          _r.ok = false;
+          _r.error.msg = "file not found";
+          return;
+        }
+        buf = File.ReadAllBytes(filePath);
+        ext = Path.GetExtension(filePath);
+        if (string.Equals(ext, ".png", StringComparison.OrdinalIgnoreCase)) mime = "image/png";
+        else if (string.Equals(ext, ".webp", StringComparison.OrdinalIgnoreCase)) mime = "image/webp";
+        else if (string.Equals(ext, ".gif", StringComparison.OrdinalIgnoreCase)) mime = "image/gif";
+        if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+      }
+      if (buf == null || buf.Length > 12 * 1024 * 1024) {
+        _r.ok = false;
+        _r.error.msg = "image too large";
+        return;
+      }
+      _r.output.base64 = Convert.ToBase64String(buf);
+      _r.output.mime = mime;
+      _r.output.fileName = name + ext;
+      _r.ok = true;
+    } catch (Exception ex) {
+      _r.ok = false;
+      if (_r.error == null) _r.error = new JObject();
+      _r.error.msg = ex.Message;
+      _r.error.code = -1;
     }
   }
 
@@ -1031,7 +1195,12 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       ServeLegacyShowFile(rest);
       return;
     }
+    if (action == "getPendingOta") {
+      ServePendingOta();
+      return;
+    }
 
+    try {
     switch (action) {
       case "getDevices":
         GetDevices(rest);
@@ -1081,11 +1250,23 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       case "getShows":
         GetShows(rest);
         break;
+      case "listFirmwareBins":
+        ListFirmwareBins(rest);
+        break;
+      case "firmwareUpdate":
+        FirmwareUpdate(rest);
+        break;
       case "exportShow":
         ExportShow(rest);
         break;
       case "importShow":
         ImportShow(rest);
+        break;
+      case "listReadyShows":
+        ListReadyShows(rest);
+        break;
+      case "fetchShowSource":
+        FetchShowSource(rest);
         break;
       default:
         if (string.IsNullOrEmpty(action)) {
@@ -1097,18 +1278,29 @@ public partial class microPhotoFrame : System.Web.UI.Page {
         }
         break;
     }
+    } catch (Exception actEx) {
+      rest.ok = false;
+      if (rest.error == null) rest.error = new JObject();
+      rest.error.msg = actEx.Message;
+      rest.error.code = -1;
+    }
     /*-- @<BUILD_ONLY_ON_BUILDS:Release ----
     rest.input = new JObject();
     ---- @>BUILD_ONLY_ON_BUILDS --*/
-    Response.ContentType = "application/json";
-    Response.Write(Newtonsoft.Json.JsonConvert.SerializeObject(rest, Newtonsoft.Json.Formatting.None));
-    Response.Flush();
+    try {
+      Response.ContentType = "application/json";
+      Response.Write(Newtonsoft.Json.JsonConvert.SerializeObject(rest, Newtonsoft.Json.Formatting.None));
+      Response.Flush();
+    } catch (Exception serEx) {
+      Response.ContentType = "application/json";
+      Response.Write("{\"ok\":false,\"error\":{\"msg\":" + JsonConvert.ToString(serEx.Message) + ",\"code\":-1},\"output\":{}}");
+    }
     HttpContext.Current.ApplicationInstance.CompleteRequest();
   }
 
   private static readonly Regex ChannelSegRe = new Regex(@"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$", RegexOptions.Compiled);
   private static readonly Regex ChannelDisplayRe = new Regex(@"^[0-9A-Za-z]$", RegexOptions.Compiled);
-  private const string MigrateUser = "mamekudz";
+  private const string MigrateUser = "user";
   private const string MigrateTarget = "family";
 
   private class FoundShow {
@@ -1508,6 +1700,204 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       }
     }
     return withShow != "" ? withShow : any;
+  }
+
+  private string OtaDir() {
+    string dir = PathCorrection("./tmp/ota");
+    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+    return dir;
+  }
+
+  private string OtaSafeKey(string ip) {
+    if (ip == null) return "";
+    StringBuilder sb = new StringBuilder();
+    foreach (char c in ip) {
+      if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '.' || c == ':')
+        sb.Append(c == '.' || c == ':' ? '_' : c);
+    }
+    return sb.ToString();
+  }
+
+  private JObject OtaQueueWrite(string deviceIp, byte[] buf, string fileName) {
+    string dir = OtaDir();
+    string key = OtaSafeKey(deviceIp);
+    if (key == "") throw new Exception("deviceIp ungültig.");
+    string prev = Path.Combine(dir, key + ".json");
+    if (File.Exists(prev)) {
+      try {
+        JObject old = JObject.Parse(File.ReadAllText(prev));
+        string oldTok = (string)old["token"];
+        if (!string.IsNullOrEmpty(oldTok)) {
+          string oldKey = Path.Combine(dir, "token-" + oldTok + ".key");
+          if (File.Exists(oldKey)) File.Delete(oldKey);
+        }
+      } catch { }
+    }
+    string token = Guid.NewGuid().ToString("N");
+    File.WriteAllBytes(Path.Combine(dir, key + ".bin"), buf);
+    JObject meta = new JObject();
+    meta["token"] = token;
+    meta["deviceIp"] = deviceIp;
+    meta["fileName"] = fileName;
+    meta["size"] = buf.Length;
+    meta["queuedAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    FileWriteAllText(Path.Combine(dir, key + ".json"), meta.ToString(Formatting.None));
+    FileWriteAllText(Path.Combine(dir, "token-" + token + ".key"), key);
+    JObject queued = new JObject();
+    queued["token"] = token;
+    queued["size"] = buf.Length;
+    queued["fileName"] = fileName;
+    return queued;
+  }
+
+  private void AttachPendingOta(dynamic _r) {
+    List<string> ips = new List<string>();
+    if (_r.input != null && _r.input.deviceInfo != null && _r.input.deviceInfo.ip != null)
+      ips.Add((string)_r.input.deviceInfo.ip);
+    if (_r.input != null && _r.input.deviceIp != null)
+      ips.Add((string)_r.input.deviceIp);
+    string remote = Request.Headers["X-Forwarded-For"];
+    if (string.IsNullOrEmpty(remote)) remote = Request.UserHostAddress;
+    if (!string.IsNullOrEmpty(remote)) ips.Add(remote.Split(',')[0].Trim());
+    string dir = OtaDir();
+    for (int i = 0; i < ips.Count; i++) {
+      string key = OtaSafeKey(ips[i]);
+      if (key == "") continue;
+      string metaPath = Path.Combine(dir, key + ".json");
+      if (!File.Exists(metaPath)) continue;
+      try {
+        JObject meta = JObject.Parse(File.ReadAllText(metaPath));
+        if (meta["token"] == null) continue;
+        JObject pending = new JObject();
+        pending["token"] = (string)meta["token"];
+        pending["size"] = meta["size"];
+        pending["fileName"] = meta["fileName"];
+        _r.output.pendingOta = pending;
+        return;
+      } catch { }
+    }
+  }
+
+  private string ResolveFirmwareBuildBin(string id) {
+    string safe = Regex.Replace(id ?? "", @"[^a-zA-Z0-9_\-]", "");
+    if (safe == "") throw new Exception("firmwareId fehlt.");
+    string root = Path.GetFullPath(PathCorrection("./firmware/.pio/build"));
+    string abs = Path.GetFullPath(Path.Combine(root, safe, "firmware.bin"));
+    if (!abs.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+      throw new Exception("path not allowed");
+    if (!File.Exists(abs)) throw new Exception("firmware.bin nicht gefunden.");
+    return abs;
+  }
+
+  private byte[] LoadFirmwareBuffer(dynamic input, out string fileName) {
+    string firmwareId = input.firmwareId != null ? (string)input.firmwareId : "";
+    if (firmwareId != "") {
+      string fp = ResolveFirmwareBuildBin(firmwareId);
+      fileName = firmwareId + ".bin";
+      return File.ReadAllBytes(fp);
+    }
+    string b64 = input.firmware != null ? (string)input.firmware : "";
+    if (b64 == "") throw new Exception("firmware (Base64) oder firmwareId fehlt.");
+    fileName = "firmware.bin";
+    return Convert.FromBase64String(b64);
+  }
+
+  public void ListFirmwareBins(dynamic _r) {
+    JArray bins = new JArray();
+    string root = PathCorrection("./firmware/.pio/build");
+    if (Directory.Exists(root)) {
+      string[] dirs = Directory.GetDirectories(root);
+      for (int i = 0; i < dirs.Length; i++) {
+        string bin = Path.Combine(dirs[i], "firmware.bin");
+        if (!File.Exists(bin)) continue;
+        FileInfo fi = new FileInfo(bin);
+        JObject row = new JObject();
+        row["id"] = Path.GetFileName(dirs[i]);
+        row["label"] = Path.GetFileName(dirs[i]);
+        row["size"] = fi.Length;
+        row["mtime"] = fi.LastWriteTimeUtc.ToString("o");
+        bins.Add(row);
+      }
+    }
+    _r.output.bins = bins;
+    _r.ok = true;
+  }
+
+  public void FirmwareUpdate(dynamic _r) {
+    string deviceIp = _r.input.deviceIp != null ? (string)_r.input.deviceIp : "";
+    if (deviceIp == "") throw new Exception("deviceIp fehlt.");
+    string fileName;
+    byte[] buf = LoadFirmwareBuffer(_r.input, out fileName);
+    bool queue = _r.input.queue != null && (bool)_r.input.queue;
+    if (queue) {
+      _r.output.queued = true;
+      _r.output.pendingOta = OtaQueueWrite(deviceIp, buf, fileName);
+      _r.ok = true;
+      return;
+    }
+    try {
+      string boundary = "----FWUpload" + DateTime.UtcNow.Ticks;
+      byte[] header = Encoding.ASCII.GetBytes("--" + boundary + "\r\nContent-Disposition: form-data; name=\"firmware\"; filename=\"firmware.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+      byte[] footer = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
+      HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://" + deviceIp + "/ota");
+      req.Method = "POST";
+      req.ContentType = "multipart/form-data; boundary=" + boundary;
+      req.Timeout = 120000;
+      req.ReadWriteTimeout = 120000;
+      req.ContentLength = header.Length + buf.Length + footer.Length;
+      using (Stream s = req.GetRequestStream()) {
+        s.Write(header, 0, header.Length);
+        s.Write(buf, 0, buf.Length);
+        s.Write(footer, 0, footer.Length);
+      }
+      using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse()) {
+        using (StreamReader sr = new StreamReader(resp.GetResponseStream())) {
+          string text = sr.ReadToEnd();
+          try { _r.output.deviceResponse = JObject.Parse(text); } catch { _r.output.deviceResponse = text; }
+        }
+      }
+      _r.ok = true;
+    } catch {
+      _r.output.queued = true;
+      _r.output.pendingOta = OtaQueueWrite(deviceIp, buf, fileName);
+      _r.output.deviceUnreachable = true;
+      _r.ok = true;
+    }
+  }
+
+  private void ServePendingOta() {
+    string token = Regex.Replace(Request["token"] ?? "", @"[^a-zA-Z0-9]", "");
+    if (token == "") {
+      Response.StatusCode = 400;
+      Response.Write("{\"ok\":false}");
+      HttpContext.Current.ApplicationInstance.CompleteRequest();
+      return;
+    }
+    string dir = OtaDir();
+    string keyFile = Path.Combine(dir, "token-" + token + ".key");
+    if (!File.Exists(keyFile)) {
+      Response.StatusCode = 404;
+      Response.Write("{\"ok\":false}");
+      HttpContext.Current.ApplicationInstance.CompleteRequest();
+      return;
+    }
+    string key = File.ReadAllText(keyFile).Trim();
+    string binPath = Path.Combine(dir, key + ".bin");
+    if (!File.Exists(binPath)) {
+      Response.StatusCode = 404;
+      Response.Write("{\"ok\":false}");
+      HttpContext.Current.ApplicationInstance.CompleteRequest();
+      return;
+    }
+    Response.Clear();
+    Response.ContentType = "application/octet-stream";
+    Response.AddHeader("Content-Disposition", "attachment; filename=\"firmware.bin\"");
+    Response.TransmitFile(binPath);
+    Response.Flush();
+    try { File.Delete(binPath); } catch { }
+    try { File.Delete(Path.Combine(dir, key + ".json")); } catch { }
+    try { File.Delete(keyFile); } catch { }
+    HttpContext.Current.ApplicationInstance.CompleteRequest();
   }
 
   private void ServeLegacyShowFile(dynamic _r) {

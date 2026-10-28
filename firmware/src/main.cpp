@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.9"
+#define FIRMWARE_VERSION "1.5.10"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -1810,6 +1810,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint = fals
 bool isSDCardAvailable();
 static bool tryRedisplayLastWithOfflineBadge();
 static bool redisplayLastWithoutOfflineBadge();
+static void applyQueuedOta(const String& url);
 
 // === Server Communication ===
 String doHttpPost(String url, String jsonPayload) {
@@ -2229,6 +2230,15 @@ bool getActiveShow() {
   bool responseOk = doc["ok"].as<bool>();
   Serial1.print("Response ok: ");
   Serial1.println(responseOk ? "true" : "false");
+
+  const char* otaToken = doc["output"]["pendingOta"]["token"] | "";
+  if (otaToken[0]) {
+    String otaUrl = serverOriginFromHost() + "?action=getPendingOta&token=" + String(otaToken);
+    Serial1.print("Pending OTA ");
+    Serial1.println(otaUrl);
+    applyQueuedOta(otaUrl);
+  }
+
   if (!responseOk) {
     lastGetShowError = "ok=false";
     String errMsg = doc["error"]["msg"] | "";
@@ -3691,6 +3701,41 @@ void displayNextImage() {
       slideTimerMarkNow();
     }
   }
+}
+
+static void applyQueuedOta(const String& url) {
+  PowerHighScope _pwrOta;
+  Serial1.print("OTA download ");
+  Serial1.println(url);
+  HTTPClient http;
+  http.setTimeout(120000);
+  http.begin(url);
+  int code = http.GET();
+  if (code != 200) {
+    Serial1.print("OTA HTTP ");
+    Serial1.println(code);
+    http.end();
+    return;
+  }
+  int len = http.getSize();
+  WiFiClient& stream = http.getStream();
+  if (!Update.begin(len > 0 ? (size_t)len : UPDATE_SIZE_UNKNOWN)) {
+    Update.printError(Serial1);
+    http.end();
+    return;
+  }
+  size_t written = Update.writeStream(stream);
+  Serial1.print("OTA wrote ");
+  Serial1.println((unsigned)written);
+  bool ok = Update.end() && !Update.hasError();
+  http.end();
+  if (!ok) {
+    Update.printError(Serial1);
+    return;
+  }
+  Serial1.println("OTA ok, reboot");
+  delay(400);
+  ESP.restart();
 }
 
 // === OTA Firmware Update Handler ===

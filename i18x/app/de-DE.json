@@ -12,6 +12,7 @@
 	"Photo Settings<context=\"ui\"/>": "Fotoeinstellungen",
 	"Export Show '<showName/>'<context=\"ui\"/>": "Show '<showName/>' exportieren",
 	"Import Show<context=\"ui\"/>": "Show importieren",
+	"AutoShow from catalog<context=\"ui\"/>": "AutoShow aus Katalog",
 	"Manage Channel '<channelName/>'<context=\"ui\"/>": "Kanal '<channelName/>' verwalten",
 	"Manage Channel<context=\"ui\"/>": "Kanal verwalten",
 	"Device Manager<context=\"ui\"/>": "Geräte",

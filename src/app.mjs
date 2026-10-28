@@ -2,7 +2,7 @@ import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
 import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs?v=exp3";
-import RESTX from "./microLib/RESTX.mjs";
+import RESTX from "./microLib/RESTX.mjs?v=hang1";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
 import "./microLib/ArrayUtils.mjs";
@@ -42,7 +42,7 @@ const pageTitles = {
     "TopMenu": "Main Menu<context=\"ui\"/>", "AddNewShow": "Add New Show<context=\"ui\"/>", "DeleteShow": "Delete Show '<showName/>'<context=\"ui\"/>",
     "ShowSettings": "Edit Settings of '<showName/>'<context=\"ui\"/>", "ActivateShow": "Activate Show '<showName/>'<context=\"ui\"/>", "AddShowPhotos": "Add Photos to '<showName/>'<context=\"ui\"/>",
     "ManageShowPhotos": "Manage Photos of '<showName/>'<context=\"ui\"/>", "PhotoSettings": "Photo Settings<context=\"ui\"/>", "ExportShow": "Export Show '<showName/>'<context=\"ui\"/>",
-    "ImportShow": "Import Show<context=\"ui\"/>", "Channels": "Manage Channel '<channelName/>'<context=\"ui\"/>", "Devices": "Device Manager<context=\"ui\"/>"
+    "ImportShow": "Import Show<context=\"ui\"/>", "AutoShow": "AutoShow from catalog<context=\"ui\"/>", "Channels": "Manage Channel '<channelName/>'<context=\"ui\"/>", "Devices": "Device Manager<context=\"ui\"/>"
 };
 
 const SETTINGS_KEY = "microPhotoFrame_LastSettings";
@@ -248,6 +248,9 @@ window.ShowPage = function (pageId) {
     if (pageId === 'AddNewShow') {
         window.LoadAddNewShowPage();
     }
+    if (pageId === 'AutoShow') {
+        window.LoadAutoShowPage();
+    }
     if (pageId === 'AddShowPhotos') {
         // Clear file input when page is opened
         const fileInput = document.getElementById('addPhotosInput');
@@ -298,6 +301,7 @@ window.ShowPage = function (pageId) {
     }
     if (pageId === 'Devices') {
         window.RefreshDevices();
+        if (window.LoadFirmwareBins) window.LoadFirmwareBins();
     }
     if (pageId === 'PhotoSettings' || pageId === 'AddShowPhotos') {
         // Update button states when opening these pages
@@ -563,6 +567,10 @@ function displayDefForId(displayId) {
 function displayNameForId(displayId) {
     const def = displayDefForId(displayId);
     return def ? (def.name || displayId) : (displayId || '');
+}
+
+function displaySlugForId(displayId) {
+    return EInkDef.slugForId(displayId) || String(displayId || '');
 }
 
 function shortDisplayName(displayId) {
@@ -1023,6 +1031,12 @@ window.UpdateGlobalShowSelect = async function () {
         }
     } catch (err) {
         console.error("Error updating global show select:", err);
+        const msg = (err && err.error && err.error.msg) || (err && err.message) || String(err);
+        sel.innerHTML = '<option value="">Shows failed: ' + String(msg).replace(/</g, '') + '</option>';
+        const chSel = document.getElementById('globalChannelSelect');
+        if (chSel && /Loading channels/i.test(chSel.options[0] ? chSel.options[0].text : '')) {
+            chSel.innerHTML = '<option value="">Channels failed — reload</option>';
+        }
     } finally {
         window._updatingShowSelect = false;
         syncPhotoSettingsDisplayFromContext();
@@ -2369,14 +2383,15 @@ window.StopAddPhotos = function() {
     }
 };
 
-window.ProcessAndAddPhotos = async function () {
+window.ProcessAndAddPhotos = async function (override) {
     const fileInput = document.getElementById('addPhotosInput');
-    const messageDiv = document.getElementById('addPhotosMessage');
-    const progressDiv = document.getElementById('addPhotosProgress');
-    const progressBar = document.getElementById('addPhotosProgressBar');
-    const progressText = document.getElementById('addPhotosProgressText');
+    const messageDiv = (override && override.messageDiv) || document.getElementById('addPhotosMessage');
+    const progressDiv = (override && override.progressDiv) || document.getElementById('addPhotosProgress');
+    const progressBar = (override && override.progressBar) || document.getElementById('addPhotosProgressBar');
+    const progressText = (override && override.progressText) || document.getElementById('addPhotosProgressText');
     const globalSelect = document.getElementById('globalShowSelect');
-    const showName = globalSelect ? globalSelect.value : '';
+    const showName = (override && override.showName) || (globalSelect ? globalSelect.value : '');
+    const extraFiles = override && override.files ? Array.from(override.files) : null;
     
     if (!showName) {
         messageDiv.style.display = 'block';
@@ -2389,7 +2404,7 @@ window.ProcessAndAddPhotos = async function () {
         return;
     }
 
-    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    if ((!extraFiles || extraFiles.length === 0) && (!fileInput || !fileInput.files || fileInput.files.length === 0)) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#e74c3c';
         messageDiv.style.color = 'white';
@@ -2433,7 +2448,7 @@ window.ProcessAndAddPhotos = async function () {
         }
     }
     
-    const files = Array.from(fileInput.files);
+    const files = extraFiles && extraFiles.length ? extraFiles : Array.from(fileInput.files);
     totalFiles = files.length;
     let successCount = 0;
     let errorCount = 0;
@@ -2535,17 +2550,21 @@ window.ProcessAndAddPhotos = async function () {
                 }));
                 const encoded = await ink.Encode();
                 const dataUri = EInk.GetDataURIByBase64(encoded.toBase64());
-                const res = await new RESTX().promiseCall('saveShowImage', {
+                const savePromise = new RESTX().promiseCall('saveShowImage', withSelectedChannel({
                     show: showName,
                     showName: showName,
                     img: dataUri,
                     ...(extraSave || {})
+                }));
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('saveShowImage timed out')), 120000);
                 });
+                const res = await Promise.race([savePromise, timeoutPromise]);
                 if (res && res.ok && res.output && res.output.imgName) {
                     window.originalImages[res.output.imgName] = file;
                     return res.output.imgName;
                 }
-                return null;
+                throw new Error((res && res.error && res.error.msg) || 'saveShowImage failed');
             };
 
             let landscapeImageName = null;
@@ -2600,7 +2619,7 @@ window.ProcessAndAddPhotos = async function () {
     
     stopped = window._stopAddPhotos;
     } finally {
-        fileInput.value = '';
+        if (fileInput && !extraFiles) fileInput.value = '';
         window.UpdateAddPhotosButtonText();
         window._stopAddPhotos = false;
         setAddPhotosBusy(false);
@@ -3455,9 +3474,9 @@ window.ExportSelectedShow = function () {
     messageDiv.style.color = 'white';
     messageDiv.innerText = "Exporting show...";
     
-    new RESTX().promiseCall('exportShow', {
+    new RESTX().promiseCall('exportShow', withSelectedChannel({
         showName: showName
-    }).then(_res => {
+    })).then(_res => {
         if (_res.ok && _res.output.showZip) {
             // Convert base64 to blob and download
             const base64Data = _res.output.showZip;
@@ -3470,7 +3489,7 @@ window.ExportSelectedShow = function () {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = showName + '.show';
+            a.download = _res.output.showFile || (showName + '.show');
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -3817,6 +3836,195 @@ window.CreateNewShow = function () {
     });
 };
 
+function autoShowNameFromCatalog(fileNameOrName) {
+    let n = String(fileNameOrName || 'Show').replace(/\\/g, '/').split('/').pop();
+    n = n.replace(/\.json$/i, '').replace(/_orgimgs$/i, '');
+    if (!n) n = 'Show';
+    return n.endsWith('.AutoShow') ? n : n + '.AutoShow';
+}
+
+function resolveCatalogImageUrl(url, catalogName) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    let rel = raw.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (rel.startsWith('readyToGoShows/')) return rel;
+    return 'readyToGoShows/' + catalogName + '/' + rel.replace(/^\.\//, '');
+}
+
+function fileFromBase64(base64, fileName, mime) {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], fileName, { type: mime || 'image/jpeg' });
+}
+
+window.LoadAutoShowPage = async function () {
+    const sel = document.getElementById('autoShowCatalog');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— choose a catalog —</option>';
+    try {
+        const res = await new RESTX().promiseCall('listReadyShows', {});
+        const catalogs = (res.ok && res.output && res.output.catalogs) || [];
+        catalogs.forEach((c) => {
+            const o = document.createElement('option');
+            o.value = c.path;
+            o.textContent = (c.title || c.name) + (c.count ? ' (' + c.count + ')' : '');
+            o.dataset.name = c.name || '';
+            sel.appendChild(o);
+        });
+    } catch (err) {
+        console.warn('listReadyShows', err);
+    }
+    const fileInput = document.getElementById('autoShowInput');
+    const fileBtn = document.getElementById('autoShowFileBtn');
+    if (fileInput && fileBtn && !fileInput._autoShowBound) {
+        fileInput._autoShowBound = true;
+        fileInput.addEventListener('change', () => {
+            fileBtn.innerText = fileInput.files && fileInput.files[0]
+                ? '📄 ' + fileInput.files[0].name
+                : '📄 Or pick a *_orgimgs.json';
+        });
+    }
+};
+
+window.CreateAutoShow = async function () {
+    const messageDiv = document.getElementById('autoShowMessage');
+    const progressDiv = document.getElementById('autoShowProgress');
+    const progressBar = document.getElementById('autoShowProgressBar');
+    const progressText = document.getElementById('autoShowProgressText');
+    const channelPick = getSelectedChannelSlug();
+    const displayId = (currentChannels[channelPick] && currentChannels[channelPick].displayId) || '';
+    const fileInput = document.getElementById('autoShowInput');
+    const catalogSel = document.getElementById('autoShowCatalog');
+
+    const restErr = (err) => {
+        if (!err) return 'unknown error';
+        if (typeof err === 'string') return err;
+        if (err.message) return err.message;
+        if (err.error && err.error.msg) return err.error.msg;
+        try { return JSON.stringify(err.error || err); } catch (_) { return String(err); }
+    };
+    const say = (bg, text) => {
+        if (!messageDiv) return;
+        messageDiv.style.display = 'block';
+        messageDiv.style.background = bg;
+        messageDiv.style.color = 'white';
+        messageDiv.innerText = text;
+    };
+
+    if (!channelPick || !currentChannels[channelPick] || !displayId) {
+        say('#e74c3c', 'Choose a channel first. The channel sets the display type.');
+        return;
+    }
+
+    let catalog = null;
+    let catalogName = '';
+    try {
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            const file = fileInput.files[0];
+            catalog = JSON.parse(await file.text());
+            catalogName = file.name.replace(/\.json$/i, '').replace(/_orgimgs$/i, '');
+        } else if (catalogSel && catalogSel.value) {
+            catalogName = (catalogSel.selectedOptions[0] && catalogSel.selectedOptions[0].dataset.name) || '';
+            const res = await new RESTX().promiseCall('fetchShowSource', { url: catalogSel.value, name: 'catalog' });
+            if (!res.ok || !res.output || !res.output.base64) throw new Error(res.error && res.error.msg ? res.error.msg : 'catalog not loaded');
+            const raw = Uint8Array.from(atob(res.output.base64), (c) => c.charCodeAt(0));
+            catalog = JSON.parse(new TextDecoder().decode(raw));
+            if (!catalogName) catalogName = autoShowNameFromCatalog(catalogSel.value).replace(/\.AutoShow$/, '');
+        }
+    } catch (err) {
+        say('#e74c3c', 'Could not read catalog: ' + restErr(err));
+        return;
+    }
+
+    if (!catalog || !Array.isArray(catalog.images) || !catalog.images.length) {
+        say('#e74c3c', 'Pick a ready catalog or a *_orgimgs.json with an images list.');
+        return;
+    }
+
+    const showName = autoShowNameFromCatalog(catalogName || catalog.name || 'Show');
+    say('#3498db', 'Creating ' + showName + '…');
+
+    try {
+        try {
+            const created = await new RESTX().promiseCall('createShow', withSelectedChannel({
+                showName,
+                displayId,
+                channel: channelPick
+            }));
+            if (!created.ok) throw created;
+        } catch (createErr) {
+            const msg = restErr(createErr);
+            if (!/existiert bereits|already exists/i.test(msg)) throw createErr;
+        }
+
+        if (catalog.timer || catalog.mode) {
+            await new RESTX().promiseCall('setShowSettings', withSelectedChannel({
+                showName,
+                showMode: catalog.mode || 'sequential',
+                showTimer: catalog.timer || 15
+            }));
+        }
+
+        const files = [];
+        for (let i = 0; i < catalog.images.length; i++) {
+            const img = catalog.images[i] || {};
+            say('#3498db', 'Loading image ' + (i + 1) + ' / ' + catalog.images.length + '…');
+            const url = resolveCatalogImageUrl(img.url, catalogName);
+            if (!url) continue;
+            const localGuess = catalogName && img.name
+                ? 'readyToGoShows/' + catalogName + '/orgimgs/' + img.name + '.jpg'
+                : '';
+            let fetched;
+            const tryUrls = localGuess && localGuess !== url ? [localGuess, url] : [url];
+            let lastFetchErr = '';
+            for (const tryUrl of tryUrls) {
+                try {
+                    fetched = await new RESTX().promiseCall('fetchShowSource', {
+                        url: tryUrl,
+                        name: img.name || ('img' + (i + 1))
+                    });
+                    if (fetched && fetched.ok && fetched.output && fetched.output.base64) break;
+                    lastFetchErr = (fetched && fetched.error && fetched.error.msg) || 'download failed';
+                    fetched = null;
+                } catch (fetchErr) {
+                    lastFetchErr = restErr(fetchErr);
+                    fetched = null;
+                }
+            }
+            if (!fetched) {
+                say('#e67e22', (img.name || url) + ': ' + lastFetchErr + ' — skip');
+                continue;
+            }
+            if (!fetched.ok || !fetched.output || !fetched.output.base64) {
+                say('#e67e22', (img.name || url) + ': ' + ((fetched.error && fetched.error.msg) || 'download failed') + ' — skip');
+                continue;
+            }
+            files.push(fileFromBase64(fetched.output.base64, fetched.output.fileName || (img.name + '.jpg'), fetched.output.mime));
+        }
+        if (!files.length) throw new Error('No images loaded from the catalog.');
+
+        const sel = document.getElementById('globalShowSelect');
+        await window.UpdateGlobalShowSelect();
+        if (sel) {
+            sel.value = showName;
+            saveLastSelectedShow(showName);
+        }
+
+        await window.ProcessAndAddPhotos({
+            files,
+            showName,
+            messageDiv,
+            progressDiv,
+            progressBar,
+            progressText
+        });
+    } catch (err) {
+        say('#e74c3c', 'AutoShow failed: ' + restErr(err));
+    }
+};
+
 // ===============================================================
 // DEVICE MANAGER & OTA FIRMWARE UPDATE
 // ===============================================================
@@ -4111,65 +4319,134 @@ window.QueryDeviceInfo = async function (ip) {
 
 let _otaSelectedFile = null;
 
+function syncOtaButtons() {
+    const built = document.getElementById('otaBuiltBin')?.value;
+    const ready = !!(built || _otaSelectedFile);
+    const uploadBtn = document.getElementById('otaUploadBtn');
+    const queueBtn = document.getElementById('otaQueueBtn');
+    if (uploadBtn) uploadBtn.disabled = !ready;
+    if (queueBtn) queueBtn.disabled = !ready;
+}
+
+window.LoadFirmwareBins = async function () {
+    const sel = document.getElementById('otaBuiltBin');
+    if (!sel) return;
+    sel.onchange = () => {
+        if (sel.value) {
+            _otaSelectedFile = null;
+            const fileInput = document.getElementById('otaFileInput');
+            if (fileInput) fileInput.value = '';
+            const infoEl = document.getElementById('otaFileInfo');
+            if (infoEl) {
+                const opt = sel.options[sel.selectedIndex];
+                infoEl.style.display = 'block';
+                infoEl.textContent = opt ? opt.textContent : sel.value;
+            }
+        }
+        syncOtaButtons();
+    };
+    try {
+        const res = await new RESTX().promiseCall('listFirmwareBins');
+        const bins = (res && res.output && res.output.bins) || [];
+        const keep = sel.value;
+        sel.innerHTML = bins.length
+            ? '<option value="">— lokalen Build wählen —</option>'
+            : '<option value="">— keine lokalen Builds —</option>';
+        for (const b of bins) {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            const kb = b.size ? (b.size / 1024).toFixed(0) + ' KB' : '';
+            opt.textContent = (b.label || b.id) + (kb ? ' (' + kb + ')' : '');
+            sel.appendChild(opt);
+        }
+        if (keep && bins.some((b) => b.id === keep)) sel.value = keep;
+        syncOtaButtons();
+    } catch (err) {
+        console.error('listFirmwareBins', err);
+    }
+};
+
 window.OtaFileSelected = function (event) {
     const files = event.target.files;
     const infoEl = document.getElementById('otaFileInfo');
-    const uploadBtn = document.getElementById('otaUploadBtn');
     if (files && files.length > 0) {
         _otaSelectedFile = files[0];
+        const built = document.getElementById('otaBuiltBin');
+        if (built) built.value = '';
         if (infoEl) {
             infoEl.style.display = 'block';
             infoEl.textContent = `${_otaSelectedFile.name} (${(_otaSelectedFile.size / 1024).toFixed(1)} KB)`;
         }
-        if (uploadBtn) uploadBtn.disabled = false;
     } else {
         _otaSelectedFile = null;
         if (infoEl) infoEl.style.display = 'none';
-        if (uploadBtn) uploadBtn.disabled = true;
     }
+    syncOtaButtons();
 };
 
-window.StartOtaUpdate = async function () {
+window.StartOtaUpdate = async function (queueOnly) {
     const ip = document.getElementById('otaDeviceIp')?.value?.trim();
     if (!ip) { alert('Please enter the device IP address.'); return; }
-    if (!_otaSelectedFile) { alert('Please select a firmware .bin file.'); return; }
+    const firmwareId = document.getElementById('otaBuiltBin')?.value || '';
+    if (!firmwareId && !_otaSelectedFile) { alert('Please select a firmware .bin file.'); return; }
 
     const msgEl = document.getElementById('otaMessage');
     const progressEl = document.getElementById('otaProgress');
     const barEl = document.getElementById('otaProgressBar');
     const statusEl = document.getElementById('otaStatusText');
     const uploadBtn = document.getElementById('otaUploadBtn');
+    const queueBtn = document.getElementById('otaQueueBtn');
 
     if (uploadBtn) uploadBtn.disabled = true;
+    if (queueBtn) queueBtn.disabled = true;
     if (progressEl) progressEl.style.display = 'block';
     if (msgEl) msgEl.style.display = 'none';
     if (barEl) barEl.style.width = '10%';
-    if (statusEl) statusEl.textContent = 'Reading firmware file...';
+    if (statusEl) statusEl.textContent = queueOnly ? 'Queueing firmware…' : 'Preparing firmware…';
 
     try {
-        const arrayBuf = await _otaSelectedFile.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuf);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-        const base64 = btoa(binary);
+        const payload = { deviceIp: ip, queue: !!queueOnly };
+        if (firmwareId) {
+            payload.firmwareId = firmwareId;
+        } else {
+            const arrayBuf = await _otaSelectedFile.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuf);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            payload.firmware = btoa(binary);
+        }
 
         if (barEl) barEl.style.width = '30%';
-        if (statusEl) statusEl.textContent = `Uploading ${(_otaSelectedFile.size / 1024).toFixed(0)} KB to ${ip}...`;
+        if (statusEl) {
+            statusEl.textContent = queueOnly
+                ? `Merke Update für ${ip} vor…`
+                : `Uploading to ${ip}…`;
+        }
 
-        const res = await new RESTX().promiseCall('firmwareUpdate', {
-            deviceIp: ip,
-            firmware: base64
-        });
+        const res = await new RESTX().promiseCall('firmwareUpdate', payload);
 
         if (barEl) barEl.style.width = '100%';
 
         if (res.ok) {
-            if (statusEl) statusEl.textContent = 'Firmware update successful! Device is rebooting...';
-            if (msgEl) {
-                msgEl.style.display = 'block';
-                msgEl.style.background = '#27ae60';
-                msgEl.style.color = '#fff';
-                msgEl.textContent = 'OTA update successful. The device will reboot with the new firmware.';
+            const queued = !!(res.output && res.output.queued);
+            if (queued) {
+                if (statusEl) statusEl.textContent = 'Queued — the device updates on the next wakeup.';
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#2980b9';
+                    msgEl.style.color = '#fff';
+                    msgEl.textContent = res.output.deviceUnreachable
+                        ? 'Gerät gerade nicht erreichbar (Deep Sleep). Update liegt bereit und wird beim nächsten Aufwachen eingespielt.'
+                        : 'Update vorgemerkt. Beim nächsten Wakeup (Bildwechsel oder Server-Poll) holt das Gerät die Firmware.';
+                }
+            } else {
+                if (statusEl) statusEl.textContent = 'Firmware update successful! Device is rebooting...';
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#27ae60';
+                    msgEl.style.color = '#fff';
+                    msgEl.textContent = 'OTA update successful. The device will reboot with the new firmware.';
+                }
             }
         } else {
             throw new Error(res.error?.msg || 'Unknown error');
@@ -4184,6 +4461,6 @@ window.StartOtaUpdate = async function () {
             msgEl.textContent = 'Firmware update failed: ' + (err.message || err);
         }
     } finally {
-        if (uploadBtn) uploadBtn.disabled = false;
+        syncOtaButtons();
     }
 };

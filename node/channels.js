@@ -9,7 +9,7 @@ const path = require('path');
 
 const SEG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/;
 const DISPLAY_RE = /^[0-9A-Za-z]$/;
-const MIGRATE_USER = 'mamekudz';
+const MIGRATE_USER = 'user';
 const MIGRATE_TARGET = 'family';
 
 function toPathDisplay(id) {
@@ -177,7 +177,9 @@ function isReservedTop(name) {
 }
 
 function safeShowDirName(name) {
-	return 'show_' + String(name || '').replace(/[^a-zA-Z0-9\-_]/g, '_');
+	const safe = String(name || '').replace(/[^a-zA-Z0-9\-_.]/g, '_').replace(/\.{2,}/g, '.').replace(/^[._]+|[._]+$/g, '');
+	if (!safe || safe.includes('..')) return 'show_unknown';
+	return 'show_' + safe;
 }
 
 function showNameFromDir(dir) {

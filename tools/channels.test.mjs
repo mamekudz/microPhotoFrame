@@ -156,15 +156,15 @@ test('deleting a target removes all its channels', () => {
 	assert.deepEqual(cfg.channels, {});
 });
 
-test('legacy shows are copied into mamekudz/family/{displayId}', () => {
+test('legacy shows are copied into user/family/{displayId}', () => {
 	const dir = tmpShows();
 	writeShow(dir, 'Kids', '9');
 	writeShow(dir, 'mini', 'f');
 	const cfg = ch.migrateLegacyShows(dir, { activeShows: { '9': 'Kids' } });
-	assert.ok(cfg.channels['mamekudz/family/9']);
-	assert.ok(cfg.channels['mamekudz/family/f']);
-	assert.equal(cfg.channels['mamekudz/family/9'].showName, 'Kids');
-	assert.ok(fs.existsSync(path.join(dir, 'mamekudz', 'family', '9', 'show_Kids', 'show.json')));
+	assert.ok(cfg.channels['user/family/9']);
+	assert.ok(cfg.channels['user/family/f']);
+	assert.equal(cfg.channels['user/family/9'].showName, 'Kids');
+	assert.ok(fs.existsSync(path.join(dir, 'user', 'family', '9', 'show_Kids', 'show.json')));
 	assert.equal(fs.existsSync(path.join(dir, 'show_Kids', 'show.json')), false);
 });
 

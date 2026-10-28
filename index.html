@@ -70,6 +70,7 @@
             <button id="btnAddShowPhotos"></button><button id="btnManageShowPhotos"></button>
             <button id="btnPhotoSettings"></button><button id="btnExportShow"></button>
             <button id="btnImportShow"></button>
+            <button id="btnAutoShow"></button>
             <button id="btnDevices"></button>
         </div>
     </div>
@@ -297,7 +298,7 @@
 
         <div class="controls">
             <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Export the currently selected show as a ZIP file. The ZIP file contains all show settings and images.
+                Export the selected show as a ZIP. The file name uses a readable display tag, e.g. ClassicArt_Spectra6-7.3.show. The package only fits that panel.
             </p>
             <button class="btn-action save-btn" onclick="window.ExportSelectedShow()">📦 Export Show</button>
             <div id="exportShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
@@ -314,10 +315,36 @@
             <button class="btn-action save-btn drop-target" id="importShowFileBtn" onclick="document.getElementById('importShowInput').click()">📄 Datei auswählen oder hierher ziehen</button>
             <input type="file" id="importShowInput" accept=".zip,.show" class="file-input-hidden" />
             <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Select a ZIP file (.zip or .show) containing a show export. The show will be imported with all its settings and images.
+                Select a .show or ZIP export. The display tag is in the file name (e.g. ClassicArt_Spectra6-7.3.show). Import only onto a matching panel.
             </p>
             <button class="btn-action save-btn" onclick="window.ImportShow()">📥 Import Show</button>
             <div id="importShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
+        </div>
+    </div>
+
+    <div id="AutoShow" class="page">
+        <div class="page-header">
+            <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
+            <h2 class="page-title">AutoShow from catalog</h2>
+        </div>
+        <div class="controls">
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
+                Creates <code>Name.AutoShow</code> on the selected channel and processes the catalog images for that display. URLs may be https or local paths under <code>readyToGoShows/</code>.
+            </p>
+            <div class="control-row">
+                <label for="autoShowCatalog">Ready catalog</label>
+                <select id="autoShowCatalog">
+                    <option value="">— choose a catalog —</option>
+                </select>
+            </div>
+            <button class="btn-action save-btn drop-target" id="autoShowFileBtn" onclick="document.getElementById('autoShowInput').click()">📄 Or pick a *_orgimgs.json</button>
+            <input type="file" id="autoShowInput" accept=".json,application/json" class="file-input-hidden" />
+            <button class="btn-action save-btn" onclick="window.CreateAutoShow()">⚙ Create AutoShow</button>
+            <div id="autoShowProgress" style="display:none;margin-top:12px;">
+                <div id="autoShowProgressBar" style="height:8px;background:#2ecc71;width:0;"></div>
+                <p id="autoShowProgressText"></p>
+            </div>
+            <div id="autoShowMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
 
@@ -330,7 +357,7 @@
         <div class="controls">
             <p style="font-size:0.9rem; color:#666; margin-bottom:16px;">
                 A channel is <code>User ID / Group ID / display</code>, URL
-                <code>/shows/mamekudz/family/9</code>. The default channel is set with the
+                <code>/shows/userid/family/9</code>. The default channel is set with the
                 <strong>Default</strong> checkbox below. The server root uses that channel;
                 the URL shown here is always the real path.
             </p>
@@ -338,7 +365,7 @@
                 <h3 style="margin-bottom:12px;">New Channel</h3>
                 <div class="control-row">
                     <label for="newChannelUser" data-i18n='User ID:<context="ui"/>'>User ID:</label>
-                    <input type="text" id="newChannelUser" list="channelUserList" placeholder="mamekudz" />
+                    <input type="text" id="newChannelUser" list="channelUserList" placeholder="userid" />
                     <datalist id="channelUserList"></datalist>
                 </div>
                 <div class="control-row">
@@ -401,10 +428,21 @@
         <hr style="margin:25px 0;">
 
         <h3 style="margin-bottom:12px;">Firmware Update (OTA)</h3>
+        <p style="font-size:0.85rem; color:#666; margin:0 0 12px;">
+            Der Dateidialog darf keinen festen Startordner öffnen. Lokale Builds aus
+            <code>firmware/.pio/build/</code> stehen in der Liste. Im Deep Sleep ist das Gerät nicht erreichbar —
+            dann wird das Update für den nächsten Wakeup (Bildwechsel / Server-Poll) vorgemerkt.
+        </p>
         <div class="controls">
             <div class="control-row">
                 <label for="otaDeviceIp">Device IP:</label>
                 <input type="text" id="otaDeviceIp" placeholder="z.B. 192.168.1.42" style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div class="control-row" style="margin-top:8px;">
+                <label for="otaBuiltBin">Lokaler Build:</label>
+                <select id="otaBuiltBin" style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+                    <option value="">— keine lokalen Builds —</option>
+                </select>
             </div>
             <div class="control-row" style="margin-top:8px;">
                 <label for="otaFileInput">Firmware .bin:</label>
@@ -412,7 +450,8 @@
                 <input type="file" id="otaFileInput" accept=".bin" class="file-input-hidden" onchange="window.OtaFileSelected(event)" />
             </div>
             <div id="otaFileInfo" style="font-size:0.85rem; color:#666; margin-top:4px; display:none;"></div>
-            <button class="btn-action save-btn" id="otaUploadBtn" onclick="window.StartOtaUpdate()" style="margin-top:12px; background:#e67e22;" disabled>⬆ Upload Firmware</button>
+            <button class="btn-action save-btn" id="otaUploadBtn" onclick="window.StartOtaUpdate(false)" style="margin-top:12px; background:#e67e22;" disabled>⬆ Jetzt senden</button>
+            <button class="btn-action save-btn" id="otaQueueBtn" onclick="window.StartOtaUpdate(true)" style="margin-top:12px; margin-left:8px; background:#2980b9;" disabled>⏱ Beim nächsten Aufwachen</button>
             <div id="otaProgress" style="margin-top:10px; display:none;">
                 <div style="background:#eee; border-radius:4px; overflow:hidden; height:24px;">
                     <div id="otaProgressBar" style="background:#27ae60; height:100%; width:0%; transition:width 0.3s;"></div>
@@ -435,6 +474,6 @@
 
 
     <!-- Application module -->
-    <script type="module" src="./src/app.mjs?v=showlist1"></script>
+    <script type="module" src="./src/app.mjs?v=autoshow1"></script>
 
 </html>

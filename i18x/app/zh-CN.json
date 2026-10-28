@@ -12,6 +12,7 @@
 	"Photo Settings<context=\"ui\"/>": "照片设置",
 	"Export Show '<showName/>'<context=\"ui\"/>": "导出节目“<showName/>”",
 	"Import Show<context=\"ui\"/>": "导入节目",
+	"AutoShow from catalog<context=\"ui\"/>": "从目录创建 AutoShow",
 	"Manage Channel '<channelName/>'<context=\"ui\"/>": "管理频道“<channelName/>”",
 	"Manage Channel<context=\"ui\"/>": "管理频道",
 	"Device Manager<context=\"ui\"/>": "设备",

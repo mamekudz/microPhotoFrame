@@ -2,6 +2,19 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 10,
+		"date": "2026-10-28 17:40",
+		"beta": false,
+		"info": [
+			"AutoShow builds a show from a ready-to-go catalog on the selected channel.",
+			".show packages use readable display tags such as Spectra6-7.3 or ePaperBWRY-1.54.",
+			"OTA can queue firmware for the next wakeup when the frame is in deep sleep.",
+			"Catalog downloads and getShows no longer hang the web UI on server errors."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 9,
 		"date": "2026-10-28 15:40",
 		"beta": false,

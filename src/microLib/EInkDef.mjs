@@ -2197,4 +2197,28 @@ export default class EInkDef {
 			this.displayID = _opts;
 		}
 	}
+
+	/** Readable file-name token for a catalog row. Official `id` stays the single-char key. */
+	static slugFromDef(def) {
+		if (!def || !def.id) return '';
+		if (def.slug) return def.slug;
+		const name = String(def.name || '');
+		let family = 'ePaper';
+		if (/Waveshare|e-Paper \(G\)/i.test(name)) family = 'ePaperBWRY';
+		else if (/Spectra 3100/i.test(name)) family = 'Spectra3100';
+		else if (/Spectra 6/i.test(name)) family = 'Spectra6';
+		else if (/Spectra BWR/i.test(name)) family = 'SpectraBWR';
+		else if (/Spectra BWY/i.test(name)) family = 'SpectraBWY';
+		else if (/Gray4/i.test(name)) family = 'Gray4';
+		else if (/B&W/i.test(name)) family = 'BW';
+		const size = def.size != null && def.size !== '' ? String(def.size) : String(def.id);
+		return family + '-' + size;
+	}
+
+	static slugForId(id) {
+		const key = String(id ?? '').trim();
+		if (!key) return '';
+		const found = Object.values(EInkDef.DISPLAYS).find((d) => String(d.id) === key);
+		return found ? EInkDef.slugFromDef(found) : key;
+	}
 }

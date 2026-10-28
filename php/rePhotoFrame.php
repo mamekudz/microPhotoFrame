@@ -230,9 +230,125 @@ function getSafeShowName($givenName) {
     if (empty($givenName)) {
         return 'show_unknown';
     }
-    $safeName = preg_replace('/[^a-zA-Z0-9\-_]/', '_', $givenName);
-    $safeName = trim($safeName, '_');
+    $safeName = preg_replace('/[^a-zA-Z0-9\-_.]/', '_', $givenName);
+    $safeName = preg_replace('/\.{2,}/', '.', $safeName);
+    $safeName = trim($safeName, '._');
+    if ($safeName === '' || strpos($safeName, '..') !== false) {
+        return 'show_unknown';
+    }
     return 'show_' . $safeName;
+}
+
+function displaySlugForId($displayId) {
+    static $map = null;
+    $key = trim((string)$displayId);
+    if ($key === '') return '';
+    if ($map === null) {
+        $raw = @file_get_contents(__DIR__ . '/../src/microLib/display-slugs.json');
+        $map = $raw ? json_decode($raw, true) : [];
+        if (!is_array($map)) $map = [];
+    }
+    return isset($map[$key]) ? $map[$key] : $key;
+}
+
+function resolveReadyShowPath($rawUrl) {
+    $rel = str_replace('\\', '/', trim((string)$rawUrl));
+    $rel = ltrim($rel, '/');
+    if (strpos($rel, 'readyToGoShows/') === 0) $rel = substr($rel, strlen('readyToGoShows/'));
+    if ($rel === '' || strpos($rel, '..') !== false) return null;
+    $root = realpath(__DIR__ . '/../readyToGoShows');
+    if ($root === false) return null;
+    $abs = realpath($root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $rel));
+    if ($abs === false) return null;
+    if ($abs !== $root && strpos($abs, $root . DIRECTORY_SEPARATOR) !== 0) return null;
+    return $abs;
+}
+
+function listReadyShows(&$rest) {
+    $catalogs = [];
+    $root = __DIR__ . '/../readyToGoShows';
+    if (is_dir($root)) {
+        foreach (scandir($root) as $name) {
+            if ($name === '.' || $name === '..') continue;
+            $json = $root . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . $name . '_orgimgs.json';
+            if (!is_file($json)) continue;
+            $title = $name;
+            $count = 0;
+            $cat = @json_decode(@file_get_contents($json), true);
+            if (is_array($cat)) {
+                if (!empty($cat['name'])) $title = $cat['name'];
+                if (!empty($cat['images']) && is_array($cat['images'])) $count = count($cat['images']);
+            }
+            $catalogs[] = [
+                'name' => $name,
+                'title' => $title,
+                'count' => $count,
+                'path' => 'readyToGoShows/' . $name . '/' . $name . '_orgimgs.json'
+            ];
+        }
+    }
+    $rest['output']['catalogs'] = $catalogs;
+    $rest['ok'] = true;
+}
+
+function fetchShowSource(&$rest) {
+    $raw = isset($rest['input']['url']) ? trim((string)$rest['input']['url']) : '';
+    $name = isset($rest['input']['name']) ? preg_replace('/[^a-zA-Z0-9\-_]/', '_', (string)$rest['input']['name']) : 'image';
+    if ($name === '') $name = 'image';
+    if ($raw === '') {
+        $rest['ok'] = false;
+        $rest['error']['msg'] = 'url fehlt';
+        return;
+    }
+    $mime = 'image/jpeg';
+    $ext = '.jpg';
+    if (preg_match('#^https?://#i', $raw)) {
+        $ctx = stream_context_create([
+            'http' => [
+                'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) microPhotoFrame/1.5\r\nAccept: image/avif,image/webp,image/*,*/*;q=0.8\r\n",
+                'follow_location' => 1,
+                'timeout' => 30
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]
+        ]);
+        $buf = @file_get_contents($raw, false, $ctx);
+        if ($buf === false) {
+            $rest['ok'] = false;
+            $rest['error']['msg'] = 'download failed';
+            return;
+        }
+    } else {
+        $path = resolveReadyShowPath($raw);
+        if ($path === null || !is_file($path)) {
+            $rest['ok'] = false;
+            $rest['error']['msg'] = 'file not found';
+            return;
+        }
+        $buf = file_get_contents($path);
+        $ext = strtolower(strrchr($path, '.'));
+        if ($ext === '.png') $mime = 'image/png';
+        elseif ($ext === '.webp') $mime = 'image/webp';
+        elseif ($ext === '.gif') $mime = 'image/gif';
+        if ($ext === '' || $ext === false) $ext = '.jpg';
+    }
+    if (strlen($buf) > 12 * 1024 * 1024) {
+        $rest['ok'] = false;
+        $rest['error']['msg'] = 'image too large';
+        return;
+    }
+    $rest['output']['base64'] = base64_encode($buf);
+    $rest['output']['mime'] = $mime;
+    $rest['output']['fileName'] = $name . $ext;
+    $rest['ok'] = true;
+}
+
+function showPackageFileName($showName, $displayId) {
+    $base = preg_replace('/[^a-zA-Z0-9\-_.]/', '_', (string)$showName);
+    $base = preg_replace('/\.{2,}/', '.', $base);
+    $base = trim($base, '._');
+    if ($base === '') $base = 'show';
+    $slug = displaySlugForId($displayId);
+    return $slug === '' ? $base . '.show' : $base . '_' . $slug . '.show';
 }
 
 function showDisplayId($showName) {
@@ -883,6 +999,7 @@ function getShows(&$rest) {
         $rest['output']['shows'] = $resolved['shows'];
         $rest['output']['channel'] = $resolved['channel'];
         $rest['output']['channelError'] = $resolved['channelError'];
+        attachPendingOta($rest);
         $rest['ok'] = true;
     } catch (Exception $e) {
         $rest['ok'] = false;
@@ -999,8 +1116,10 @@ function exportShow(&$rest) {
             }
             $export['imgsdata'] = $imgsData;
             $json = json_encode($export, JSON_UNESCAPED_SLASHES);
-            $zipped = createZippedBufferByString($json, $showName . '.show');
+            $packageName = showPackageFileName($orgShowName, isset($show['displayId']) ? $show['displayId'] : '');
+            $zipped = createZippedBufferByString($json, $packageName);
             $rest['output']['showZip'] = base64_encode($zipped);
+            $rest['output']['showFile'] = $packageName;
             $rest['ok'] = true;
         } else {
             $rest['ok'] = false;
@@ -1085,15 +1204,153 @@ function importShow(&$rest) {
     }
 }
 
+function otaDir() {
+    $dir = pathCorrection('./tmp/ota');
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    return $dir;
+}
+
+function otaSafeKey($ip) {
+    $s = preg_replace('/[^0-9a-fA-F.:]/', '', (string)$ip);
+    return str_replace([':', '.'], '_', $s);
+}
+
+function otaQueueWrite($deviceIp, $buf, $fileName = 'firmware.bin') {
+    $dir = otaDir();
+    $key = otaSafeKey($deviceIp);
+    if ($key === '') throw new Exception('deviceIp ungültig.');
+    $prev = $dir . DIRECTORY_SEPARATOR . $key . '.json';
+    if (is_file($prev)) {
+        $old = json_decode(@file_get_contents($prev), true);
+        if (!empty($old['token'])) {
+            @unlink($dir . DIRECTORY_SEPARATOR . 'token-' . $old['token'] . '.key');
+        }
+    }
+    $token = bin2hex(random_bytes(16));
+    file_put_contents($dir . DIRECTORY_SEPARATOR . $key . '.bin', $buf);
+    file_put_contents($dir . DIRECTORY_SEPARATOR . $key . '.json', json_encode([
+        'token' => $token,
+        'deviceIp' => $deviceIp,
+        'fileName' => $fileName,
+        'size' => strlen($buf),
+        'queuedAt' => round(microtime(true) * 1000)
+    ]));
+    file_put_contents($dir . DIRECTORY_SEPARATOR . 'token-' . $token . '.key', $key);
+    return ['token' => $token, 'size' => strlen($buf), 'fileName' => $fileName];
+}
+
+function attachPendingOta(&$rest) {
+    global $input;
+    $ips = [];
+    if (!empty($input['deviceInfo']['ip'])) $ips[] = $input['deviceInfo']['ip'];
+    if (!empty($input['deviceIp'])) $ips[] = $input['deviceIp'];
+    $remote = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    if ($remote) $ips[] = trim(explode(',', $remote)[0]);
+    $dir = otaDir();
+    foreach ($ips as $ip) {
+        $key = otaSafeKey($ip);
+        if ($key === '') continue;
+        $metaPath = $dir . DIRECTORY_SEPARATOR . $key . '.json';
+        if (!is_file($metaPath)) continue;
+        $meta = json_decode(file_get_contents($metaPath), true);
+        if (!empty($meta['token'])) {
+            $rest['output']['pendingOta'] = [
+                'token' => $meta['token'],
+                'size' => $meta['size'] ?? 0,
+                'fileName' => $meta['fileName'] ?? 'firmware.bin'
+            ];
+            return;
+        }
+    }
+}
+
+function resolveFirmwareBuildBin($id) {
+    $safe = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string)$id);
+    if ($safe === '') throw new Exception('firmwareId fehlt.');
+    $fp = pathCorrection('./firmware/.pio/build/' . $safe . '/firmware.bin');
+    $root = pathCorrection('./firmware/.pio/build');
+    if (strpos(realpath($fp) ?: $fp, realpath($root) ?: $root) !== 0) throw new Exception('path not allowed');
+    if (!is_file($fp)) throw new Exception('firmware.bin nicht gefunden.');
+    return $fp;
+}
+
+function loadFirmwareBuffer($input) {
+    if (!empty($input['firmwareId'])) {
+        $fp = resolveFirmwareBuildBin($input['firmwareId']);
+        return ['buf' => file_get_contents($fp), 'fileName' => $input['firmwareId'] . '.bin'];
+    }
+    $fw64 = $input['firmware'] ?? '';
+    if ($fw64 === '') throw new Exception('firmware (Base64) oder firmwareId fehlt.');
+    $buf = base64_decode($fw64, true);
+    if ($buf === false) throw new Exception('Ungültige Base64-Firmware.');
+    return ['buf' => $buf, 'fileName' => 'firmware.bin'];
+}
+
+function listFirmwareBins(&$rest) {
+    $bins = [];
+    $root = pathCorrection('./firmware/.pio/build');
+    if (is_dir($root)) {
+        foreach (scandir($root) as $name) {
+            if ($name === '.' || $name === '..') continue;
+            $fp = $root . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . 'firmware.bin';
+            if (!is_file($fp)) continue;
+            $bins[] = [
+                'id' => $name,
+                'label' => $name,
+                'size' => filesize($fp),
+                'mtime' => date('c', filemtime($fp))
+            ];
+        }
+    }
+    $rest['output']['bins'] = $bins;
+    $rest['ok'] = true;
+}
+
+function servePendingOta() {
+    $token = preg_replace('/[^a-zA-Z0-9]/', '', $_GET['token'] ?? '');
+    if ($token === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => ['msg' => 'token fehlt']]);
+        exit(0);
+    }
+    $dir = otaDir();
+    $keyFile = $dir . DIRECTORY_SEPARATOR . 'token-' . $token . '.key';
+    if (!is_file($keyFile)) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'error' => ['msg' => 'kein pending OTA']]);
+        exit(0);
+    }
+    $key = trim(file_get_contents($keyFile));
+    $binPath = $dir . DIRECTORY_SEPARATOR . $key . '.bin';
+    if (!is_file($binPath)) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'error' => ['msg' => 'OTA-Datei fehlt']]);
+        exit(0);
+    }
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="firmware.bin"');
+    header('Content-Length: ' . filesize($binPath));
+    readfile($binPath);
+    @unlink($binPath);
+    @unlink($dir . DIRECTORY_SEPARATOR . $key . '.json');
+    @unlink($keyFile);
+    exit(0);
+}
+
 function firmwareUpdateProxy(&$rest) {
     global $input;
     $deviceIp = $input['deviceIp'] ?? '';
-    $fw64 = $input['firmware'] ?? '';
     if (empty($deviceIp)) throw new Exception('deviceIp fehlt.');
-    if (empty($fw64)) throw new Exception('firmware (Base64) fehlt.');
-
-    $fwBin = base64_decode($fw64, true);
-    if ($fwBin === false) throw new Exception('Ungültige Base64-Firmware.');
+    $loaded = loadFirmwareBuffer($input);
+    $fwBin = $loaded['buf'];
+    if (!empty($input['queue'])) {
+        $queued = otaQueueWrite($deviceIp, $fwBin, $loaded['fileName']);
+        $rest['output']['queued'] = true;
+        $rest['output']['pendingOta'] = $queued;
+        $rest['ok'] = true;
+        return;
+    }
 
     $boundary = '----FWUpload' . time();
     $body = "--{$boundary}\r\n"
@@ -1113,7 +1370,14 @@ function firmwareUpdateProxy(&$rest) {
     ];
     $ctx = stream_context_create($opts);
     $result = @file_get_contents("http://{$deviceIp}/ota", false, $ctx);
-    if ($result === false) throw new Exception('Gerät nicht erreichbar: ' . $deviceIp);
+    if ($result === false) {
+        $queued = otaQueueWrite($deviceIp, $fwBin, $loaded['fileName']);
+        $rest['output']['queued'] = true;
+        $rest['output']['pendingOta'] = $queued;
+        $rest['output']['deviceUnreachable'] = true;
+        $rest['ok'] = true;
+        return;
+    }
 
     $json = json_decode($result, true);
     $rest['output']['deviceResponse'] = $json ?: ['msg' => $result];
@@ -1183,8 +1447,20 @@ switch ($action) {
     case 'importShow':
         importShow($rest);
         break;
+    case 'listReadyShows':
+        listReadyShows($rest);
+        break;
+    case 'fetchShowSource':
+        fetchShowSource($rest);
+        break;
     case 'firmwareUpdate':
         firmwareUpdateProxy($rest);
+        break;
+    case 'listFirmwareBins':
+        listFirmwareBins($rest);
+        break;
+    case 'getPendingOta':
+        servePendingOta();
         break;
     case 'getDeviceInfo':
         getDeviceInfoProxy($rest);

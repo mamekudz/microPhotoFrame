@@ -72,3 +72,9 @@ node tools/downloadShowImages.mjs ClassicArt
 Die Webapp verarbeitet die Fotos für das gewählte E-Ink-Display.
 
 Exportierte Pakete heißen Name_DisplayID.show, z. B. ColorFullAnimals_I.show. Nur fuer dieses Display importieren.
+
+## Dateinamen und AutoShow
+
+Exportierte Pakete heißen `Name_Kuerzel.show`, z. B. `ColorFullAnimals_SpectraBWR-2.13.show` oder `ClassicArt_Spectra6-7.3.show`. Offizielle Display-IDs bleiben 9 / I / f.
+
+In der Webapp: **AutoShow from catalog** legt `ColorfulAnimals.AutoShow` auf dem gewaehlten Kanal an. Bild-URLs duerfen https oder lokal `readyToGoShows/...` sein.

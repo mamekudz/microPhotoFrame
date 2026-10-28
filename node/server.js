@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const channels = require('./channels');
 
 const app = express();
@@ -78,7 +79,29 @@ const writeJSON = (p, d) => {
     try { fs.writeFileSync(p, JSON.stringify(d), 'utf8'); return true; } 
     catch (e) { return false; } 
 };
-const getSafeShowName = (n) => 'show_' + n.toString().replace(/[^a-zA-Z0-9\-_]/g, '_');
+const getSafeShowName = (n) => {
+    const safe = String(n || '').replace(/[^a-zA-Z0-9\-_.]/g, '_').replace(/\.{2,}/g, '.').replace(/^[._]+|[._]+$/g, '');
+    if (!safe || safe.includes('..')) return 'show_unknown';
+    return 'show_' + safe;
+};
+let _displaySlugs = null;
+const displaySlugForId = (id) => {
+    const key = String(id || '').trim();
+    if (!key) return '';
+    if (!_displaySlugs) {
+        try {
+            _displaySlugs = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'src', 'microLib', 'display-slugs.json'), 'utf8'));
+        } catch (_) {
+            _displaySlugs = {};
+        }
+    }
+    return _displaySlugs[key] || key;
+};
+const showPackageFileName = (showName, displayId) => {
+    const base = String(showName || 'show').replace(/[^a-zA-Z0-9\-_.]/g, '_').replace(/\.{2,}/g, '.').replace(/^[._]+|[._]+$/g, '') || 'show';
+    const slug = displaySlugForId(displayId);
+    return slug ? `${base}_${slug}.show` : `${base}.show`;
+};
 
 // Datei mit Retry-Logik lesen (wie ASPX FileReadAllText)
 const fileReadAllText = (filePath) => {
@@ -239,6 +262,7 @@ const handleGetShows = (rest, input, req) => {
         const shows = loadShowsCfg();
         saveShowsCfg(shows);
         attachChannelOutput(rest, shows, req, input);
+        attachPendingOta(rest, input, req);
         rest.ok = true;
     } catch (err) {
         rest.ok = false;
@@ -516,11 +540,12 @@ const handleExportShowAsync = async (rest, input) => {
     const exportStr = JSON.stringify(exportObj);
     const JSZip = require('jszip');
     const zip = new JSZip();
-    
-    zip.file(safeName + '.show', exportStr);
+    const packageName = showPackageFileName(showName, show.displayId);
+    zip.file(packageName, exportStr);
     
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     rest.output.showZip = zipBuffer.toString('base64');
+    rest.output.showFile = packageName;
     rest.ok = true;
 };
 
@@ -613,13 +638,253 @@ const handleImportShowAsync = async (rest, input) => {
 };
 
 // --- OTA Firmware Update: Proxy .bin to device ---
+const READY_SHOWS_DIR = path.join(BASE_DIR, 'readyToGoShows');
+const MAX_SHOW_SOURCE = 12 * 1024 * 1024;
+
+function resolveReadyShowPath(rawUrl) {
+    let rel = String(rawUrl || '').trim().replace(/\\/g, '/');
+    rel = rel.replace(/^\/+/, '');
+    if (rel.startsWith('readyToGoShows/')) rel = rel.slice('readyToGoShows/'.length);
+    if (!rel || rel.includes('..')) throw new Error('path not allowed');
+    const abs = path.resolve(READY_SHOWS_DIR, rel);
+    const root = path.resolve(READY_SHOWS_DIR);
+    if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('path not allowed');
+    return abs;
+}
+
+function downloadHttpBuffer(url, hops = 0) {
+    const http = require('http');
+    const https = require('https');
+    return new Promise((resolve, reject) => {
+        if (hops > 6) {
+            reject(new Error('too many redirects'));
+            return;
+        }
+        const lib = url.startsWith('https') ? https : http;
+        const req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) microPhotoFrame/1.5', 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8' }, timeout: 30000 }, (res) => {
+            const loc = res.headers.location;
+            if (loc && [301, 302, 303, 307, 308].includes(res.statusCode)) {
+                res.resume();
+                const next = loc.startsWith('http') ? loc : new URL(loc, url).href;
+                downloadHttpBuffer(next, hops + 1).then(resolve, reject);
+                return;
+            }
+            if (res.statusCode !== 200) {
+                res.resume();
+                reject(new Error('HTTP ' + res.statusCode));
+                return;
+            }
+            const chunks = [];
+            let size = 0;
+            res.on('data', (c) => {
+                size += c.length;
+                if (size > MAX_SHOW_SOURCE) {
+                    req.destroy();
+                    reject(new Error('image too large'));
+                    return;
+                }
+                chunks.push(c);
+            });
+            res.on('end', () => resolve({ buf: Buffer.concat(chunks), mime: String(res.headers['content-type'] || 'image/jpeg') }));
+            res.on('error', reject);
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
+const handleListReadyShows = (rest) => {
+    const catalogs = [];
+    if (fs.existsSync(READY_SHOWS_DIR)) {
+        for (const ent of fs.readdirSync(READY_SHOWS_DIR, { withFileTypes: true })) {
+            if (!ent.isDirectory()) continue;
+            const jsonName = ent.name + '_orgimgs.json';
+            const jsonPath = path.join(READY_SHOWS_DIR, ent.name, jsonName);
+            if (!fs.existsSync(jsonPath)) continue;
+            let title = ent.name;
+            let count = 0;
+            try {
+                const cat = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+                if (cat && cat.name) title = cat.name;
+                if (cat && Array.isArray(cat.images)) count = cat.images.length;
+            } catch (_) { /* ignore */ }
+            catalogs.push({
+                name: ent.name,
+                title,
+                count,
+                path: 'readyToGoShows/' + ent.name + '/' + jsonName
+            });
+        }
+    }
+    rest.output.catalogs = catalogs;
+    rest.ok = true;
+};
+
+const handleFetchShowSource = async (rest, input) => {
+    const raw = String((input && input.url) || '').trim();
+    const name = String((input && input.name) || 'image').replace(/[^a-zA-Z0-9\-_]/g, '_') || 'image';
+    if (!raw) throw new Error('url fehlt');
+    let buf;
+    let mime = 'image/jpeg';
+    let ext = '.jpg';
+    if (/^https?:\/\//i.test(raw)) {
+        const got = await downloadHttpBuffer(raw);
+        buf = got.buf;
+        mime = got.mime.split(';')[0] || mime;
+        if (mime.includes('png')) ext = '.png';
+        else if (mime.includes('webp')) ext = '.webp';
+        else if (mime.includes('gif')) ext = '.gif';
+    } else {
+        const filePath = resolveReadyShowPath(raw);
+        if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) throw new Error('file not found');
+        buf = fs.readFileSync(filePath);
+        ext = path.extname(filePath) || ext;
+        if (ext === '.png') mime = 'image/png';
+        else if (ext === '.webp') mime = 'image/webp';
+        else if (ext === '.gif') mime = 'image/gif';
+    }
+    if (buf.length > MAX_SHOW_SOURCE) throw new Error('image too large');
+    rest.output.base64 = buf.toString('base64');
+    rest.output.mime = mime;
+    rest.output.fileName = name + ext;
+    rest.ok = true;
+};
+
+const OTA_DIR = path.join(BASE_DIR, 'tmp', 'ota');
+const FIRMWARE_BUILD_DIR = path.join(BASE_DIR, 'firmware', '.pio', 'build');
+
+function otaSafeKey(ip) {
+    return String(ip || '').replace(/[^0-9a-fA-F.:]/g, '').replace(/[.:]/g, '_');
+}
+
+function otaQueueWrite(deviceIp, buf, fileName) {
+    fs.mkdirSync(OTA_DIR, { recursive: true });
+    const key = otaSafeKey(deviceIp);
+    if (!key) throw new Error('deviceIp ungültig.');
+    const token = crypto.randomBytes(16).toString('hex');
+    const prevPath = path.join(OTA_DIR, key + '.json');
+    if (fs.existsSync(prevPath)) {
+        try {
+            const prev = JSON.parse(fs.readFileSync(prevPath, 'utf8'));
+            if (prev && prev.token) {
+                const oldTok = path.join(OTA_DIR, 'token-' + prev.token + '.key');
+                if (fs.existsSync(oldTok)) fs.unlinkSync(oldTok);
+            }
+        } catch (_) { /* ignore */ }
+    }
+    fs.writeFileSync(path.join(OTA_DIR, key + '.bin'), buf);
+    fs.writeFileSync(path.join(OTA_DIR, key + '.json'), JSON.stringify({
+        token, deviceIp, fileName: fileName || 'firmware.bin', size: buf.length, queuedAt: Date.now()
+    }));
+    fs.writeFileSync(path.join(OTA_DIR, 'token-' + token + '.key'), key);
+    return { token, size: buf.length, fileName: fileName || 'firmware.bin' };
+}
+
+function findPendingOta(input, req) {
+    const ips = [];
+    if (input && input.deviceInfo && input.deviceInfo.ip) ips.push(String(input.deviceInfo.ip));
+    if (input && input.deviceIp) ips.push(String(input.deviceIp));
+    const rawIp = req && (req.headers['x-forwarded-for'] || req.socket && req.socket.remoteAddress);
+    if (rawIp) ips.push(String(rawIp).split(',')[0].trim().replace(/^::ffff:/, ''));
+    for (const ip of ips) {
+        const key = otaSafeKey(ip);
+        if (!key) continue;
+        const metaPath = path.join(OTA_DIR, key + '.json');
+        if (!fs.existsSync(metaPath)) continue;
+        try {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            if (meta && meta.token) return { token: meta.token, size: meta.size, fileName: meta.fileName };
+        } catch (_) { /* ignore */ }
+    }
+    return null;
+}
+
+function attachPendingOta(rest, input, req) {
+    const pending = findPendingOta(input, req);
+    if (pending) rest.output.pendingOta = pending;
+}
+
+function resolveFirmwareBuildBin(id) {
+    const safe = String(id || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+    if (!safe) throw new Error('firmwareId fehlt.');
+    const abs = path.resolve(FIRMWARE_BUILD_DIR, safe, 'firmware.bin');
+    const root = path.resolve(FIRMWARE_BUILD_DIR);
+    if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('path not allowed');
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error('firmware.bin nicht gefunden.');
+    return abs;
+}
+
+function loadFirmwareBuffer(input) {
+    if (input && input.firmwareId) {
+        const fp = resolveFirmwareBuildBin(input.firmwareId);
+        return { buf: fs.readFileSync(fp), fileName: input.firmwareId + '.bin' };
+    }
+    const firmwareBase64 = input && input.firmware;
+    if (!firmwareBase64) throw new Error('firmware (Base64) oder firmwareId fehlt.');
+    return { buf: Buffer.from(firmwareBase64, 'base64'), fileName: 'firmware.bin' };
+}
+
+const handleListFirmwareBins = (rest) => {
+    const bins = [];
+    if (fs.existsSync(FIRMWARE_BUILD_DIR)) {
+        for (const ent of fs.readdirSync(FIRMWARE_BUILD_DIR, { withFileTypes: true })) {
+            if (!ent.isDirectory()) continue;
+            const fp = path.join(FIRMWARE_BUILD_DIR, ent.name, 'firmware.bin');
+            if (!fs.existsSync(fp)) continue;
+            const st = fs.statSync(fp);
+            bins.push({
+                id: ent.name,
+                label: ent.name,
+                size: st.size,
+                mtime: st.mtime.toISOString()
+            });
+        }
+    }
+    rest.output.bins = bins;
+    rest.ok = true;
+};
+
+function servePendingOta(req, res) {
+    const token = String((req.query && req.query.token) || (req.body && req.body.input && req.body.input.token) || '').replace(/[^a-zA-Z0-9]/g, '');
+    if (!token) {
+        res.status(400).json({ ok: false, error: { msg: 'token fehlt' } });
+        return;
+    }
+    const keyFile = path.join(OTA_DIR, 'token-' + token + '.key');
+    if (!fs.existsSync(keyFile)) {
+        res.status(404).json({ ok: false, error: { msg: 'kein pending OTA' } });
+        return;
+    }
+    const key = fs.readFileSync(keyFile, 'utf8').trim();
+    const binPath = path.join(OTA_DIR, key + '.bin');
+    if (!fs.existsSync(binPath)) {
+        res.status(404).json({ ok: false, error: { msg: 'OTA-Datei fehlt' } });
+        return;
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="firmware.bin"');
+    const stream = fs.createReadStream(binPath);
+    stream.on('close', () => {
+        try { fs.unlinkSync(binPath); } catch (_) { /* ignore */ }
+        try { fs.unlinkSync(path.join(OTA_DIR, key + '.json')); } catch (_) { /* ignore */ }
+        try { fs.unlinkSync(keyFile); } catch (_) { /* ignore */ }
+    });
+    stream.pipe(res);
+}
+
 const handleFirmwareUpdate = async (rest, input) => {
     const deviceIp = input.deviceIp;
-    const firmwareBase64 = input.firmware; // Base64-encoded .bin
     if (!deviceIp) throw new Error("deviceIp fehlt.");
-    if (!firmwareBase64) throw new Error("firmware (Base64) fehlt.");
+    const loaded = loadFirmwareBuffer(input);
+    const firmwareBuf = loaded.buf;
+    if (input.queue) {
+        const queued = otaQueueWrite(deviceIp, firmwareBuf, loaded.fileName);
+        rest.output.queued = true;
+        rest.output.pendingOta = queued;
+        rest.ok = true;
+        return;
+    }
 
-    const firmwareBuf = Buffer.from(firmwareBase64, 'base64');
     console.log(`[OTA] Sending ${firmwareBuf.length} bytes to ${deviceIp}...`);
 
     const http = require('http');
@@ -628,37 +893,47 @@ const handleFirmwareUpdate = async (rest, input) => {
     const footer = `\r\n--${boundary}--\r\n`;
     const bodyLen = Buffer.byteLength(header) + firmwareBuf.length + Buffer.byteLength(footer);
 
-    const result = await new Promise((resolve, reject) => {
-        const req = http.request({
-            hostname: deviceIp,
-            port: 80,
-            path: '/ota',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'multipart/form-data; boundary=' + boundary,
-                'Content-Length': bodyLen
-            },
-            timeout: 120000
-        }, (res) => {
-            let data = '';
-            res.on('data', c => data += c);
-            res.on('end', () => {
-                try { resolve(JSON.parse(data)); } catch (e) { resolve({ ok: res.statusCode === 200, msg: data }); }
+    try {
+        const result = await new Promise((resolve, reject) => {
+            const req = http.request({
+                hostname: deviceIp,
+                port: 80,
+                path: '/ota',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'multipart/form-data; boundary=' + boundary,
+                    'Content-Length': bodyLen
+                },
+                timeout: 120000
+            }, (res) => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch (e) { resolve({ ok: res.statusCode === 200, msg: data }); }
+                });
             });
+            req.on('error', e => reject(e));
+            req.on('timeout', () => { req.destroy(); reject(new Error('Timeout beim Senden an Gerät')); });
+            req.write(header);
+            req.write(firmwareBuf);
+            req.write(footer);
+            req.end();
         });
-        req.on('error', e => reject(e));
-        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout beim Senden an Gerät')); });
-        req.write(header);
-        req.write(firmwareBuf);
-        req.write(footer);
-        req.end();
-    });
 
-    rest.output.deviceResponse = result;
-    rest.ok = result.ok !== false;
-    if (!rest.ok) {
-        rest.error.msg = result.msg || 'Firmware-Update fehlgeschlagen';
-        rest.error.code = 10;
+        rest.output.deviceResponse = result;
+        rest.ok = result.ok !== false;
+        if (!rest.ok) {
+            rest.error.msg = result.msg || 'Firmware-Update fehlgeschlagen';
+            rest.error.code = 10;
+        }
+    } catch (err) {
+        const queued = otaQueueWrite(deviceIp, firmwareBuf, loaded.fileName);
+        rest.output.queued = true;
+        rest.output.pendingOta = queued;
+        rest.output.deviceUnreachable = true;
+        rest.ok = true;
+        rest.error.msg = '';
+        console.log(`[OTA] Device ${deviceIp} unreachable — queued for next wakeup (${err.message})`);
     }
 };
 
@@ -699,6 +974,10 @@ const handleApiPost = async (req, res) => {
 
     try {
         if (!action) throw new Error("Keine Action im Payload gefunden.");
+        if (action === 'getPendingOta') {
+            servePendingOta(req, res);
+            return;
+        }
 
         switch (action) {
             case 'getDevices':
@@ -755,8 +1034,17 @@ const handleApiPost = async (req, res) => {
             case 'importShow':
                 await handleImportShowAsync(rest, input);
                 break;
+            case 'listReadyShows':
+                handleListReadyShows(rest);
+                break;
+            case 'fetchShowSource':
+                await handleFetchShowSource(rest, input);
+                break;
             case 'firmwareUpdate':
                 await handleFirmwareUpdate(rest, input);
+                break;
+            case 'listFirmwareBins':
+                handleListFirmwareBins(rest);
                 break;
             case 'getDeviceInfo':
                 await handleGetDeviceInfo(rest, input);
@@ -807,6 +1095,10 @@ app.use(express.static(BASE_DIR));
 
 // Fallback für alle GET-Anfragen liefert die index.html
 app.get('/', (req, res) => {
+    if (req.query.action === 'getPendingOta') {
+        servePendingOta(req, res);
+        return;
+    }
     res.sendFile(path.join(BASE_DIR, 'index.html'));
 });
 
