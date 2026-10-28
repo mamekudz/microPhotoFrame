@@ -253,8 +253,7 @@ function scanChannels(showsDir) {
 				const local = readJSON(path.join(dir, 'channel.json')) || {};
 				const names = listShowNames(dir);
 				let showName = local.showName || local.activeShow || '';
-				if (showName && !names.includes(showName)) showName = names[0] || '';
-				if (!showName) showName = names[0] || '';
+				if (showName && !names.includes(showName)) showName = '';
 				channels[id] = {
 					user, userId: user,
 					target, group: target, groupId: target,
@@ -582,13 +581,7 @@ function createShow(showsDir, shows, { showName, channel } = {}) {
 		restEnd: DEFAULT_REST_END,
 		displayId: parsed.displayId
 	});
-	const next = refreshFromDisk(showsDir, shows);
-	const chJson = readJSON(path.join(dir, 'channel.json')) || {};
-	if (!chJson.showName) {
-		writeJSON(path.join(dir, 'channel.json'), { showName });
-		return refreshFromDisk(showsDir, next);
-	}
-	return next;
+	return refreshFromDisk(showsDir, shows);
 }
 
 function deleteShow(showsDir, shows, { showName, channel } = {}) {

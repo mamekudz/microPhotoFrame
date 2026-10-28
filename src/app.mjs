@@ -1,7 +1,7 @@
 import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
-import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs?v=exp2";
+import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs?v=exp3";
 import RESTX from "./microLib/RESTX.mjs";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
@@ -76,6 +76,13 @@ function getSelectedChannelSlug() {
 
 function getSelectedShowName() {
     return document.getElementById('globalShowSelect')?.value || '';
+}
+
+function withSelectedChannel(input) {
+    const channel = getSelectedChannelSlug();
+    const next = input && typeof input === 'object' ? { ...input } : {};
+    if (channel && channel !== NEW_CHANNEL_VALUE) next.channel = channel;
+    return next;
 }
 
 const PAGES_NEED_SHOW = ['DeleteShow', 'ShowSettings', 'ActivateShow', 'AddShowPhotos', 'ManageShowPhotos', 'ExportShow'];
@@ -368,7 +375,6 @@ window.UpdateBackButtons = function(enabled) {
         btn.disabled = !enabled;
         btn.style.opacity = enabled ? '1' : '0.45';
         btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
-        btn.style.pointerEvents = enabled ? 'auto' : 'none';
         if (enabled) {
             btn.removeAttribute('aria-disabled');
         } else {
@@ -691,7 +697,7 @@ async function loadShowDisplays(showList) {
     const names = showList || [];
     await Promise.all(names.map(async (showName) => {
         try {
-            const showRes = await new RESTX().promiseCall('getShow', { showName });
+            const showRes = await new RESTX().promiseCall('getShow', withSelectedChannel({ showName }));
             currentShowDisplays[showName] = (showRes.ok && showRes.output.show)
                 ? (showRes.output.show.displayId || '')
                 : '';
@@ -824,33 +830,11 @@ window.UpdateGlobalShowSelect = async function () {
         
         if (showList && showList.length > 0) {
             sel.innerHTML = "";
-            
-            // Load display IDs for all shows in parallel
-            const showPromises = showList.map(async (showName) => {
-                try {
-                    const showRes = await new RESTX().promiseCall('getShow', { showName: showName });
-                    if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
-                        return { name: showName, displayId: showRes.output.show.displayId };
-                    }
-                } catch (e) {
-                    console.warn("Could not load displayId for show:", showName, e);
-                }
-                return { name: showName, displayId: null };
+            const channelDid = (selectedChannel && selectedChannel.displayId) || '';
+            const visibleShows = showList.map((name) => {
+                currentShowDisplays[name] = channelDid;
+                return { name, displayId: channelDid };
             });
-            
-            const showsWithDisplay = await Promise.all(showPromises);
-            
-            // Ensure we process shows in the same order as showList
-            const orderedShows = showList.map(showName => {
-                return showsWithDisplay.find(s => s.name === showName) || { name: showName, displayId: null };
-            });
-            orderedShows.forEach((show) => {
-                currentShowDisplays[show.name] = show.displayId || '';
-            });
-            const filterDid = selectedChannel && selectedChannel.displayId ? selectedChannel.displayId : '';
-            const visibleShows = filterDid
-                ? orderedShows.filter((show) => show.displayId === filterDid)
-                : orderedShows;
             const assignedShow = (selectedChannel && selectedChannel.showName) || '';
             
             // Channel picks the show. Fallback: last selected, then first visible.
@@ -869,7 +853,7 @@ window.UpdateGlobalShowSelect = async function () {
             if (!visibleShows.length) {
                 const empty = document.createElement('option');
                 empty.value = '';
-                empty.text = filterDid ? 'No show for this display' : 'No shows';
+                empty.text = 'No shows';
                 sel.appendChild(empty);
             }
 
@@ -2259,9 +2243,9 @@ window.LoadShowSettingsPage = function () {
     if (messageDiv) messageDiv.style.display = 'none';
     
     // Load current show settings
-    new RESTX().promiseCall('getShow', {
+    new RESTX().promiseCall('getShow', withSelectedChannel({
         showName: showName
-    }).then(_res => {
+    })).then(_res => {
         if (_res.ok && _res.output.show) {
             applyShowSettingsForm(_res.output.show);
         } else {
@@ -2427,7 +2411,7 @@ window.ProcessAndAddPhotos = async function () {
     let stopped = false;
     try {
         try {
-            const showRes = await new RESTX().promiseCall('getShow', { showName: showName });
+            const showRes = await new RESTX().promiseCall('getShow', withSelectedChannel({ showName: showName }));
             if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
                 showDisplayId = showRes.output.show.displayId;
             }
@@ -3216,7 +3200,7 @@ window.LoadActivateShowPage = async function () {
     let selectedShowDisplayId = null;
     if (selectedShow) {
         try {
-            const showRes = await new RESTX().promiseCall('getShow', { showName: selectedShow });
+            const showRes = await new RESTX().promiseCall('getShow', withSelectedChannel({ showName: selectedShow }));
             if (showRes.ok && showRes.output.show) selectedShowDisplayId = showRes.output.show.displayId || null;
         } catch (e) { /* ignore */ }
     }
@@ -3269,7 +3253,7 @@ window.UpdateActivateShowButton = async function () {
     // Get the displayId of the selected show
     let selectedShowDisplayId = null;
     try {
-        const showRes = await new RESTX().promiseCall('getShow', { showName: selectedShow });
+        const showRes = await new RESTX().promiseCall('getShow', withSelectedChannel({ showName: selectedShow }));
         if (showRes.ok && showRes.output.show && showRes.output.show.displayId) {
             selectedShowDisplayId = showRes.output.show.displayId;
         }
@@ -3679,9 +3663,9 @@ window.CheckShowDisplayIdMatch = async function () {
     }
     
     try {
-        const _res = await new RESTX().promiseCall('getShow', {
+        const _res = await new RESTX().promiseCall('getShow', withSelectedChannel({
             showName: showName
-        });
+        }));
         
         if (_res.ok && _res.output.show && _res.output.show.displayId) {
             const showDisplayId = _res.output.show.displayId;

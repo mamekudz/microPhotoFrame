@@ -34,6 +34,18 @@
             padding-top: 118px; /* Space for stacked show/channel header */
         }
 
+        button:disabled,
+        button[aria-disabled="true"],
+        input:disabled,
+        select:disabled,
+        textarea:disabled,
+        .btn-action:disabled,
+        .back-btn:disabled,
+        .header-new-btn:disabled,
+        .menu-grid button:disabled {
+            cursor: not-allowed !important;
+        }
+
         .global-header {
             position: fixed;
             top: 0;
@@ -604,7 +616,6 @@
         .back-btn:disabled {
             opacity: 0.45;
             cursor: not-allowed;
-            pointer-events: none;
         }
 
         @media (prefers-color-scheme: dark) {

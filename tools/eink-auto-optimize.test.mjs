@@ -6,16 +6,22 @@ const e6 = { colors: ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', '#f
 
 test('high-key bathroom does not crush the subject', () => {
 	const s = SuggestEinkSettings({
-		p05: 0.55,
+		p25: 0.58,
 		p50: 0.82,
-		p95: 0.97,
+		p75: 0.92,
+		trimMean: 0.76,
 		mean: 0.78,
-		std: 0.10,
+		iqr: 0.34,
+		darkFrac: 0.08,
+		brightFrac: 0.62,
 		meanSat: 0.12,
 		skinFrac: 0.08,
-		subjectMean: 0.34,
-		subjectP05: 0.16,
-		subjectP95: 0.55
+		subjectTrimMean: 0.36,
+		subjectP25: 0.22,
+		subjectP75: 0.48,
+		subjectDarkFrac: 0.18,
+		subjectBrightFrac: 0.12,
+		subjectFrac: 0.2
 	}, e6);
 	assert.ok(s.blackPointAdjust <= 1.12, 'bp=' + s.blackPointAdjust);
 	assert.ok(s.contrastAdjust <= 1.45, 'contrast=' + s.contrastAdjust);
@@ -23,16 +29,22 @@ test('high-key bathroom does not crush the subject', () => {
 
 test('low-key night lifts shadows instead of adding contrast', () => {
 	const s = SuggestEinkSettings({
-		p05: 0.01,
-		p50: 0.08,
-		p95: 0.70,
-		mean: 0.12,
-		std: 0.14,
+		p25: 0.05,
+		p50: 0.10,
+		p75: 0.22,
+		trimMean: 0.13,
+		mean: 0.16,
+		iqr: 0.17,
+		darkFrac: 0.72,
+		brightFrac: 0.04,
 		meanSat: 0.15,
 		skinFrac: 0.04,
-		subjectMean: 0.22,
-		subjectP05: 0.06,
-		subjectP95: 0.72
+		subjectTrimMean: 0.22,
+		subjectP25: 0.10,
+		subjectP75: 0.38,
+		subjectDarkFrac: 0.55,
+		subjectBrightFrac: 0.06,
+		subjectFrac: 0.18
 	}, e6);
 	assert.ok(s.blackPointAdjust <= 0.85, 'bp=' + s.blackPointAdjust);
 	assert.ok(s.contrastAdjust <= 1.35, 'contrast=' + s.contrastAdjust);
@@ -40,17 +52,71 @@ test('low-key night lifts shadows instead of adding contrast', () => {
 
 test('normal daylight stays near previous defaults', () => {
 	const s = SuggestEinkSettings({
-		p05: 0.06,
+		p25: 0.22,
 		p50: 0.48,
-		p95: 0.92,
+		p75: 0.74,
+		trimMean: 0.47,
 		mean: 0.47,
-		std: 0.18,
+		iqr: 0.52,
+		darkFrac: 0.18,
+		brightFrac: 0.16,
 		meanSat: 0.28,
 		skinFrac: 0.05,
-		subjectMean: 0.47,
-		subjectP05: 0.08,
-		subjectP95: 0.88
+		subjectTrimMean: 0.47,
+		subjectP25: 0.24,
+		subjectP75: 0.70,
+		subjectDarkFrac: 0.16,
+		subjectBrightFrac: 0.14,
+		subjectFrac: 0.2
 	}, e6);
-	assert.ok(s.blackPointAdjust >= 0.85 && s.blackPointAdjust <= 1.20, 'bp=' + s.blackPointAdjust);
-	assert.ok(s.contrastAdjust >= 1.15 && s.contrastAdjust <= 1.70, 'contrast=' + s.contrastAdjust);
+	assert.ok(s.blackPointAdjust >= 0.82 && s.blackPointAdjust <= 1.22, 'bp=' + s.blackPointAdjust);
+	assert.ok(s.contrastAdjust >= 1.10 && s.contrastAdjust <= 1.70, 'contrast=' + s.contrastAdjust);
+});
+
+test('a few highlight spikes do not treat a dark photo as high-key', () => {
+	const s = SuggestEinkSettings({
+		p05: 0.02,
+		p95: 0.98,
+		mean: 0.28,
+		p25: 0.06,
+		p50: 0.12,
+		p75: 0.22,
+		trimMean: 0.14,
+		iqr: 0.16,
+		darkFrac: 0.70,
+		brightFrac: 0.03,
+		meanSat: 0.12,
+		subjectTrimMean: 0.18,
+		subjectP25: 0.08,
+		subjectP75: 0.30,
+		subjectDarkFrac: 0.60,
+		subjectBrightFrac: 0.04,
+		subjectFrac: 0.15
+	}, e6);
+	assert.ok(s.blackPointAdjust <= 0.88, 'bp=' + s.blackPointAdjust);
+	assert.ok(s.whitePointAdjust <= 1.22, 'wp=' + s.whitePointAdjust);
+});
+
+test('a dark corner does not treat a bright photo as night', () => {
+	const s = SuggestEinkSettings({
+		p05: 0.02,
+		p95: 0.96,
+		mean: 0.68,
+		p25: 0.58,
+		p50: 0.74,
+		p75: 0.88,
+		trimMean: 0.72,
+		iqr: 0.30,
+		darkFrac: 0.05,
+		brightFrac: 0.60,
+		meanSat: 0.14,
+		subjectTrimMean: 0.66,
+		subjectP25: 0.50,
+		subjectP75: 0.82,
+		subjectDarkFrac: 0.08,
+		subjectBrightFrac: 0.48,
+		subjectFrac: 0.2
+	}, e6);
+	assert.ok(s.blackPointAdjust >= 0.90, 'bp=' + s.blackPointAdjust);
+	assert.ok(s.contrastAdjust <= 1.40, 'contrast=' + s.contrastAdjust);
 });

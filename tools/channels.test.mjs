@@ -87,6 +87,7 @@ test('show must be created inside a channel and cannot change display', () => {
 	let cfg = ch.createChannel(dir, ch.emptyShows(), { user: 'mamekudz', target: 'family', displayId: '9' });
 	assert.throws(() => ch.createShow(dir, cfg, { showName: 'album' }), /Kanal fehlt/);
 	cfg = ch.createShow(dir, cfg, { showName: 'album', channel: 'mamekudz/family/9' });
+	assert.equal(cfg.channels['mamekudz/family/9'].showName, '');
 	const found = ch.findShow(dir, 'album', 'mamekudz/family/9');
 	assert.ok(found);
 	assert.equal(found.displayId, '9');
@@ -115,6 +116,23 @@ test('rest window 22-6 wraps overnight and same hour disables rest', () => {
 	assert.equal(ch.restWindowUnix(8, 8, day).nextRestStart, 0);
 	const afternoon = ch.restWindowUnix(13, 17, local(2026, 5, 16, 14));
 	assert.equal(afternoon.restActive, true);
+});
+
+test('same show name in two channels is found via the channel hint', () => {
+	const dir = tmpShows();
+	let cfg = ch.createChannel(dir, ch.emptyShows(), { user: 'mamekudz', target: 'family', displayId: '9' });
+	cfg = ch.createChannel(dir, cfg, { user: 'mamekudz', target: 'family', displayId: 'f' });
+	cfg = ch.createShow(dir, cfg, { showName: 'hochzeiten', channel: 'mamekudz/family/9' });
+	cfg = ch.createShow(dir, cfg, { showName: 'hochzeiten', channel: 'mamekudz/family/f' });
+	const spectra = ch.findShow(dir, 'hochzeiten', 'mamekudz/family/9');
+	const wave = ch.findShow(dir, 'hochzeiten', 'mamekudz/family/f');
+	assert.ok(spectra);
+	assert.ok(wave);
+	assert.equal(spectra.displayId, '9');
+	assert.equal(wave.displayId, 'f');
+	assert.notEqual(spectra.dir, wave.dir);
+	const first = ch.findShow(dir, 'hochzeiten', '');
+	assert.ok(first);
 });
 
 test('activate only accepts a show that lives in the channel', () => {

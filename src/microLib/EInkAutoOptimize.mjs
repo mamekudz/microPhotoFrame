@@ -62,22 +62,86 @@ function stdOf(hist, total, mean) {
     return Math.sqrt(variance / total) / 255;
 }
 
+function massAtMost(hist, total, maxIncl) {
+    if (!total) return 0;
+    let acc = 0;
+    for (let i = 0; i <= maxIncl; i++) acc += hist[i];
+    return acc / total;
+}
+
+function massAtLeast(hist, total, minIncl) {
+    if (!total) return 0;
+    let acc = 0;
+    for (let i = minIncl; i < 256; i++) acc += hist[i];
+    return acc / total;
+}
+
+/** Mean of the middle 80% — ignores short highlight/shadow spikes. */
+function trimmedMeanOf(hist, total, loP = 0.10, hiP = 0.90) {
+    if (!total) return 128;
+    const lo = percentileOf(hist, total, loP);
+    const hi = percentileOf(hist, total, hiP);
+    let sum = 0;
+    let w = 0;
+    for (let i = lo; i <= hi; i++) {
+        sum += i * hist[i];
+        w += hist[i];
+    }
+    return w ? sum / w : meanOf(hist, total);
+}
+
+function robustFromHist(hist, n) {
+    const p25 = percentileOf(hist, n, 0.25) / 255;
+    const p50 = percentileOf(hist, n, 0.50) / 255;
+    const p75 = percentileOf(hist, n, 0.75) / 255;
+    return {
+        trimMean: trimmedMeanOf(hist, n) / 255,
+        p25,
+        p50,
+        p75,
+        darkFrac: massAtMost(hist, n, 64),
+        brightFrac: massAtLeast(hist, n, 191),
+        iqr: Math.max(0, p75 - p25)
+    };
+}
+
+function mix(a, b, t) {
+    const x = Number.isFinite(a) ? a : b;
+    const y = Number.isFinite(b) ? b : a;
+    if (!Number.isFinite(x)) return 0;
+    if (!Number.isFinite(y)) return x;
+    return x * (1 - t) + y * t;
+}
+
 function packStats(hist, n, satSum, skin, w, h, subject) {
     const mean = meanOf(hist, n);
+    const robust = robustFromHist(hist, n);
     return {
         p05: percentileOf(hist, n, 0.05) / 255,
-        p25: percentileOf(hist, n, 0.25) / 255,
-        p50: percentileOf(hist, n, 0.50) / 255,
+        p10: percentileOf(hist, n, 0.10) / 255,
+        p25: robust.p25,
+        p50: robust.p50,
+        p75: robust.p75,
+        p90: percentileOf(hist, n, 0.90) / 255,
         p95: percentileOf(hist, n, 0.95) / 255,
         mean: mean / 255,
+        trimMean: robust.trimMean,
         std: stdOf(hist, n, mean),
+        iqr: robust.iqr,
+        darkFrac: robust.darkFrac,
+        brightFrac: robust.brightFrac,
         meanSat: n ? satSum / n : 0,
         skinFrac: n ? skin / n : 0,
         width: w,
         height: h,
         subjectMean: subject.mean,
+        subjectTrimMean: subject.trimMean,
         subjectP05: subject.p05,
+        subjectP25: subject.p25,
+        subjectP75: subject.p75,
         subjectP95: subject.p95,
+        subjectDarkFrac: subject.darkFrac,
+        subjectBrightFrac: subject.brightFrac,
         subjectFrac: subject.frac
     };
 }
@@ -144,11 +208,18 @@ export function SampleImageStats(img, maxEdge = 160, options = {}) {
     }
 
     const useSub = subN >= Math.max(8, n * 0.02);
-    const subMean = useSub ? meanOf(subHist, subN) / 255 : meanOf(hist, n) / 255;
+    const src = useSub ? subHist : hist;
+    const srcN = useSub ? subN : n;
+    const subRobust = robustFromHist(src, srcN);
     const subject = {
-        mean: subMean,
-        p05: (useSub ? percentileOf(subHist, subN, 0.05) : percentileOf(hist, n, 0.05)) / 255,
-        p95: (useSub ? percentileOf(subHist, subN, 0.95) : percentileOf(hist, n, 0.95)) / 255,
+        mean: meanOf(src, srcN) / 255,
+        trimMean: subRobust.trimMean,
+        p05: percentileOf(src, srcN, 0.05) / 255,
+        p25: subRobust.p25,
+        p75: subRobust.p75,
+        p95: percentileOf(src, srcN, 0.95) / 255,
+        darkFrac: subRobust.darkFrac,
+        brightFrac: subRobust.brightFrac,
         frac: n ? subN / n : 0
     };
 
@@ -157,55 +228,62 @@ export function SampleImageStats(img, maxEdge = 160, options = {}) {
 
 export function SuggestEinkSettings(stats, display, extras = {}) {
     const kind = GetPaletteKind(display);
-    const p05 = stats.p05 ?? 0.06;
-    const p50 = stats.p50 ?? stats.mean ?? 0.45;
-    const p95 = stats.p95 ?? 0.92;
-    const mean = stats.mean ?? p50;
-    const std = stats.std ?? 0.18;
+    const p25 = stats.p25 ?? stats.p05 ?? 0.15;
+    const p50 = stats.p50 ?? stats.trimMean ?? stats.mean ?? 0.45;
+    const p75 = stats.p75 ?? stats.p95 ?? 0.85;
+    const trimMean = stats.trimMean ?? stats.mean ?? p50;
+    const iqr = stats.iqr ?? Math.max(0, p75 - p25);
+    const darkFrac = stats.darkFrac ?? 0;
+    const brightFrac = stats.brightFrac ?? 0;
     const meanSat = stats.meanSat ?? 0.28;
     const skinFrac = stats.skinFrac ?? 0;
-    const subjectMean = extras.subjectMean ?? stats.subjectMean ?? mean;
-    const subjectP05 = extras.subjectP05 ?? stats.subjectP05 ?? p05;
-    const subjectP95 = extras.subjectP95 ?? stats.subjectP95 ?? p95;
 
-    const toneMean = subjectMean;
-    const toneP05 = subjectP05;
-    const hiP95 = Math.max(p95, subjectP95);
+    const subW = clamp((extras.subjectFrac ?? stats.subjectFrac ?? 0) > 0.04 ? 0.55 : 0.35, 0, 0.7);
+    const toneCenter = mix(
+        trimMean,
+        extras.subjectTrimMean ?? stats.subjectTrimMean ?? extras.subjectMean ?? stats.subjectMean ?? trimMean,
+        subW
+    );
+    const bulkLow = mix(p25, extras.subjectP25 ?? stats.subjectP25 ?? p25, subW);
+    const bulkHigh = mix(p75, extras.subjectP75 ?? stats.subjectP75 ?? p75, subW);
+    const darkMass = mix(darkFrac, extras.subjectDarkFrac ?? stats.subjectDarkFrac ?? darkFrac, subW);
+    const brightMass = mix(brightFrac, extras.subjectBrightFrac ?? stats.subjectBrightFrac ?? brightFrac, subW);
 
-    const lowKey = toneMean < 0.30 || (mean < 0.22 && p95 < 0.78);
-    const highKey = mean > 0.68 && p05 > 0.28 && toneMean > 0.45;
-    const brightBgDarkSubject = mean - toneMean > 0.22 && mean > 0.45;
+    const lowKey = toneCenter < 0.32 && darkMass >= 0.42;
+    const highKey = toneCenter > 0.60 && brightMass >= 0.42;
+    const brightBgDarkSubject = brightMass - darkMass > 0.22 && toneCenter < 0.42 && brightFrac > 0.35;
 
     let bp = 1.0;
     let wp = 1.1;
-    let contrast = 1.35;
+    let contrast = 1.32;
 
     if (lowKey) {
-        const lift = clamp((0.42 - toneMean) * 2.0, 0.15, 0.55);
-        bp = clamp(1.0 - lift, 0.45, 0.85);
-        wp = clamp(1.06 + (0.82 - hiP95) * 0.5, 0.95, 1.22);
-        contrast = clamp(1.10 + (0.12 - Math.min(std, 0.16)) * 0.8, 1.04, 1.28);
+        const lift = clamp((0.40 - toneCenter) * 1.6 + (darkMass - 0.42) * 0.35, 0.12, 0.48);
+        bp = clamp(1.0 - lift, 0.50, 0.88);
+        wp = clamp(1.06 + (0.62 - bulkHigh) * 0.4, 0.96, 1.20);
+        contrast = clamp(1.10 + (0.22 - Math.min(iqr, 0.28)) * 0.6, 1.04, 1.28);
     } else if (highKey) {
-        bp = clamp(1.0 + (toneP05 - 0.22) * 0.35, 0.92, 1.12);
-        wp = clamp(1.04 + (0.96 - hiP95) * 1.0, 0.90, 1.20);
-        contrast = clamp(1.18 + (0.14 - Math.min(std, 0.18)) * 0.8, 1.05, 1.36);
+        bp = clamp(1.0 + (bulkLow - 0.28) * 0.25, 0.92, 1.12);
+        wp = clamp(1.04 + (0.78 - bulkHigh) * 0.5, 0.92, 1.18);
+        contrast = clamp(1.16 + (0.20 - Math.min(iqr, 0.26)) * 0.5, 1.05, 1.32);
     } else if (brightBgDarkSubject) {
-        const lift = clamp((0.38 - toneMean) * 1.5, 0.08, 0.40);
-        bp = clamp(1.0 - lift, 0.58, 1.05);
-        wp = clamp(1.06 + (0.94 - hiP95) * 0.8, 0.92, 1.22);
-        contrast = clamp(1.22 + (0.16 - Math.min(std, 0.20)) * 0.7, 1.08, 1.42);
+        const lift = clamp((0.38 - toneCenter) * 1.3 + darkMass * 0.2, 0.06, 0.36);
+        bp = clamp(1.0 - lift, 0.60, 1.05);
+        wp = clamp(1.06 + (0.76 - bulkHigh) * 0.4, 0.94, 1.18);
+        contrast = clamp(1.18 + (0.24 - Math.min(iqr, 0.30)) * 0.45, 1.08, 1.38);
     } else {
-        const haze = toneP05 > 0.12 && std < 0.15 && mean > 0.32 && mean < 0.62;
+        const haze = bulkLow > 0.18 && iqr < 0.18 && toneCenter > 0.34 && toneCenter < 0.62;
+        const darkPull = (darkMass - brightMass) * 0.22;
         bp = haze
-            ? clamp(1.0 + (toneP05 - 0.10) * 0.9, 0.92, 1.22)
-            : clamp(1.0 + (toneP05 - 0.06) * 0.8, 0.82, 1.18);
-        wp = clamp(1.08 + (0.92 - hiP95) * 1.1, 0.90, 1.38);
-        contrast = clamp(1.32 + (0.18 - std) * 1.4, 1.10, 1.65);
+            ? clamp(1.0 + (bulkLow - 0.16) * 0.7, 0.92, 1.18)
+            : clamp(1.0 - darkPull + (bulkLow - 0.16) * 0.35, 0.82, 1.18);
+        wp = clamp(1.08 + (0.72 - bulkHigh) * 0.55 + (0.22 - brightMass) * 0.25, 0.92, 1.32);
+        contrast = clamp(1.28 + (0.26 - iqr) * 1.1, 1.10, 1.58);
     }
 
-    if (toneMean < 0.34 && !highKey) {
-        bp = Math.min(bp, clamp(1.0 - (0.38 - toneMean) * 1.35, 0.52, 0.95));
-        contrast = Math.min(contrast, 1.38);
+    if (toneCenter < 0.34 && darkMass >= 0.30 && !highKey) {
+        bp = Math.min(bp, clamp(1.0 - (0.36 - toneCenter) * 1.1, 0.55, 0.95));
+        contrast = Math.min(contrast, 1.36);
     }
 
     let sat;
@@ -291,8 +369,12 @@ export async function OptimizeImageForEink(img, options = {}) {
     const settings = SuggestEinkSettings(stats, display, {
         bbox: focus.bbox,
         subjectMean: stats.subjectMean,
-        subjectP05: stats.subjectP05,
-        subjectP95: stats.subjectP95
+        subjectTrimMean: stats.subjectTrimMean,
+        subjectP25: stats.subjectP25,
+        subjectP75: stats.subjectP75,
+        subjectDarkFrac: stats.subjectDarkFrac,
+        subjectBrightFrac: stats.subjectBrightFrac,
+        subjectFrac: stats.subjectFrac
     });
     return {
         settings: {

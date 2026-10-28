@@ -1,6 +1,6 @@
 {
   "name": "microPhotoFrame-server",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "microPhotoFrame Node.js Express Server",
   "main": "server.js",
   "scripts": {

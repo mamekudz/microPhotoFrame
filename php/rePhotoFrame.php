@@ -614,7 +614,17 @@ function createShow(&$rest) {
 
         $channel = $rest['input']['channel'] ?? '';
         if ($channel !== '') {
-            $shows = assignShowToChannelCfg($shows, $orgShowName, $displayId, $channel);
+            $slug = normalizeChannelSlug($channel);
+            if ($slug === '' || !isset($shows['channels'][$slug])) {
+                throw new Exception('Kanal nicht gefunden.');
+            }
+            if (!isset($shows['channels'][$slug]['shows']) || !is_array($shows['channels'][$slug]['shows'])) {
+                $shows['channels'][$slug]['shows'] = [];
+            }
+            if (!in_array($orgShowName, $shows['channels'][$slug]['shows'], true)) {
+                $shows['channels'][$slug]['shows'][] = $orgShowName;
+            }
+            $shows = syncActiveShows($shows);
         }
         
         writeAllJSONNoFormat($showsPathName, $shows);

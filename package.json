@@ -1,6 +1,6 @@
 {
   "name": "microphotoframe",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "WiFi-based E-Ink photo frame firmware for reTerminal E1002, GooDisplay NeoFrame, and Waveshare ESP32-S3 1.54inch e-Paper (G)",
   "author": "Meinolf Amekudzi",
   "license": "MIT",

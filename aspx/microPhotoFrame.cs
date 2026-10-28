@@ -405,12 +405,6 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     show["imgs"] = new JArray();
     show["displayId"] = displayId;
     WriteAllJSONNoFormat(Path.Combine(showPath, "show.json"), show);
-    string chJsonPath = Path.Combine(ShowsRoot(), user, target, displayId, "channel.json");
-    JObject chJson = ReadAllJSONObject(chJsonPath) as JObject ?? new JObject();
-    if (string.IsNullOrEmpty((string)chJson["showName"])) {
-      chJson["showName"] = orgShowName;
-      WriteAllJSONNoFormat(chJsonPath, chJson);
-    }
     JObject shows = LoadShowsCfg();
     _r.output.shows = shows;
     _r.output.showName = orgShowName;
@@ -1271,8 +1265,7 @@ public partial class microPhotoFrame : System.Web.UI.Page {
           dynamic local = ReadAllJSONObject(Path.Combine(dispDir, "channel.json"));
           JArray names = ListShowNamesIn(dispDir);
           string showName = local != null && local.showName != null ? (string)local.showName : "";
-          if (showName != "" && !names.Any(n => (string)n == showName)) showName = names.Count > 0 ? (string)names[0] : "";
-          if (showName == "" && names.Count > 0) showName = (string)names[0];
+          if (showName != "" && !names.Any(n => (string)n == showName)) showName = "";
           JObject ch = new JObject();
           ch["user"] = user;
           ch["target"] = target;

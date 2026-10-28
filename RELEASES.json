@@ -2,6 +2,19 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 6,
+		"date": "2026-10-28 11:55",
+		"beta": false,
+		"info": [
+			"The show list is the show_* folders of the selected channel. The same show name may exist on another display.",
+			"New shows are not activated automatically.",
+			"Auto-optimize uses the bulk of dark and light pixels, not short histogram spikes.",
+			"Disabled controls show a not-allowed cursor."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 5,
 		"date": "2026-10-28 11:40",
 		"beta": false,
