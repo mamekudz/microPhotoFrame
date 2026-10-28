@@ -18,6 +18,10 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: installer/assets/runtime-cache
+          key: server-runtimes-${{ hashFiles('installer/assets/server-runtimes.json') }}
       - run: node tools/release.mjs check
       - run: node --test tools/release.test.mjs
       - run: npm run build:packages

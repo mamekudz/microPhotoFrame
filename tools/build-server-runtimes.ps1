@@ -11,10 +11,23 @@ foreach ($item in $manifest.items) {
     if ($Server -ne 'all' -and $Server -notin $item.servers) { continue }
     $file = Join-Path $cache $item.file
     if (!(Test-Path $file) -or (Get-FileHash $file -Algorithm SHA256).Hash -ne $item.sha256) {
-        & curl.exe --fail --location --proto '=https' --proto-redir '=https' --retry 3 --silent --show-error -o "$file.part" $item.url
-        if ($LASTEXITCODE -ne 0) { throw "Download failed: $($item.file)" }
-        if ((Get-FileHash "$file.part" -Algorithm SHA256).Hash -ne $item.sha256) { throw "Checksum mismatch: $($item.file)" }
-        Move-Item -LiteralPath "$file.part" -Destination $file -Force
+        $part = "$file.part"
+        $ok = $false
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            # Resume a partial file; curl --retry alone skips error 18 (truncated body).
+            & curl.exe --fail --location --proto '=https' --proto-redir '=https' `
+                --retry 5 --retry-all-errors --retry-delay 3 --retry-max-time 180 `
+                --continue-at - --silent --show-error -o $part $item.url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $part) -and (Get-FileHash $part -Algorithm SHA256).Hash -eq $item.sha256) {
+                $ok = $true
+                break
+            }
+            Write-Host "Download attempt $attempt failed for $($item.file) (exit $LASTEXITCODE)"
+            if (Test-Path $part) { Remove-Item -LiteralPath $part -Force }
+            Start-Sleep -Seconds (3 * $attempt)
+        }
+        if (-not $ok) { throw "Download failed: $($item.file)" }
+        Move-Item -LiteralPath $part -Destination $file -Force
     }
     Write-Host "Verified $($item.file)"
     if ($item.kind -eq 'zip') {
