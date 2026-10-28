@@ -59,7 +59,7 @@ This project includes photo frame firmware for the reTerminal E1001/E1002, GooDi
 
 #### ⏱️ Flexible Timing
 - ✅ Display duration: 1 minute to 6 hours per image list
-- ✅ Configurable rest periods to preserve battery
+- ✅ Per-show rest period (default 22:00–06:00): the frame stays in deep sleep and keeps the last photo; same start and end hour turns rest off
 - ✅ Different modes: sequential, reverse, or random
 
 #### 💾 Storage
@@ -236,7 +236,7 @@ Dieses Projekt enthält eine Fotorahmen-Firmware für das reTerminal E1001/E1002
 
 #### ⏱️ Flexible Zeitsteuerung
 - ✅ Anzeigedauer: 1 Minute bis 6 Stunden pro Bildliste
-- ✅ Konfigurierbare Ruhezeiten zur Akkuschonung
+- ✅ Ruhezeit pro Show (Standard 22:00–06:00): das Gerät bleibt im Tiefschlaf und behält das letzte Foto; gleiche Start- und Endstunde schaltet die Ruhezeit aus
 - ✅ Verschiedene Modi: fortlaufend, rücklaufend oder zufällig
 
 #### 💾 Speicherung

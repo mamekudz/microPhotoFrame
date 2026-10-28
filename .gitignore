@@ -49,9 +49,10 @@ desktop.ini
 # Logs
 *.log
 
-# COCO-SSD weights (gulp INIT)
+# COCO-SSD weights (gulp INIT). Keep the download manifest in git.
 src/libs/models/model.json
 src/libs/models/group1-shard*
+!src/libs/models/manifest.json
 
 # Shows folder should exist but be empty (use shows/.gitkeep)
 shows/*

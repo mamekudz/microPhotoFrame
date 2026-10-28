@@ -366,6 +366,28 @@
             flex: 1;
         }
 
+        .rest-hours {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .rest-hours select {
+            flex: 1 1 0;
+            max-width: 8rem;
+            padding: 8px;
+            font-size: 1rem;
+        }
+
+        .settings-hint {
+            margin: 0 0 14px 120px;
+            font-size: 0.85rem;
+            color: var(--text);
+            opacity: 0.72;
+        }
+
         /* Style for active show in select - must be very specific to override browser defaults */
         #globalShowSelect option[data-active="true"] {
             background-color: var(--d) !important;

@@ -2,6 +2,17 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 1,
+		"date": "2026-10-28 09:50",
+		"beta": false,
+		"info": [
+			"Per-show rest period (default 22:00–06:00). The frame keeps the last photo and stays in deep sleep; the same start and end hour turns rest off.",
+			"Server packages download the local COCO-SSD model from the committed manifest so the release build can run without vendored weights."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 0,
 		"date": "2026-10-28 09:15",
 		"beta": false,

@@ -400,6 +400,8 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     show["name"] = orgShowName;
     show["timer"] = 1;
     show["mode"] = "random";
+    show["restStart"] = 22;
+    show["restEnd"] = 6;
     show["imgs"] = new JArray();
     show["displayId"] = displayId;
     WriteAllJSONNoFormat(Path.Combine(showPath, "show.json"), show);
@@ -629,6 +631,8 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     *
     * show.name         name of the show
     * show.timer        display duration of one image in minutes
+    * show.restStart    hour 0-23 when nightly deep sleep begins (default 22)
+    * show.restEnd      hour 0-23 when nightly deep sleep ends (default 6); same as restStart disables rest
     * show.imgs         array of image names available in show
     * shows.mode        "random" / "forwaresequence" / "reverssequence"
     */
@@ -644,6 +648,7 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     dynamic show = ReadAllJSONObject(Path.Combine(found.Dir, "show.json"));
     if (show != null) {
       AttachShowMeta(show, found);
+      AttachShowRestWindow(show as JObject);
       _r.output.show = show;
       _r.ok = true;
     } else {
@@ -681,6 +686,8 @@ public partial class microPhotoFrame : System.Web.UI.Page {
    * @param input.showName   the name of the show which have to set active.
    * @param input.showMode   new photo selection mode of show.
    * @param input.showTimer  new display time for each photo in minutes.
+   * @param input.showRestStart  optional rest-period start hour 0-23.
+   * @param input.showRestEnd    optional rest-period end hour 0-23.
    * @return output.show, json of a description the given show (see GetShow).
    */
   public void SetShowSettings(dynamic _r) {
@@ -692,8 +699,19 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     if (show != null) {
       show.mode = (string)_r.input.showMode;
       show.timer = (int)_r.input.showTimer;
-      _r.output.show = show;
-      WriteAllJSONNoFormat(showPathName, show);
+      JObject showObj = show as JObject;
+      if (showObj != null) {
+        if (_r.input.showRestStart != null) showObj["restStart"] = NormalizeRestHour(_r.input.showRestStart, 22);
+        if (_r.input.showRestEnd != null) showObj["restEnd"] = NormalizeRestHour(_r.input.showRestEnd, 6);
+        ApplyShowRestDefaults(showObj);
+        StripShowRestWindow(showObj);
+        WriteAllJSONNoFormat(showPathName, showObj);
+        AttachShowRestWindow(showObj);
+        _r.output.show = showObj;
+      } else {
+        WriteAllJSONNoFormat(showPathName, show);
+        _r.output.show = show;
+      }
       _r.ok = true;
     } else {
       _r.ok = false;
@@ -1377,6 +1395,82 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     if (show == null || found == null) return;
     show.channel = found.Channel ?? "";
     show.relDir = found.RelDir ?? "";
+  }
+
+  private static int NormalizeRestHour(object raw, int fallback) {
+    if (raw == null) return fallback;
+    int n;
+    if (!int.TryParse(Convert.ToString(raw), out n) || n < 0 || n > 23) return fallback;
+    return n;
+  }
+
+  private static DateTime RestLocalHour(DateTime now, int dayOffset, int hour) {
+    return new DateTime(now.Year, now.Month, now.Day, hour, 0, 0, DateTimeKind.Local).AddDays(dayOffset);
+  }
+
+  private static long ToUnixSec(DateTime local) {
+    DateTime utc = local.ToUniversalTime();
+    return (long)(utc - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+  }
+
+  private static void ApplyShowRestDefaults(JObject show) {
+    if (show == null) return;
+    show["restStart"] = show["restStart"] == null ? 22 : NormalizeRestHour(show["restStart"], 22);
+    show["restEnd"] = show["restEnd"] == null ? 6 : NormalizeRestHour(show["restEnd"], 6);
+  }
+
+  private static void StripShowRestWindow(JObject show) {
+    if (show == null) return;
+    show.Remove("restActive");
+    show.Remove("nextRestStart");
+    show.Remove("restSleepUntil");
+    show.Remove("tzOffsetMin");
+  }
+
+  private static void AttachShowRestWindow(JObject show) {
+    if (show == null) return;
+    ApplyShowRestDefaults(show);
+    int start = (int)show["restStart"];
+    int end = (int)show["restEnd"];
+    if (start == end) {
+      show["restActive"] = false;
+      show["nextRestStart"] = 0;
+      show["restSleepUntil"] = 0;
+      show["tzOffsetMin"] = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.Now).TotalMinutes;
+      return;
+    }
+    DateTime now = DateTime.Now;
+    int h = now.Hour;
+    DateTime startDt;
+    DateTime endDt;
+    if (start > end) {
+      if (h >= start) {
+        startDt = RestLocalHour(now, 0, start);
+        endDt = RestLocalHour(now, 1, end);
+      } else if (h < end) {
+        startDt = RestLocalHour(now, -1, start);
+        endDt = RestLocalHour(now, 0, end);
+      } else {
+        startDt = RestLocalHour(now, 0, start);
+        endDt = RestLocalHour(now, 1, end);
+      }
+    } else if (h < start) {
+      startDt = RestLocalHour(now, 0, start);
+      endDt = RestLocalHour(now, 0, end);
+    } else if (h < end) {
+      startDt = RestLocalHour(now, 0, start);
+      endDt = RestLocalHour(now, 0, end);
+    } else {
+      startDt = RestLocalHour(now, 1, start);
+      endDt = RestLocalHour(now, 1, end);
+    }
+    long nextRestStart = ToUnixSec(startDt);
+    long restSleepUntil = ToUnixSec(endDt);
+    long nowSec = ToUnixSec(now);
+    show["restActive"] = nowSec >= nextRestStart && nowSec < restSleepUntil;
+    show["nextRestStart"] = nextRestStart;
+    show["restSleepUntil"] = restSleepUntil;
+    show["tzOffsetMin"] = (int)TimeZoneInfo.Local.GetUtcOffset(now).TotalMinutes;
   }
 
   private string RequestedDeviceDisplayIdRaw(dynamic _r) {

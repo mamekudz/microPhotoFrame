@@ -6,7 +6,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="./styles/app.css?v=i18n3">
+    <link rel="stylesheet" href="./styles/app.css?v=rest1">
 
     <!-- TensorFlow.js + COCO-SSD lokal; Gewichte: gulp INIT → src/libs/models/ -->
     <script src="/src/libs/tf.min.js"></script>
@@ -221,10 +221,19 @@
                 </select>
             </div>
             <div class="control-row">
-                <label>Timer (minutes):</label>
+                <label data-i18n='Timer (minutes):<context="ui"/>'>Timer (minutes):</label>
                 <input type="number" id="showTimer" min="1" max="1440" value="1" style="flex:1; padding:8px; font-size:1rem;" />
             </div>
-            <button class="btn-action save-btn" onclick="window.SaveShowSettings()">💾 Save Settings</button>
+            <div class="control-row">
+                <label data-i18n='Rest:<context="ui"/>'>Rest:</label>
+                <div class="rest-hours">
+                    <select id="showRestStart"></select>
+                    <span data-i18n='to<context="ui"/>'>to</span>
+                    <select id="showRestEnd"></select>
+                </div>
+            </div>
+            <p class="settings-hint" data-i18n='Deep sleep between these hours (server clock). Same hour turns rest off. Default 22:00–06:00.<context="ui"/>'>Deep sleep between these hours (server clock). Same hour turns rest off. Default 22:00–06:00.</p>
+            <button class="btn-action save-btn" onclick="window.SaveShowSettings()">💾 <span data-i18n='Save Settings<context="ui"/>'>Save Settings</span></button>
             <div id="showSettingsMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
@@ -425,6 +434,6 @@
 
 
     <!-- Application module -->
-    <script type="module" src="./src/app.mjs?v=i18n1"></script>
+    <script type="module" src="./src/app.mjs?v=rest1"></script>
 
 </html>

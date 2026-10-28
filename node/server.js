@@ -253,7 +253,9 @@ const handleGetShow = (rest, input) => {
     
     registerDeviceEcho(input);
     const found = requireShow(showName, input.channel);
-    const show = attachShowMeta(readJSON(path.join(found.dir, 'show.json')), found);
+    const show = channels.attachShowRestWindow(
+        attachShowMeta(readJSON(path.join(found.dir, 'show.json')), found)
+    );
     rest.output.show = show;
     rest.ok = true;
 };
@@ -470,9 +472,13 @@ const handleSetShowSettings = (rest, input) => {
     
     if (showMode !== undefined) show.mode = showMode;
     if (showTimer !== undefined) show.timer = showTimer;
-    
+    if (input.showRestStart !== undefined) show.restStart = input.showRestStart;
+    if (input.showRestEnd !== undefined) show.restEnd = input.showRestEnd;
+    channels.applyShowRestDefaults(show);
+    channels.stripShowRestWindow(show);
+
     writeJSON(showPath, show);
-    rest.output.show = show;
+    rest.output.show = channels.attachShowRestWindow(show);
     rest.ok = true;
 };
 
@@ -589,6 +595,8 @@ const handleImportShowAsync = async (rest, input) => {
             }
         }
         
+        channels.applyShowRestDefaults(show);
+        channels.stripShowRestWindow(show);
         writeJSON(showPath, show);
         
         if (!shows.shows.includes(orgShowName)) {

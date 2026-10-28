@@ -2177,6 +2177,31 @@ window.CopyBase64ToClipboard = async function () {
     }
 };
 
+function fillRestHourSelect(sel, value) {
+    if (!sel) return;
+    if (sel.options.length === 0) {
+        for (let h = 0; h < 24; h++) {
+            const o = document.createElement('option');
+            o.value = String(h);
+            o.textContent = String(h).padStart(2, '0') + ':00';
+            sel.appendChild(o);
+        }
+    }
+    const n = Number(value);
+    sel.value = (Number.isInteger(n) && n >= 0 && n <= 23) ? String(n) : '22';
+}
+
+function applyShowSettingsForm(show) {
+    const modeSelect = document.getElementById('showMode');
+    const timerInput = document.getElementById('showTimer');
+    const restStart = document.getElementById('showRestStart');
+    const restEnd = document.getElementById('showRestEnd');
+    if (modeSelect) modeSelect.value = (show && show.mode) || 'random';
+    if (timerInput) timerInput.value = (show && show.timer) || 1;
+    fillRestHourSelect(restStart, show && show.restStart !== undefined ? show.restStart : 22);
+    fillRestHourSelect(restEnd, show && show.restEnd !== undefined ? show.restEnd : 6);
+}
+
 window.LoadShowSettingsPage = function () {
     const globalSelect = document.getElementById('globalShowSelect');
     const showName = globalSelect ? globalSelect.value : '';
@@ -2200,30 +2225,13 @@ window.LoadShowSettingsPage = function () {
         showName: showName
     }).then(_res => {
         if (_res.ok && _res.output.show) {
-            const show = _res.output.show;
-            const modeSelect = document.getElementById('showMode');
-            const timerInput = document.getElementById('showTimer');
-            
-            if (modeSelect && show.mode) {
-                modeSelect.value = show.mode;
-            }
-            if (timerInput && show.timer) {
-                timerInput.value = show.timer;
-            }
+            applyShowSettingsForm(_res.output.show);
         } else {
-            // Set defaults if show doesn't exist yet
-            const modeSelect = document.getElementById('showMode');
-            const timerInput = document.getElementById('showTimer');
-            if (modeSelect) modeSelect.value = 'random';
-            if (timerInput) timerInput.value = 1;
+            applyShowSettingsForm(null);
         }
     }).catch(err => {
         console.error("Error loading show settings:", err);
-        // Set defaults on error
-        const modeSelect = document.getElementById('showMode');
-        const timerInput = document.getElementById('showTimer');
-        if (modeSelect) modeSelect.value = 'random';
-        if (timerInput) timerInput.value = 1;
+        applyShowSettingsForm(null);
     });
 };
 
@@ -2233,6 +2241,8 @@ window.SaveShowSettings = function () {
     const messageDiv = document.getElementById('showSettingsMessage');
     const modeSelect = document.getElementById('showMode');
     const timerInput = document.getElementById('showTimer');
+    const restStartInput = document.getElementById('showRestStart');
+    const restEndInput = document.getElementById('showRestEnd');
     
     if (!showName) {
         messageDiv.style.display = 'block';
@@ -2247,6 +2257,8 @@ window.SaveShowSettings = function () {
     
     const showMode = modeSelect ? modeSelect.value : 'random';
     const showTimer = timerInput ? parseInt(timerInput.value) : 1;
+    const showRestStart = restStartInput ? parseInt(restStartInput.value, 10) : 22;
+    const showRestEnd = restEndInput ? parseInt(restEndInput.value, 10) : 6;
     
     if (showTimer < 1 || showTimer > 1440) {
         messageDiv.style.display = 'block';
@@ -2265,10 +2277,23 @@ window.SaveShowSettings = function () {
     messageDiv.style.color = 'white';
     messageDiv.innerText = "Saving settings...";
     
+    if (showRestStart < 0 || showRestStart > 23 || showRestEnd < 0 || showRestEnd > 23) {
+        messageDiv.style.display = 'block';
+        messageDiv.style.background = '#e74c3c';
+        messageDiv.style.color = 'white';
+        messageDiv.innerText = "Rest hours must be between 0 and 23.";
+        setTimeout(() => {
+            messageDiv.style.display = 'none';
+        }, 3000);
+        return;
+    }
+
     new RESTX().promiseCall('setShowSettings', {
         showName: showName,
         showMode: showMode,
-        showTimer: showTimer
+        showTimer: showTimer,
+        showRestStart: showRestStart,
+        showRestEnd: showRestEnd
     }).then(_res => {
         if (_res.ok) {
             // Show success message

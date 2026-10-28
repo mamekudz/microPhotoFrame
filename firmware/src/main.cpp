@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.0"
+#define FIRMWARE_VERSION "1.5.1"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -199,6 +199,11 @@ String currentShowName = "";
 String currentChannelPath = "";
 String currentShowMode = "forwardssequence"; // forwardssequence, reversesequence, random
 int currentShowTimer = 5; // minutes
+int currentRestStart = 22;
+int currentRestEnd = 6;
+int currentTzOffsetMin = 0;
+static uint32_t g_nextRestStart = 0;
+static uint32_t g_restSleepUntil = 0;
 int currentImageIndex = 0;
 uint64_t lastImageChangeSessionMs = 0;
 std::vector<String> currentShowImages;
@@ -337,6 +342,7 @@ static uint32_t g_lastImageUnix = 0;
 static uint32_t g_lastPollUnix = 0;
 static bool g_wDeepPoll = false;
 static bool g_wDeepImg = false;
+static bool g_wDeepRest = false;
 
 static void slideTimerMarkNow() {
   lastImageChangeSessionMs = sessionMs();
@@ -359,6 +365,70 @@ static void markServerPollWallClock() {
   }
 }
 
+static bool restPeriodDisabled() {
+  return currentRestStart == currentRestEnd;
+}
+
+static uint32_t restUtcAtHour(time_t localMid, int tzMin, int dayOff, int hour) {
+  time_t loc = localMid + (time_t)dayOff * 86400 + (time_t)hour * 3600;
+  return (uint32_t)(loc - (time_t)tzMin * 60);
+}
+
+static void computeRestWindowFromHours(uint32_t nowUtc) {
+  if (restPeriodDisabled()) {
+    g_nextRestStart = 0;
+    g_restSleepUntil = 0;
+    return;
+  }
+  time_t local = (time_t)nowUtc + (time_t)currentTzOffsetMin * 60;
+  struct tm t;
+  gmtime_r(&local, &t);
+  int h = t.tm_hour;
+  time_t localMid = local - (time_t)t.tm_hour * 3600 - (time_t)t.tm_min * 60 - (time_t)t.tm_sec;
+  uint32_t startU;
+  uint32_t endU;
+  if (currentRestStart > currentRestEnd) {
+    if (h >= currentRestStart) {
+      startU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestStart);
+      endU = restUtcAtHour(localMid, currentTzOffsetMin, 1, currentRestEnd);
+    } else if (h < currentRestEnd) {
+      startU = restUtcAtHour(localMid, currentTzOffsetMin, -1, currentRestStart);
+      endU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestEnd);
+    } else {
+      startU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestStart);
+      endU = restUtcAtHour(localMid, currentTzOffsetMin, 1, currentRestEnd);
+    }
+  } else if (h < currentRestStart) {
+    startU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestStart);
+    endU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestEnd);
+  } else if (h < currentRestEnd) {
+    startU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestStart);
+    endU = restUtcAtHour(localMid, currentTzOffsetMin, 0, currentRestEnd);
+  } else {
+    startU = restUtcAtHour(localMid, currentTzOffsetMin, 1, currentRestStart);
+    endU = restUtcAtHour(localMid, currentTzOffsetMin, 1, currentRestEnd);
+  }
+  g_nextRestStart = startU;
+  g_restSleepUntil = endU;
+}
+
+static void rollRestWindowForward(uint32_t now) {
+  if (restPeriodDisabled() || g_restSleepUntil == 0) return;
+  while (g_restSleepUntil <= now) {
+    g_nextRestStart += 86400u;
+    g_restSleepUntil += 86400u;
+  }
+}
+
+static bool isInRestPeriod(uint32_t now) {
+  if (restPeriodDisabled() || now <= 1700000000u) return false;
+  if (g_restSleepUntil == 0) computeRestWindowFromHours(now);
+  rollRestWindowForward(now);
+  if (g_restSleepUntil == 0) return false;
+  if (g_nextRestStart == 0) return now < g_restSleepUntil;
+  return now >= g_nextRestStart && now < g_restSleepUntil;
+}
+
 /** Deep Sleep bis nächstem Bild-Timer oder Server-Poll; nur bei gültigem time() und lstImgT. */
 static bool trySlideshowDeepSleep() {
   if (bootConfigApActive) return false;
@@ -367,6 +437,38 @@ static bool trySlideshowDeepSleep() {
   if (nowt <= 1700000000) return false;
 
   uint32_t now = (uint32_t)nowt;
+  if (!restPeriodDisabled()) {
+    if (g_restSleepUntil == 0) computeRestWindowFromHours(now);
+    rollRestWindowForward(now);
+    uint64_t imgDuePreview = (uint64_t)g_lastImageUnix + (uint64_t)(unsigned)currentShowTimer * 60ULL;
+    bool inRest = isInRestPeriod(now);
+    bool restSoon = !inRest && g_nextRestStart > 0 && imgDuePreview >= (uint64_t)g_nextRestStart;
+    if (inRest || restSoon) {
+      uint32_t sec = (g_restSleepUntil > now) ? (g_restSleepUntil - now) : 1u;
+      if (sec < 15u) return false;
+      const uint32_t kMaxDeepSecRest = 8u * 3600u;
+      if (sec > kMaxDeepSecRest) sec = kMaxDeepSecRest;
+      preferences.begin("microPhotoFrame", false);
+      preferences.putInt("sImgIx", currentImageIndex);
+      preferences.putUChar("dsAct", 3u);
+      preferences.end();
+      Serial1.printf("Deep sleep %lu s (Ruhezeit bis %lu)\n",
+                     (unsigned long)sec, (unsigned long)g_restSleepUntil);
+      Serial1.flush();
+      WiFi.disconnect(true);
+      delay(200);
+      WiFi.mode(WIFI_OFF);
+      esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+      esp_sleep_enable_timer_wakeup((uint64_t)sec * 1000000ULL);
+#if PHOTOFRAME_HAS_BUTTONS && (defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2))
+      uint64_t extMask = (1ULL << (uint8_t)BTN_ACTION) | (1ULL << (uint8_t)BTN_NEXT) | (1ULL << (uint8_t)BTN_PREV);
+      esp_sleep_enable_ext1_wakeup(extMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+      esp_deep_sleep_start();
+      return true;
+    }
+  }
+
   uint64_t imgDue64 = (uint64_t)g_lastImageUnix + (uint64_t)(unsigned)currentShowTimer * 60ULL;
   if (imgDue64 > 0xFFFFFFFFULL) imgDue64 = 0xFFFFFFFFULL;
   uint32_t imgDue = (uint32_t)imgDue64;
@@ -416,7 +518,7 @@ bool dnsServerActive = false;
 
 #if !PHOTOFRAME_HAS_BUTTONS
 static bool shouldOfferBootConfigAp() {
-  return !g_wDeepImg && !g_wDeepPoll;
+  return !g_wDeepImg && !g_wDeepPoll && !g_wDeepRest;
 }
 #else
 static bool shouldOfferBootConfigAp() {
@@ -2303,6 +2405,19 @@ bool loadShowData() {
   JsonObject show = doc["output"]["show"];
   currentShowMode = show["mode"].as<String>();
   currentShowTimer = show["timer"].as<int>();
+  currentRestStart = show["restStart"] | 22;
+  currentRestEnd = show["restEnd"] | 6;
+  if (currentRestStart < 0 || currentRestStart > 23) currentRestStart = 22;
+  if (currentRestEnd < 0 || currentRestEnd > 23) currentRestEnd = 6;
+  currentTzOffsetMin = show["tzOffsetMin"] | 0;
+  g_nextRestStart = show["nextRestStart"] | 0;
+  g_restSleepUntil = show["restSleepUntil"] | 0;
+  {
+    time_t nowt = time(nullptr);
+    if (nowt > 1700000000 && g_restSleepUntil == 0 && !restPeriodDisabled()) {
+      computeRestWindowFromHours((uint32_t)nowt);
+    }
+  }
   
   // Store all images first
   allShowImages.clear();
@@ -2333,6 +2448,8 @@ bool loadShowData() {
   Serial1.print("Timer: ");
   Serial1.print(currentShowTimer);
   Serial1.println(" minutes");
+  Serial1.printf("Rest: %02d:00-%02d:00%s\n", currentRestStart, currentRestEnd,
+                 restPeriodDisabled() ? " (off)" : "");
   
   // Download images to SD card if available (for offline mode)
   if (isSDCardAvailable()) {
@@ -4205,6 +4322,7 @@ void setup() {
       preferences.putUChar("dsAct", 0);
       if (dact == 1) g_wDeepImg = true;
       else if (dact == 2) g_wDeepPoll = true;
+      else if (dact == 3) g_wDeepRest = true;
       Serial1.printf("Wake from deep sleep: TIMER dsAct was %u\n", (unsigned)dact);
     } else if (wc == ESP_SLEEP_WAKEUP_EXT1) {
       preferences.putUChar("dsAct", 0);
@@ -4262,7 +4380,7 @@ void setup() {
       startBootConfigAp();
     }
 
-    if (!g_wDeepImg && !g_wDeepPoll) {
+    if (!g_wDeepImg && !g_wDeepPoll && !g_wDeepRest) {
       String ipLine = WiFi.localIP().toString();
       if (bootConfigApActive) {
         String apLine = String("5 min AP microPhotoFrame http://") + WiFi.softAPIP().toString() + "/";
@@ -4308,6 +4426,23 @@ void setup() {
               bool su = getActiveShow();
               if (su && loadShowData() && currentShowImages.size() > 0) {
                 currentImageIndex = -1;
+                displayNextImage();
+              }
+            }
+          } else if (g_wDeepRest) {
+            g_wDeepRest = false;
+            preferences.begin("microPhotoFrame", false);
+            int savedIx = preferences.getInt("sImgIx", -1);
+            preferences.end();
+            if (savedIx >= 0) currentImageIndex = savedIx;
+            {
+              time_t nowt = time(nullptr);
+              uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+              if (nowu && isInRestPeriod(nowu)) {
+                Serial1.println("Deep-Sleep-Wake: Ruhezeit — Bild bleibt");
+                lastImageChangeSessionMs = sessionMs();
+              } else {
+                Serial1.println("Deep-Sleep-Wake: Ruhezeit vorbei — naechstes Bild");
                 displayNextImage();
               }
             }
@@ -4361,6 +4496,23 @@ void setup() {
               currentImageIndex = -1;
               displayNextImage();
             }
+          } else if (g_wDeepRest) {
+            g_wDeepRest = false;
+            preferences.begin("microPhotoFrame", false);
+            int savedIx = preferences.getInt("sImgIx", -1);
+            preferences.end();
+            if (savedIx >= 0) currentImageIndex = savedIx;
+            {
+              time_t nowt = time(nullptr);
+              uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+              if (nowu && isInRestPeriod(nowu)) {
+                Serial1.println("Deep-Sleep-Wake: Ruhezeit — Bild bleibt (NVS-Show)");
+                lastImageChangeSessionMs = sessionMs();
+              } else {
+                Serial1.println("Deep-Sleep-Wake: Ruhezeit vorbei — naechstes Bild (NVS-Show)");
+                displayNextImage();
+              }
+            }
           } else {
             currentImageIndex = -1;
             displayNextImage();
@@ -4372,14 +4524,16 @@ void setup() {
         showStatusOrKeepLast(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
       }
     }
-    if (g_wDeepPoll || g_wDeepImg) {
+    if (g_wDeepPoll || g_wDeepImg || g_wDeepRest) {
       Serial1.println("Deep-Sleep-Wake: nicht verarbeitet — Flags zurueckgesetzt");
       g_wDeepPoll = false;
       g_wDeepImg = false;
+      g_wDeepRest = false;
     }
   } else {
     g_wDeepPoll = false;
     g_wDeepImg = false;
+    g_wDeepRest = false;
     Serial1.println("WiFi connect failed — opening config AP for setup");
     if (startFrameSoftAp()) {
       Serial1.print("Fallback AP IP: ");
@@ -4581,7 +4735,11 @@ void loop() {
 
   // --- Auto image change ---
   if (currentShowImages.size() > 0 && sessionMs() - lastImageChangeSessionMs > (uint64_t)currentShowTimer * 60000ULL) {
-    displayNextImage();
+    time_t nowt = time(nullptr);
+    uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+    if (!(nowu && isInRestPeriod(nowu))) {
+      displayNextImage();
+    }
   }
 
   // Deep Sleep oder Leichtschlaf zwischen Slides/Poll.

@@ -407,6 +407,82 @@ function emptyShowsCfg() {
     ];
 }
 
+function normalizeRestHour($raw, $fallback) {
+    if (!is_numeric($raw)) return $fallback;
+    $n = intval($raw);
+    return ($n >= 0 && $n <= 23) ? $n : $fallback;
+}
+
+function applyShowRestDefaults(&$show) {
+    if (!is_array($show)) return $show;
+    $show['restStart'] = array_key_exists('restStart', $show)
+        ? normalizeRestHour($show['restStart'], 22)
+        : 22;
+    $show['restEnd'] = array_key_exists('restEnd', $show)
+        ? normalizeRestHour($show['restEnd'], 6)
+        : 6;
+    return $show;
+}
+
+function stripShowRestWindow(&$show) {
+    if (!is_array($show)) return $show;
+    unset($show['restActive'], $show['nextRestStart'], $show['restSleepUntil'], $show['tzOffsetMin']);
+    return $show;
+}
+
+function restWindowUnix($restStart, $restEnd, $now = null) {
+    $start = normalizeRestHour($restStart, 22);
+    $end = normalizeRestHour($restEnd, 6);
+    if ($start === $end) {
+        return ['restActive' => false, 'nextRestStart' => 0, 'restSleepUntil' => 0];
+    }
+    $now = $now === null ? time() : intval($now);
+    $h = intval(date('G', $now));
+    $y = intval(date('Y', $now));
+    $m = intval(date('n', $now));
+    $d = intval(date('j', $now));
+    $atHour = function ($dayOffset, $hour) use ($y, $m, $d) {
+        return mktime($hour, 0, 0, $m, $d + $dayOffset, $y);
+    };
+    if ($start > $end) {
+        if ($h >= $start) {
+            $nextRestStart = $atHour(0, $start);
+            $restSleepUntil = $atHour(1, $end);
+        } elseif ($h < $end) {
+            $nextRestStart = $atHour(-1, $start);
+            $restSleepUntil = $atHour(0, $end);
+        } else {
+            $nextRestStart = $atHour(0, $start);
+            $restSleepUntil = $atHour(1, $end);
+        }
+    } elseif ($h < $start) {
+        $nextRestStart = $atHour(0, $start);
+        $restSleepUntil = $atHour(0, $end);
+    } elseif ($h < $end) {
+        $nextRestStart = $atHour(0, $start);
+        $restSleepUntil = $atHour(0, $end);
+    } else {
+        $nextRestStart = $atHour(1, $start);
+        $restSleepUntil = $atHour(1, $end);
+    }
+    return [
+        'restActive' => $now >= $nextRestStart && $now < $restSleepUntil,
+        'nextRestStart' => $nextRestStart,
+        'restSleepUntil' => $restSleepUntil
+    ];
+}
+
+function attachShowRestWindow(&$show) {
+    if (!is_array($show)) return $show;
+    applyShowRestDefaults($show);
+    $win = restWindowUnix($show['restStart'], $show['restEnd']);
+    $show['restActive'] = $win['restActive'];
+    $show['nextRestStart'] = $win['nextRestStart'];
+    $show['restSleepUntil'] = $win['restSleepUntil'];
+    $show['tzOffsetMin'] = intval(round((int)date('Z') / 60));
+    return $show;
+}
+
 function syncActiveShows(&$shows) {
     $active = [];
     foreach ($shows['channels'] as $ch) {
@@ -553,6 +629,8 @@ function createShow(&$rest) {
                 'name' => $orgShowName,
                 'timer' => 1,
                 'mode' => 'random',
+                'restStart' => 22,
+                'restEnd' => 6,
                 'imgs' => [],
                 'displayId' => $displayId
             ];
@@ -739,6 +817,7 @@ function getShow(&$rest) {
     $showPathName = $showPath . DIRECTORY_SEPARATOR . 'show.json';
     $show = readAllJSONObject($showPathName);
     if ($show !== null) {
+        attachShowRestWindow($show);
         $rest['output']['show'] = $show;
         $rest['ok'] = true;
     } else {
@@ -771,8 +850,13 @@ function setShowSettings(&$rest) {
     if ($show !== null) {
         $show['mode'] = $rest['input']['showMode'];
         $show['timer'] = intval($rest['input']['showTimer']);
-        $rest['output']['show'] = $show;
+        if (isset($rest['input']['showRestStart'])) $show['restStart'] = $rest['input']['showRestStart'];
+        if (isset($rest['input']['showRestEnd'])) $show['restEnd'] = $rest['input']['showRestEnd'];
+        applyShowRestDefaults($show);
+        stripShowRestWindow($show);
         writeAllJSONNoFormat($showPathName, $show);
+        attachShowRestWindow($show);
+        $rest['output']['show'] = $show;
         $rest['ok'] = true;
     } else {
         $rest['ok'] = false;
@@ -969,6 +1053,10 @@ function importShow(&$rest) {
                 if (isset($info['timer'])) $show['timer'] = $info['timer'];
                 if (isset($info['mode'])) $show['mode'] = $info['mode'];
                 if (isset($info['displayId'])) $show['displayId'] = $info['displayId'];
+                if (isset($info['restStart'])) $show['restStart'] = $info['restStart'];
+                if (isset($info['restEnd'])) $show['restEnd'] = $info['restEnd'];
+                applyShowRestDefaults($show);
+                stripShowRestWindow($show);
                 
                 writeAllJSONNoFormat($showPathName, $show);
                 if (!in_array($orgShowName, $shows['shows'])) {

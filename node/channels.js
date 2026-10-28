@@ -20,6 +20,9 @@ function toEinkDisplay(id) {
 	return normalizeDisplay(id);
 }
 
+const DEFAULT_REST_START = 22;
+const DEFAULT_REST_END = 6;
+
 function emptyShows() {
 	return {
 		shows: [],
@@ -29,6 +32,87 @@ function emptyShows() {
 		channels: {},
 		defaultChannel: ''
 	};
+}
+
+function normalizeRestHour(raw, fallback) {
+	const n = Number(raw);
+	if (!Number.isInteger(n) || n < 0 || n > 23) return fallback;
+	return n;
+}
+
+function applyShowRestDefaults(show) {
+	if (!show || typeof show !== 'object') return show;
+	show.restStart = show.restStart === undefined
+		? DEFAULT_REST_START
+		: normalizeRestHour(show.restStart, DEFAULT_REST_START);
+	show.restEnd = show.restEnd === undefined
+		? DEFAULT_REST_END
+		: normalizeRestHour(show.restEnd, DEFAULT_REST_END);
+	return show;
+}
+
+function stripShowRestWindow(show) {
+	if (!show || typeof show !== 'object') return show;
+	delete show.restActive;
+	delete show.nextRestStart;
+	delete show.restSleepUntil;
+	delete show.tzOffsetMin;
+	return show;
+}
+
+/** restStart===restEnd → off. Overnight wrap (22–6) is allowed. Hours are server-local. */
+function restWindowUnix(restStart, restEnd, nowMs = Date.now()) {
+	const start = normalizeRestHour(restStart, DEFAULT_REST_START);
+	const end = normalizeRestHour(restEnd, DEFAULT_REST_END);
+	if (start === end) {
+		return { restActive: false, nextRestStart: 0, restSleepUntil: 0 };
+	}
+	const now = new Date(nowMs);
+	const h = now.getHours();
+	const atHour = (dayOffset, hour) => {
+		const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, 0, 0, 0);
+		return Math.floor(t.getTime() / 1000);
+	};
+	let nextRestStart;
+	let restSleepUntil;
+	if (start > end) {
+		if (h >= start) {
+			nextRestStart = atHour(0, start);
+			restSleepUntil = atHour(1, end);
+		} else if (h < end) {
+			nextRestStart = atHour(-1, start);
+			restSleepUntil = atHour(0, end);
+		} else {
+			nextRestStart = atHour(0, start);
+			restSleepUntil = atHour(1, end);
+		}
+	} else if (h < start) {
+		nextRestStart = atHour(0, start);
+		restSleepUntil = atHour(0, end);
+	} else if (h < end) {
+		nextRestStart = atHour(0, start);
+		restSleepUntil = atHour(0, end);
+	} else {
+		nextRestStart = atHour(1, start);
+		restSleepUntil = atHour(1, end);
+	}
+	const nowSec = Math.floor(nowMs / 1000);
+	return {
+		restActive: nowSec >= nextRestStart && nowSec < restSleepUntil,
+		nextRestStart,
+		restSleepUntil
+	};
+}
+
+function attachShowRestWindow(show, nowMs = Date.now()) {
+	if (!show || typeof show !== 'object') return show;
+	applyShowRestDefaults(show);
+	const win = restWindowUnix(show.restStart, show.restEnd, nowMs);
+	show.restActive = win.restActive;
+	show.nextRestStart = win.nextRestStart;
+	show.restSleepUntil = win.restSleepUntil;
+	show.tzOffsetMin = -new Date(nowMs).getTimezoneOffset();
+	return show;
 }
 
 function normalizeSeg(raw) {
@@ -494,6 +578,8 @@ function createShow(showsDir, shows, { showName, channel } = {}) {
 		imgs: [],
 		timer: 1,
 		mode: 'random',
+		restStart: DEFAULT_REST_START,
+		restEnd: DEFAULT_REST_END,
 		displayId: parsed.displayId
 	});
 	const next = refreshFromDisk(showsDir, shows);
@@ -560,5 +646,12 @@ module.exports = {
 	findShow,
 	createShow,
 	deleteShow,
-	syncActiveShows
+	syncActiveShows,
+	DEFAULT_REST_START,
+	DEFAULT_REST_END,
+	normalizeRestHour,
+	applyShowRestDefaults,
+	stripShowRestWindow,
+	restWindowUnix,
+	attachShowRestWindow
 };

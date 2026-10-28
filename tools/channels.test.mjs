@@ -92,6 +92,29 @@ test('show must be created inside a channel and cannot change display', () => {
 	assert.equal(found.displayId, '9');
 	const show = JSON.parse(fs.readFileSync(path.join(found.dir, 'show.json'), 'utf8'));
 	assert.equal(show.displayId, '9');
+	assert.equal(show.restStart, 22);
+	assert.equal(show.restEnd, 6);
+});
+
+test('rest window 22-6 wraps overnight and same hour disables rest', () => {
+	const local = (y, m, d, h) => new Date(y, m, d, h, 0, 0, 0).getTime();
+	const evening = local(2026, 5, 15, 23);
+	const night = local(2026, 5, 16, 3);
+	const morning = local(2026, 5, 16, 6);
+	const day = local(2026, 5, 16, 10);
+	const eveOff = ch.restWindowUnix(22, 6, evening);
+	assert.equal(eveOff.restActive, true);
+	assert.ok(eveOff.restSleepUntil > eveOff.nextRestStart);
+	const nightWin = ch.restWindowUnix(22, 6, night);
+	assert.equal(nightWin.restActive, true);
+	const morningWin = ch.restWindowUnix(22, 6, morning);
+	assert.equal(morningWin.restActive, false);
+	const dayWin = ch.restWindowUnix(22, 6, day);
+	assert.equal(dayWin.restActive, false);
+	assert.equal(ch.restWindowUnix(8, 8, day).restActive, false);
+	assert.equal(ch.restWindowUnix(8, 8, day).nextRestStart, 0);
+	const afternoon = ch.restWindowUnix(13, 17, local(2026, 5, 16, 14));
+	assert.equal(afternoon.restActive, true);
 });
 
 test('activate only accepts a show that lives in the channel', () => {
