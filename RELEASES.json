@@ -2,6 +2,16 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 7,
+		"date": "2026-10-28 12:00",
+		"beta": false,
+		"info": [
+			"Node installer zip includes node/channels.js so the Windows service starts."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 6,
 		"date": "2026-10-28 11:55",
 		"beta": false,

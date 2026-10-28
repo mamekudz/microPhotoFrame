@@ -370,9 +370,7 @@ const COMMON_GLOBS = [
 
 const SERVER_GLOBS = {
 	node: [
-		'node/server.js',
-		'node/package.json',
-		'node/package-lock.json',
+		'node/**/*',
 	],
 	iis: [
 		'web.config',

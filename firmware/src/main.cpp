@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.6"
+#define FIRMWARE_VERSION "1.5.7"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial

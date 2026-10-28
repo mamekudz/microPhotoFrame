@@ -1,6 +1,6 @@
 {
   "name": "microPhotoFrame Firmware",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "home_assistant_domain": "esphome",
   "new_install_prompt_erase": true,
   "builds": [
