@@ -20,6 +20,14 @@ try {
     Install
     $url = "http://127.0.0.1:$($ports[$Server])/"
     $created = Invoke-RestMethod "$url`?action=createShow" -Method Post -ContentType 'application/json' -Body '{"action":"createShow","input":{"showName":"InstallerTest","displayId":"I"}}'
+    if (!$created.ok) {
+        $channel = Invoke-RestMethod "$url`?action=createChannel" -Method Post -ContentType 'application/json' -Body '{"action":"createChannel","input":{"user":"ci","userId":"ci","target":"test","groupId":"test","displayId":"I","slug":"ci-test"}}'
+        if (!$channel.ok) { throw ('Cannot create a channel: ' + ($channel | ConvertTo-Json -Depth 8)) }
+        $created = Invoke-RestMethod "$url`?action=createShow" -Method Post -ContentType 'application/json' -Body '{"action":"createShow","input":{"showName":"InstallerTest","displayId":"I","channel":"ci/test/I"}}'
+        if (!$created.ok) {
+            $created = Invoke-RestMethod "$url`?action=createShow" -Method Post -ContentType 'application/json' -Body '{"action":"createShow","input":{"showName":"InstallerTest","displayId":"I","channel":"ci-test"}}'
+        }
+    }
     if (!$created.ok) { throw ('Cannot create a show: ' + ($created | ConvertTo-Json -Depth 8)) }
     'preserve-me' | Set-Content "$target/shows/installer-test.txt"
     $configHash = (Get-FileHash "$target/config.json").Hash

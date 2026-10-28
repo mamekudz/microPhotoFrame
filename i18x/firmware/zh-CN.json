@@ -13,7 +13,7 @@
 	"ssidManual": "或手动输入 SSID",
 	"password": "WiFi 密码",
 	"serverUrl": "服务器 URL",
-	"serverUrlHint": "只需主机和端口，例如 http://192.168.0.69:888",
+	"serverUrlHint": "只需主机和端口，例如 http://192.168.1.10:888",
 	"userId": "用户 ID",
 	"groupId": "组 ID",
 	"loadGroups": "加载",

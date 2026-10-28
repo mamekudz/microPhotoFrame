@@ -2,6 +2,18 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 9,
+		"date": "2026-10-28 15:40",
+		"beta": false,
+		"info": [
+			"Installer smoke test creates a channel before the first show.",
+			"ClassicArt ready-to-go catalog of public-domain paintings.",
+			"Firmware and docs use generic server URL and User ID placeholders."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 8,
 		"date": "2026-10-28 12:22",
 		"beta": false,

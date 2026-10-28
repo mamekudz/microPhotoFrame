@@ -93,13 +93,13 @@ npm run init
 
 `npm run init` (or `npx gulp INIT`) downloads the local COCO-SSD model into `src/libs/models/` for AI crop. Run it once after a fresh clone.
 
-Start a server. Default on this project is **IIS on port 888**. Node Express: see [INSTALLATION.md](INSTALLATION.md). Open the web UI, e.g. `http://192.168.0.69:888/`.
+Start a server. Default on this project is **IIS on port 888**. Node Express: see [INSTALLATION.md](INSTALLATION.md). Open the web UI, e.g. `http://192.168.1.10:888/`.
 
 #### 2. Create a channel
 
 A channel is **User ID / Group ID / display**. Shows live under `shows/{userId}/{groupId}/{displayId}/`.
 
-Example: User ID `mamekudz`, Group ID `family`, Spectra 6 7.3" (id `9`) → `http://192.168.0.69:888/shows/mamekudz/family/9`
+Example: User ID `userid`, Group ID `family`, Spectra 6 7.3" (id `9`) → `http://192.168.1.10:888/shows/userid/family/9`
 
 In the web UI header choose **+ New Channel**, enter User ID and Group ID, pick the display, create the channel, then activate a show. The **Default** checkbox is used when the URL has no channel path. The UI always shows the real `/shows/…` URL.
 
@@ -122,7 +122,7 @@ After first boot (or the open AP on buttonless boards — 5 minutes when deep sl
 
 1. Connect the phone to WiFi **"microPhotoFrame"** (open, 2.4 GHz), then open `http://192.168.4.1`
 2. Enter home WiFi credentials
-3. Enter only the **server URL** (`http://192.168.0.69:888`) and the **User ID**
+3. Enter only the **server URL** (`http://192.168.1.10:888`) and the **User ID**
 4. Load **Group IDs** — the server lists groups that match that User ID and this device’s display
 5. Pick a Group ID, save, restart
 
@@ -274,13 +274,13 @@ npm run init
 
 `npm run init` (oder `npx gulp INIT`) lädt einmal das lokale COCO-SSD-Modell nach `src/libs/models/` für den KI-Zuschnitt.
 
-Server starten. Standard hier ist **IIS auf Port 888**. Node Express: siehe [INSTALLATION.md](INSTALLATION.md). Web-UI öffnen, z. B. `http://192.168.0.69:888/`.
+Server starten. Standard hier ist **IIS auf Port 888**. Node Express: siehe [INSTALLATION.md](INSTALLATION.md). Web-UI öffnen, z. B. `http://192.168.1.10:888/`.
 
 #### 2. Kanal anlegen
 
 Ein Kanal ist **User ID / Group ID / Display**. Shows liegen unter `shows/{userId}/{groupId}/{displayId}/`.
 
-Beispiel: User ID `mamekudz`, Group ID `family`, Spectra 6 7,3" (ID `9`) → `http://192.168.0.69:888/shows/mamekudz/family/9`
+Beispiel: User ID `userid`, Group ID `family`, Spectra 6 7,3" (ID `9`) → `http://192.168.1.10:888/shows/userid/family/9`
 
 Im Header **+ New Channel**: User ID und Group ID eingeben, Display wählen, Kanal anlegen, Show aktivieren. **Default** gilt, wenn die URL keinen Kanalpfad hat. Angezeigt wird immer die echte `/shows/…`-URL.
 
@@ -303,7 +303,7 @@ Nach dem ersten Start (oder dem offenen AP ohne Taster — 5 Minuten, wenn Deep 
 
 1. Handy mit WLAN **"microPhotoFrame"** verbinden (offen, 2,4 GHz), dann `http://192.168.4.1`
 2. Heim-WLAN eingeben
-3. Nur die **Server-URL** (`http://192.168.0.69:888`) und die **User ID** eintragen
+3. Nur die **Server-URL** (`http://192.168.1.10:888`) und die **User ID** eintragen
 4. **Group IDs laden** — der Server listet Groups, die zu User ID und Display des Geräts passen
 5. Group ID wählen, speichern, neu starten
 

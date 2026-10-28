@@ -1,4 +1,4 @@
-# Ready-to-Go Shows für µPhotoFrame
+﻿# Ready-to-Go Shows für µPhotoFrame
 
 Dieses Verzeichnis enthält vorgefertigte Bildergalerien zum direkten Import.
 
@@ -11,7 +11,7 @@ Dieses Verzeichnis enthält vorgefertigte Bildergalerien zum direkten Import.
 
 Chamäleon, Ara, Morphofalter, Kampffisch, Pfau, Tukan, Pfeilgiftfrosch, Eisvogel, Mandrill, Korallenfische.
 
-**Status:** Bildquellen fertig, ZIP-Export folgt
+**Status:** Bildquellen fertig, ZIP-Export: ColorFullAnimals_I.show (Display I)
 
 ### 2. Classic Art
 **Für:** reTerminal E1002 (Full Color), auch andere Farb-Panels
@@ -70,3 +70,5 @@ node tools/downloadShowImages.mjs ClassicArt
 ```
 
 Die Webapp verarbeitet die Fotos für das gewählte E-Ink-Display.
+
+Exportierte Pakete heißen Name_DisplayID.show, z. B. ColorFullAnimals_I.show. Nur fuer dieses Display importieren.

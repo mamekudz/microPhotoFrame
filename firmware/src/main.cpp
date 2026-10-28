@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.8"
+#define FIRMWARE_VERSION "1.5.9"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -1106,9 +1106,9 @@ void handleRoot() {
   html += "<input type='password' name='password' id='password' value='" + htmlEscapeSsid(wifiPassword) + "'>";
   html += "<button type='button' class='password-toggle' onclick='togglePassword()'>&#128065;</button>";
   html += "</div>";
-  html += "<label data-i18n='serverUrl'>Server URL</label><input type='text' name='url' id='hostUrl' value='" + htmlEscapeSsid(hostServerUrl.length() ? hostServerUrl : hostChannelUrl) + "' placeholder='http://192.168.0.69:888'><br>";
-  html += "<small style='color:#666;' data-i18n='serverUrlHint'>Host and port only, e.g. http://192.168.0.69:888</small><br>";
-  html += "<label data-i18n='userId'>User ID</label><input type='text' name='user' id='hostUser' value='" + htmlEscapeSsid(hostUser) + "' placeholder='mamekudz' autocomplete='off'><br>";
+  html += "<label data-i18n='serverUrl'>Server URL</label><input type='text' name='url' id='hostUrl' value='" + htmlEscapeSsid(hostServerUrl.length() ? hostServerUrl : hostChannelUrl) + "' placeholder='http://192.168.1.10:888'><br>";
+  html += "<small style='color:#666;' data-i18n='serverUrlHint'>Host and port only, e.g. http://192.168.1.10:888</small><br>";
+  html += "<label data-i18n='userId'>User ID</label><input type='text' name='user' id='hostUser' value='" + htmlEscapeSsid(hostUser) + "' placeholder='userid' autocomplete='off'><br>";
   html += "<label data-i18n='groupId'>Group ID</label>";
   html += "<div style='display:flex;gap:8px;align-items:center;'>";
   html += "<select name='group' id='hostGroup' style='flex:1'>";
