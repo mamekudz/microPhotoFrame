@@ -107,7 +107,13 @@ function Test-Server {
             $html = Invoke-WebRequest "$base/" -UseBasicParsing -TimeoutSec 5
             if ($html.StatusCode -ne 200 -or $html.Content -notmatch 'microPhotoFrame|PhotoFrame') { throw 'Unexpected home page' }
             $response = Invoke-RestMethod "$base/?action=getShows" -Method Post -ContentType 'application/json' -Body '{"action":"getShows","input":{}}' -TimeoutSec 10
-            if (!$response.ok) { throw 'Server API failed' }
+            if (!$response.ok) {
+                $apiErr = ''
+                if ($response.error -and $response.error.msg) { $apiErr = [string]$response.error.msg }
+                elseif ($response -is [string]) { $apiErr = $response }
+                else { $apiErr = ($response | ConvertTo-Json -Compress -Depth 6) }
+                throw "Server API failed: $apiErr"
+            }
             Write-Host "READY: $base"
             return
         } catch { if ($i -eq 29) { throw }; Start-Sleep -Seconds 2 }

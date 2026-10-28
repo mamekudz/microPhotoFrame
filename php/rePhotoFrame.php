@@ -1205,7 +1205,7 @@ function importShow(&$rest) {
 }
 
 function otaDir() {
-    $dir = pathCorrection('./tmp/ota');
+    $dir = pathCorrection('./temp/ota');
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
     return $dir;
 }

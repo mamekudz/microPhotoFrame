@@ -1703,9 +1703,19 @@ public partial class microPhotoFrame : System.Web.UI.Page {
   }
 
   private string OtaDir() {
-    string dir = PathCorrection("./tmp/ota");
+    string dir = PathCorrection("./temp/ota");
     if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
     return dir;
+  }
+
+  private bool TryExistingOtaDir(out string dir) {
+    dir = PathCorrection("./temp/ota");
+    try {
+      return Directory.Exists(dir);
+    } catch {
+      dir = "";
+      return false;
+    }
   }
 
   private string OtaSafeKey(string ip) {
@@ -1751,31 +1761,34 @@ public partial class microPhotoFrame : System.Web.UI.Page {
   }
 
   private void AttachPendingOta(dynamic _r) {
-    List<string> ips = new List<string>();
-    if (_r.input != null && _r.input.deviceInfo != null && _r.input.deviceInfo.ip != null)
-      ips.Add((string)_r.input.deviceInfo.ip);
-    if (_r.input != null && _r.input.deviceIp != null)
-      ips.Add((string)_r.input.deviceIp);
-    string remote = Request.Headers["X-Forwarded-For"];
-    if (string.IsNullOrEmpty(remote)) remote = Request.UserHostAddress;
-    if (!string.IsNullOrEmpty(remote)) ips.Add(remote.Split(',')[0].Trim());
-    string dir = OtaDir();
-    for (int i = 0; i < ips.Count; i++) {
-      string key = OtaSafeKey(ips[i]);
-      if (key == "") continue;
-      string metaPath = Path.Combine(dir, key + ".json");
-      if (!File.Exists(metaPath)) continue;
-      try {
-        JObject meta = JObject.Parse(File.ReadAllText(metaPath));
-        if (meta["token"] == null) continue;
-        JObject pending = new JObject();
-        pending["token"] = (string)meta["token"];
-        pending["size"] = meta["size"];
-        pending["fileName"] = meta["fileName"];
-        _r.output.pendingOta = pending;
-        return;
-      } catch { }
-    }
+    try {
+      string dir;
+      if (!TryExistingOtaDir(out dir)) return;
+      List<string> ips = new List<string>();
+      if (_r.input != null && _r.input.deviceInfo != null && _r.input.deviceInfo.ip != null)
+        ips.Add((string)_r.input.deviceInfo.ip);
+      if (_r.input != null && _r.input.deviceIp != null)
+        ips.Add((string)_r.input.deviceIp);
+      string remote = Request.Headers["X-Forwarded-For"];
+      if (string.IsNullOrEmpty(remote)) remote = Request.UserHostAddress;
+      if (!string.IsNullOrEmpty(remote)) ips.Add(remote.Split(',')[0].Trim());
+      for (int i = 0; i < ips.Count; i++) {
+        string key = OtaSafeKey(ips[i]);
+        if (key == "") continue;
+        string metaPath = Path.Combine(dir, key + ".json");
+        if (!File.Exists(metaPath)) continue;
+        try {
+          JObject meta = JObject.Parse(File.ReadAllText(metaPath));
+          if (meta["token"] == null) continue;
+          JObject pending = new JObject();
+          pending["token"] = (string)meta["token"];
+          pending["size"] = meta["size"];
+          pending["fileName"] = meta["fileName"];
+          _r.output.pendingOta = pending;
+          return;
+        } catch { }
+      }
+    } catch { }
   }
 
   private string ResolveFirmwareBuildBin(string id) {

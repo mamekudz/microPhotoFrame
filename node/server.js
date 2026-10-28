@@ -750,7 +750,7 @@ const handleFetchShowSource = async (rest, input) => {
     rest.ok = true;
 };
 
-const OTA_DIR = path.join(BASE_DIR, 'tmp', 'ota');
+const OTA_DIR = path.join(BASE_DIR, 'temp', 'ota');
 const FIRMWARE_BUILD_DIR = path.join(BASE_DIR, 'firmware', '.pio', 'build');
 
 function otaSafeKey(ip) {
