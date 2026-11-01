@@ -135,6 +135,12 @@ const fileWriteAllText = (filePath, text) => {
     return false;
 };
 
+function inputTimeZone(input) {
+    if (!input || typeof input !== 'object') return 'UTC';
+    const d = input.deviceInfo;
+    return (d && (d.timeZone || d.timezone || d.tz)) || input.timeZone || input.timezone || 'UTC';
+}
+
 // Device-Registry: speichert angeschlossene Geräte
 const registerDeviceEcho = (input) => {
     try {
@@ -278,7 +284,9 @@ const handleGetShow = (rest, input) => {
     registerDeviceEcho(input);
     const found = requireShow(showName, input.channel);
     const show = channels.attachShowRestWindow(
-        attachShowMeta(readJSON(path.join(found.dir, 'show.json')), found)
+        attachShowMeta(readJSON(path.join(found.dir, 'show.json')), found),
+        Date.now(),
+        inputTimeZone(input)
     );
     rest.output.show = show;
     rest.ok = true;
@@ -498,11 +506,12 @@ const handleSetShowSettings = (rest, input) => {
     if (showTimer !== undefined) show.timer = showTimer;
     if (input.showRestStart !== undefined) show.restStart = input.showRestStart;
     if (input.showRestEnd !== undefined) show.restEnd = input.showRestEnd;
+    if (input.showRestEnabled !== undefined) show.restEnabled = input.showRestEnabled;
     channels.applyShowRestDefaults(show);
     channels.stripShowRestWindow(show);
 
     writeJSON(showPath, show);
-    rest.output.show = channels.attachShowRestWindow(show);
+    rest.output.show = channels.attachShowRestWindow(show, Date.now(), inputTimeZone(input));
     rest.ok = true;
 };
 
@@ -693,18 +702,29 @@ function downloadHttpBuffer(url, hops = 0) {
     });
 }
 
+function findReadyCatalogFile(dir, name) {
+    const preferred = [name + '.json', name + '_orgimgs.json'];
+    for (const f of preferred) {
+        if (fs.existsSync(path.join(dir, f))) return f;
+    }
+    if (!fs.existsSync(dir)) return '';
+    const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json'));
+    return files[0] || '';
+}
+
 const handleListReadyShows = (rest) => {
     const catalogs = [];
     if (fs.existsSync(READY_SHOWS_DIR)) {
         for (const ent of fs.readdirSync(READY_SHOWS_DIR, { withFileTypes: true })) {
-            if (!ent.isDirectory()) continue;
-            const jsonName = ent.name + '_orgimgs.json';
+            if (!ent.isDirectory() || ent.name === 'drafts') continue;
+            const jsonName = findReadyCatalogFile(path.join(READY_SHOWS_DIR, ent.name), ent.name);
+            if (!jsonName) continue;
             const jsonPath = path.join(READY_SHOWS_DIR, ent.name, jsonName);
-            if (!fs.existsSync(jsonPath)) continue;
             let title = ent.name;
             let count = 0;
             try {
-                const cat = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+                const raw = fs.readFileSync(jsonPath, 'utf8').replace(/^\uFEFF/, '');
+                const cat = JSON.parse(raw);
                 if (cat && cat.name) title = cat.name;
                 if (cat && Array.isArray(cat.images)) count = cat.images.length;
             } catch (_) { /* ignore */ }

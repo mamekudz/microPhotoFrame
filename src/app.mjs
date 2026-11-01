@@ -1,8 +1,8 @@
 import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
-import { OptimizeImageForEink, FocusSpotFromPredictions } from "./microLib/EInkAutoOptimize.mjs?v=exp3";
-import RESTX from "./microLib/RESTX.mjs?v=hang1";
+import { OptimizeImageForEink, FocusSpotFromPredictions, ResolveOptimizeBias } from "./microLib/EInkAutoOptimize.mjs?v=exp8";
+import RESTX from "./microLib/RESTX.mjs?v=hang2";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
 import "./microLib/ArrayUtils.mjs";
@@ -23,6 +23,15 @@ let aiDetectedSpot = null; // Stores AI-detected position {x, y} in original ima
 
 // Store original images for re-optimization (key: imageName, value: File object)
 window.originalImages = {};
+window._originalsContextKey = '';
+
+function retainOriginalsForCurrentShow() {
+    const key = (getSelectedChannelSlug() || '') + '\0' + (getSelectedShowName() || '');
+    if (window._originalsContextKey && window._originalsContextKey !== key) {
+        window.originalImages = {};
+    }
+    window._originalsContextKey = key;
+}
 
 const stdEInkConvert = new EInkDef({
     cutAspect: EInkDef.LANDSCAPE,
@@ -98,6 +107,21 @@ function titleWithShow(template, showName) {
         .trim();
 }
 
+function stripI18nMarkup(s) {
+    return String(s || '')
+        .replace(/<context="[^"]*"\s*\/?>/g, '')
+        .replace(/<newline\s*\/>/g, '\n')
+        .trim();
+}
+
+function formatRestErr(err) {
+    if (!err) return t('unknown error<context="ui"/>');
+    if (typeof err === 'string') return stripI18nMarkup(err);
+    const raw = (err.error && (err.error.omsg || err.error.msg)) || err.message;
+    if (raw) return stripI18nMarkup(raw);
+    try { return stripI18nMarkup(JSON.stringify(err.error || err)); } catch (_) { return t('unknown error<context="ui"/>'); }
+}
+
 function selectedChannelLabel() {
     const slug = getSelectedChannelSlug();
     if (!slug || slug === NEW_CHANNEL_VALUE) return t('(none)<context="ui"/>');
@@ -151,6 +175,7 @@ function saveSettingsToStorage() {
         orientation: document.getElementById('orientation').value,
         saveAspect: getSaveAspect(),
         autoOptimize: isAutoOptimizeEnabled(),
+        optimizeStyle: getOptimizeStyle(),
         bgrdColor: document.getElementById('bgrdColor').value,
         displayID: document.getElementById('displayID').value
     };
@@ -184,6 +209,38 @@ window.SyncAutoOptimize = function (fromId) {
     saveSettingsToStorage();
 };
 
+const OPTIMIZE_STYLE_IDS = ['optimizeStyle', 'optimizeStyleAdd', 'optimizeStyleAutoShow'];
+
+function getOptimizeStyle() {
+    for (const id of OPTIMIZE_STYLE_IDS) {
+        const el = document.getElementById(id);
+        if (el && el.value) return ResolveOptimizeBias(el.value).id;
+    }
+    return 'balanced';
+}
+
+window.SyncOptimizeStyle = function (fromId) {
+    const src = document.getElementById(fromId);
+    if (!src) return;
+    const id = ResolveOptimizeBias(src.value).id;
+    src.value = id;
+    OPTIMIZE_STYLE_IDS.forEach((otherId) => {
+        if (otherId === fromId) return;
+        const el = document.getElementById(otherId);
+        if (el && el.value !== id) el.value = id;
+    });
+    saveSettingsToStorage();
+};
+
+function setOptimizeStyle(raw) {
+    const id = ResolveOptimizeBias(raw).id;
+    OPTIMIZE_STYLE_IDS.forEach((selId) => {
+        const el = document.getElementById(selId);
+        if (el) el.value = id;
+    });
+    return id;
+}
+
 function loadSettingsFromStorage() {
     const saved = localStorage.getItem(SETTINGS_KEY);
     if (!saved) return;
@@ -201,6 +258,7 @@ function loadSettingsFromStorage() {
     const autoAddEl = document.getElementById('autoOptimizeAdd');
     if (autoEl) autoEl.checked = autoOn;
     if (autoAddEl) autoAddEl.checked = autoOn;
+    if (settings.optimizeStyle) setOptimizeStyle(settings.optimizeStyle);
 }
 
 window.ShowPage = function (pageId) {
@@ -217,9 +275,9 @@ window.ShowPage = function (pageId) {
         }
         return;
     }
-    // Clear original images when navigating to TopMenu
     if (pageId === 'TopMenu') {
-        window.originalImages = {};
+        window._optimizeTargetImageName = null;
+        window._optimizeReturnPage = null;
     }
     
     // Hide all pages first
@@ -358,6 +416,7 @@ function applyAddPhotosBusyControls() {
         'addPhotosInput',
         'saveAspectAdd',
         'autoOptimizeAdd',
+        'optimizeStyleAdd',
         'globalShowSelect',
         'globalChannelSelect'
     ], next);
@@ -424,9 +483,10 @@ window.Return2TopMenu = () => {
             return;
         }
     }
-    // Clear original images when returning to top menu
-    window.originalImages = {};
-    window.ShowPage('TopMenu');
+    window._optimizeTargetImageName = null;
+    const returnPage = window._optimizeReturnPage;
+    window._optimizeReturnPage = null;
+    window.ShowPage(returnPage || 'TopMenu');
 };
 
 // Drag & Drop Event-Listener Setup
@@ -531,7 +591,7 @@ window.SetupDragAndDrop = function() {
             if (importShowInput.files && importShowInput.files.length > 0) {
                 importShowFileBtn.innerText = '📄 ' + importShowInput.files[0].name;
             } else {
-                importShowFileBtn.innerText = '📄 Datei auswählen oder hierher ziehen';
+                importShowFileBtn.innerText = '📄 ' + t('Choose a file or drop it here<context="ui"/>');
             }
         };
         bindDropZone(importShowFileBtn, importShowInput, 'show', false, afterImport);
@@ -797,6 +857,7 @@ window.OnGlobalChannelChange = function () {
         return;
     }
     const after = () => {
+        retainOriginalsForCurrentShow();
         if (window.UpdateButtonTitles) window.UpdateButtonTitles();
         if (window.UpdateButtonStates) window.UpdateButtonStates();
         if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
@@ -821,10 +882,21 @@ window.selectChannelInHeader = function (slug) {
 };
 
 // Update global show select with active show highlighting and display IDs
-window.UpdateGlobalShowSelect = async function () {
+window.UpdateGlobalShowSelect = async function (preferredShow) {
     const sel = document.getElementById('globalShowSelect');
     if (!sel) return;
-    if (window._updatingShowSelect) return;
+    if (preferredShow) window._preferShowName = preferredShow;
+    if (window._updatingShowSelect) {
+        while (window._updatingShowSelect) {
+            await new Promise((r) => setTimeout(r, 30));
+        }
+        const queued = window._preferShowName;
+        if (queued) {
+            window._preferShowName = '';
+            return window.UpdateGlobalShowSelect(queued);
+        }
+        return;
+    }
     window._updatingShowSelect = true;
     
     try {
@@ -845,8 +917,14 @@ window.UpdateGlobalShowSelect = async function () {
             });
             const assignedShow = (selectedChannel && selectedChannel.showName) || '';
             
-            // Channel picks the show. Fallback: last selected, then first visible.
-            let showToSelect = assignedShow;
+            // Prefer an explicit show (just created). Else channel active, last selected, first.
+            const prefer = preferredShow || window._preferShowName || '';
+            window._preferShowName = '';
+            let showToSelect = '';
+            if (prefer && visibleShows.some((show) => show.name === prefer)) {
+                showToSelect = prefer;
+            }
+            if (!showToSelect) showToSelect = assignedShow;
             if (showToSelect && !visibleShows.some((show) => show.name === showToSelect)) {
                 showToSelect = '';
             }
@@ -1150,6 +1228,7 @@ window.ReloadCurrentPageIfNeeded = function () {
         'ActivateShow'       // Activate is per show
     ];
     
+    retainOriginalsForCurrentShow();
     if (showSpecificPages.includes(currentPageId)) {
         if (!getSelectedShowName()) {
             window.ShowPage(currentPageId === 'AddShowPhotos' || currentPageId === 'ManageShowPhotos'
@@ -1435,6 +1514,7 @@ window.ResetToDefault = async function () {
     const autoAddEl = document.getElementById('autoOptimizeAdd');
     if (autoEl) autoEl.checked = true;
     if (autoAddEl) autoAddEl.checked = true;
+    setOptimizeStyle('balanced');
     document.getElementById('bgrdColor').value = "#ffffff";
     syncPhotoSettingsDisplayFromContext();
     if (currentInk) {
@@ -1450,14 +1530,19 @@ async function previewAfterLoad() {
     }
 }
 
+function loadPhotoSettingsFile(file, replaceName = null) {
+    currentFile = file;
+    window._optimizeTargetImageName = replaceName;
+    aiDetectedSpot = null;
+    window.SetPhotoSettingsControlsEnabled(true);
+    currentInk = new EInk(currentFile, document.getElementById('displayID').value);
+    return currentInk.Load().then(() => previewAfterLoad());
+}
+
 window.InputImageChange = function (ev) {
     if (ev.target.files.length > 0) {
-        currentFile = ev.target.files[0];
-        currentInk = new EInk(currentFile, document.getElementById('displayID').value);
-        aiDetectedSpot = null; // Reset AI detection when new image is loaded
-        // Enable all controls when a new image file is loaded
-        window.SetPhotoSettingsControlsEnabled(true);
-        currentInk.Load().then(() => previewAfterLoad());
+        loadPhotoSettingsFile(ev.target.files[0], null);
+        ev.target.value = '';
     }
 };
 
@@ -1484,13 +1569,13 @@ window.AutoDetectCenter = async function () {
     // IMPORTANT: If the model is not loaded yet, we only load it 
     // through the local function, never directly via cocoSsd.load()!
     if (!detectorModel) {
-        btn.innerText = "⏳ Loading model...";
+        btn.innerText = "⏳ " + t('Loading model...<context="ui"/>');
         btn.disabled = true;
         try {
         await LoadKIModel();
         } catch (loadErr) {
             alert("AI could not be loaded: " + loadErr.message + "\n\nCheck the console (F12) for details.");
-            btn.innerText = "AI Auto-Center";
+            btn.innerText = t('AI Auto-Center<context="ui"/>');
             btn.disabled = false;
             return;
         }
@@ -1498,13 +1583,13 @@ window.AutoDetectCenter = async function () {
 
     if (!detectorModel) {
         alert("AI could not be loaded. Check the console (F12).");
-        btn.innerText = "AI Auto-Center";
+        btn.innerText = t('AI Auto-Center<context="ui"/>');
         btn.disabled = false;
         return;
     }
 
     try {
-        btn.innerText = "⏳ Scanning...";
+        btn.innerText = "⏳ " + t('Scanning...<context="ui"/>');
         btn.disabled = true;
 
         // IMPORTANT: Use the original image, not the processed testimg
@@ -1547,7 +1632,7 @@ window.AutoDetectCenter = async function () {
         console.error("AI detection error:", err);
         alert("AI error: " + (err.message || err.toString()));
     } finally {
-        btn.innerText = "AI Auto-Center";
+        btn.innerText = t('AI Auto-Center<context="ui"/>');
         btn.disabled = false;
     }
 };
@@ -1587,6 +1672,8 @@ function releaseLoadedImage(img) {
     }
 }
 
+let autoOptimizeGen = 0;
+
 window.AutoOptimizeCurrentImage = async function (opts) {
     const silent = !!(opts && opts.silent);
     if (!currentInk || !currentFile) {
@@ -1594,10 +1681,10 @@ window.AutoOptimizeCurrentImage = async function (opts) {
         return;
     }
 
+    const gen = ++autoOptimizeGen;
     const btn = document.getElementById('AutoOptimizeBtn');
-    const prevLabel = btn ? btn.innerText : '';
     if (btn) {
-        btn.innerText = "⏳ Optimizing...";
+        btn.innerText = "⏳ " + t('Optimizing...<context="ui"/>');
         btn.disabled = true;
     }
 
@@ -1611,34 +1698,39 @@ window.AutoOptimizeCurrentImage = async function (opts) {
         }
 
         const originalImg = await loadImageFromFile(currentFile);
+        const srcW = originalImg.naturalWidth;
+        const srcH = originalImg.naturalHeight;
         const displayID = document.getElementById('displayID').value;
         let result;
         try {
             result = await OptimizeImageForEink(originalImg, {
                 display: EInkDef.DISPLAYS[displayID],
-                detectorModel
+                detectorModel,
+                style: getOptimizeStyle()
             });
         } finally {
             releaseLoadedImage(originalImg);
         }
 
+        if (gen !== autoOptimizeGen) return;
         applyOptimizedSettingsToForm(result.settings);
         if (result.focus && result.focus.label) {
             aiDetectedSpot = {
                 x: result.settings.cutSpotX,
                 y: result.settings.cutSpotY,
-                originalWidth: originalImg.naturalWidth,
-                originalHeight: originalImg.naturalHeight
+                originalWidth: srcW,
+                originalHeight: srcH
             };
         }
         window.UpdatePreview();
     } catch (err) {
         console.error("Auto-optimize error:", err);
+        if (gen !== autoOptimizeGen) return;
         if (!silent) alert("Auto-optimize error: " + (err.message || err.toString()));
         else window.UpdatePreview();
     } finally {
-        if (btn) {
-            btn.innerText = prevLabel || "✨ Auto Optimize";
+        if (gen === autoOptimizeGen && btn) {
+            btn.innerText = "✨ " + t('Auto Optimize<context="ui"/>');
             btn.disabled = false;
         }
     }
@@ -1727,13 +1819,26 @@ window.addEventListener('DOMContentLoaded', () => {
     initI18n().then(() => {
         if (window.UpdateButtonTitles) window.UpdateButtonTitles();
         if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+        if (window.UpdateAddPhotosButtonText) window.UpdateAddPhotosButtonText();
+        if (window._currentPageId === 'ManageShowPhotos' && window.LoadManageShowPhotosPage) {
+            window.LoadManageShowPhotosPage();
+        }
     });
     const lidSel = document.getElementById('appLid');
     if (lidSel) lidSel.addEventListener('change', () => {
         setLid(lidSel.value);
         if (window.UpdateButtonTitles) window.UpdateButtonTitles();
         if (window.UpdatePageTitleIfNeeded) window.UpdatePageTitleIfNeeded();
+        if (window.UpdateAddPhotosButtonText) window.UpdateAddPhotosButtonText();
+        if (window._currentPageId === 'ManageShowPhotos' && window.LoadManageShowPhotosPage) {
+            window.LoadManageShowPhotosPage();
+        }
     });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.ClosePhotoLightbox();
+    });
+    const lightbox = document.getElementById('photoLightbox');
+    if (lightbox) lightbox.addEventListener('click', () => window.ClosePhotoLightbox());
     loadSettingsFromStorage();
     syncPhotoSettingsDisplayFromContext();
     // Load AI model and hide overlay when done
@@ -1932,20 +2037,22 @@ window.SaveCurImage = function () {
             saveParams.replaceImageName = window._optimizeTargetImageName;
         }
         
+        const replacedName = window._optimizeTargetImageName || null;
         new RESTX().promiseCall('saveShowImage', saveParams).then(() => {
             // Show success message
             messageDiv.style.background = '#27ae60';
-            messageDiv.innerText = window._optimizeTargetImageName 
-                ? `Image "${window._optimizeTargetImageName}" replaced successfully!`
+            messageDiv.innerText = replacedName
+                ? `Image "${replacedName}" replaced successfully!`
                 : "Image saved successfully!";
             
-            // Clear optimization target
             window._optimizeTargetImageName = null;
+            const returnPage = window._optimizeReturnPage;
+            window._optimizeReturnPage = null;
             
-            // Hide message after 2 seconds
             setTimeout(() => {
                 messageDiv.style.display = 'none';
-            }, 2000);
+                if (returnPage) window.ShowPage(returnPage);
+            }, replacedName ? 800 : 2000);
         }).catch(err => {
             // Show error message
             messageDiv.style.background = '#e74c3c';
@@ -2227,15 +2334,34 @@ function fillRestHourSelect(sel, value) {
     sel.value = (Number.isInteger(n) && n >= 0 && n <= 23) ? String(n) : '22';
 }
 
+window.SyncShowRestEnabled = function () {
+    const on = !!(document.getElementById('showRestEnabled') && document.getElementById('showRestEnabled').checked);
+    const row = document.getElementById('showRestHoursRow');
+    if (row) row.style.opacity = on ? '1' : '0.45';
+    ['showRestStart', 'showRestEnd'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !on;
+    });
+};
+
 function applyShowSettingsForm(show) {
     const modeSelect = document.getElementById('showMode');
     const timerInput = document.getElementById('showTimer');
+    const restEnabled = document.getElementById('showRestEnabled');
     const restStart = document.getElementById('showRestStart');
     const restEnd = document.getElementById('showRestEnd');
     if (modeSelect) modeSelect.value = (show && show.mode) || 'random';
     if (timerInput) timerInput.value = (show && show.timer) || 1;
     fillRestHourSelect(restStart, show && show.restStart !== undefined ? show.restStart : 22);
     fillRestHourSelect(restEnd, show && show.restEnd !== undefined ? show.restEnd : 6);
+    if (restEnabled) {
+        const start = show && show.restStart !== undefined ? Number(show.restStart) : 22;
+        const end = show && show.restEnd !== undefined ? Number(show.restEnd) : 6;
+        restEnabled.checked = show && show.restEnabled !== undefined
+            ? !!show.restEnabled
+            : start !== end;
+    }
+    window.SyncShowRestEnabled();
 }
 
 window.LoadShowSettingsPage = function () {
@@ -2277,6 +2403,7 @@ window.SaveShowSettings = function () {
     const messageDiv = document.getElementById('showSettingsMessage');
     const modeSelect = document.getElementById('showMode');
     const timerInput = document.getElementById('showTimer');
+    const restEnabledInput = document.getElementById('showRestEnabled');
     const restStartInput = document.getElementById('showRestStart');
     const restEndInput = document.getElementById('showRestEnd');
     
@@ -2293,6 +2420,7 @@ window.SaveShowSettings = function () {
     
     const showMode = modeSelect ? modeSelect.value : 'random';
     const showTimer = timerInput ? parseInt(timerInput.value) : 1;
+    const showRestEnabled = restEnabledInput ? !!restEnabledInput.checked : false;
     const showRestStart = restStartInput ? parseInt(restStartInput.value, 10) : 22;
     const showRestEnd = restEndInput ? parseInt(restEndInput.value, 10) : 6;
     
@@ -2328,6 +2456,7 @@ window.SaveShowSettings = function () {
         showName: showName,
         showMode: showMode,
         showTimer: showTimer,
+        showRestEnabled: showRestEnabled,
         showRestStart: showRestStart,
         showRestEnd: showRestEnd
     }).then(_res => {
@@ -2361,9 +2490,9 @@ window.UpdateAddPhotosButtonText = function () {
     if (processBtn && fileInput) {
         const fileCount = fileInput.files ? fileInput.files.length : 0;
         if (fileCount > 0) {
-            processBtn.textContent = `📸 Process and Add Photos (${fileCount} file${fileCount !== 1 ? 's' : ''} selected)`;
+            processBtn.textContent = '📸 ' + t('Process and Add Photos (<n/> files selected)<context="ui"/>', { n: fileCount });
         } else {
-            processBtn.textContent = '📸 Process and Add Photos';
+            processBtn.textContent = '📸 ' + t('Process and Add Photos<context="ui"/>');
         }
     }
 };
@@ -2379,7 +2508,7 @@ window.StopAddPhotos = function() {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#f39c12';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Stopping processing...";
+        messageDiv.innerText = t('Stopping processing...<context="ui"/>');
     }
 };
 
@@ -2397,7 +2526,7 @@ window.ProcessAndAddPhotos = async function (override) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#e74c3c';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Please select a show first!";
+        messageDiv.innerText = t('Please select a show first!<context="ui"/>');
         setTimeout(() => {
             messageDiv.style.display = 'none';
         }, 3000);
@@ -2408,7 +2537,7 @@ window.ProcessAndAddPhotos = async function (override) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#e74c3c';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Please select at least one image!";
+        messageDiv.innerText = t('Please select at least one image!<context="ui"/>');
         setTimeout(() => {
             messageDiv.style.display = 'none';
         }, 3000);
@@ -2417,6 +2546,7 @@ window.ProcessAndAddPhotos = async function (override) {
 
     if (window._addPhotosBusy) return;
 
+    retainOriginalsForCurrentShow();
     window._stopAddPhotos = false;
     setAddPhotosBusy(true);
 
@@ -2438,13 +2568,13 @@ window.ProcessAndAddPhotos = async function (override) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#3498db';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Loading AI model...";
+        messageDiv.innerText = t('Loading AI model...<context="ui"/>');
         try {
             await LoadKIModel();
         } catch (loadErr) {
             console.warn("AI unavailable, adding photos without subject detection:", loadErr);
             messageDiv.style.background = '#f39c12';
-            messageDiv.innerText = "AI unavailable — adding photos without subject detection.";
+            messageDiv.innerText = t('AI unavailable — adding photos without subject detection.<context="ui"/>');
         }
     }
     
@@ -2456,13 +2586,13 @@ window.ProcessAndAddPhotos = async function (override) {
     // Show progress
     progressDiv.style.display = 'block';
     progressBar.style.width = '0%';
-    progressText.innerText = `Processing 0 of ${totalFiles} images...`;
+    progressText.innerText = t('Processing <done/> of <total/> images...<context="ui"/>', { done: 0, total: totalFiles });
     const stopBtn = document.getElementById('addPhotosStopBtn');
     if (stopBtn) stopBtn.style.display = 'block';
     messageDiv.style.display = 'block';
     messageDiv.style.background = '#3498db';
     messageDiv.style.color = 'white';
-    messageDiv.innerText = `Processing ${totalFiles} image(s)...`;
+    messageDiv.innerText = t('Processing <total/> image(s)...<context="ui"/>', { total: totalFiles });
     
     // Get displayId from show (convert single char ID to display key)
     let displayIDKey = defaultDisplayId;
@@ -2520,7 +2650,8 @@ window.ProcessAndAddPhotos = async function (override) {
             if (isAutoOptimizeEnabled()) {
                 const opt = await OptimizeImageForEink(originalImg, {
                     display: EInkDef.DISPLAYS[displayIDKey],
-                    predictions
+                    predictions,
+                    style: (override && override.optimize) || getOptimizeStyle()
                 });
                 imageSettings = {
                     ...settings,
@@ -2586,7 +2717,12 @@ window.ProcessAndAddPhotos = async function (override) {
         processedCount++;
         const progress = (processedCount / totalFiles) * 100;
         progressBar.style.width = progress + '%';
-        progressText.innerText = `Processing ${processedCount} of ${totalFiles} images... (${successCount} saved, ${errorCount} errors)`;
+        progressText.innerText = t('Processing <done/> of <total/> images... (<saved/> saved, <errors/> errors)<context="ui"/>', {
+            done: processedCount,
+            total: totalFiles,
+            saved: successCount,
+            errors: errorCount
+        });
     }
     
     // Hide stop button
@@ -2594,23 +2730,31 @@ window.ProcessAndAddPhotos = async function (override) {
     if (stopBtnFinal) stopBtnFinal.style.display = 'none';
     
     const saveAspectDone = getSaveAspect();
-    const versionsHint = saveAspectDone === 'landscape'
-        ? 'landscape only'
-        : saveAspectDone === 'portrait'
-            ? 'portrait only'
-            : 'landscape + portrait';
+    const versionsHint = t(
+        saveAspectDone === 'landscape'
+            ? 'landscape only<context="ui"/>'
+            : saveAspectDone === 'portrait'
+                ? 'portrait only<context="ui"/>'
+                : 'landscape + portrait<context="ui"/>'
+    );
 
     // Show final result
     progressDiv.style.display = 'none';
     if (window._stopAddPhotos) {
         messageDiv.style.background = '#f39c12';
-        messageDiv.innerText = `Processing stopped. Processed ${processedCount} of ${totalFiles} image(s). ${successCount} versions saved (${versionsHint}), ${errorCount} error(s).`;
+        messageDiv.innerText = t('Processing stopped. Processed <done/> of <total/> image(s). <saved/> versions saved (<versions/>), <errors/> error(s).<context="ui"/>', {
+            done: processedCount, total: totalFiles, saved: successCount, versions: versionsHint, errors: errorCount
+        });
     } else if (errorCount === 0) {
         messageDiv.style.background = '#27ae60';
-        messageDiv.innerText = `Successfully processed ${totalFiles} image(s)! ${successCount} versions saved (${versionsHint}).`;
+        messageDiv.innerText = t('Successfully processed <total/> image(s)! <saved/> versions saved (<versions/>).<context="ui"/>', {
+            total: totalFiles, saved: successCount, versions: versionsHint
+        });
     } else {
         messageDiv.style.background = '#e74c3c';
-        messageDiv.innerText = `Processed ${processedCount} image(s). ${successCount} versions saved (${versionsHint}), ${errorCount} error(s).`;
+        messageDiv.innerText = t('Processed <done/> image(s). <saved/> versions saved (<versions/>), <errors/> error(s).<context="ui"/>', {
+            done: processedCount, saved: successCount, versions: versionsHint, errors: errorCount
+        });
     }
     
     setTimeout(() => {
@@ -2626,11 +2770,48 @@ window.ProcessAndAddPhotos = async function (override) {
     }
 
     if (!stopped && processedCount > 0) {
+        if (showName) {
+            saveLastSelectedShow(showName);
+            if (window.UpdateGlobalShowSelect) {
+                await window.UpdateGlobalShowSelect(showName);
+            }
+            const sel = document.getElementById('globalShowSelect');
+            if (sel && [...sel.options].some((o) => o.value === showName)) {
+                sel.value = showName;
+            }
+        }
         setTimeout(() => {
             window.ShowPage('ManageShowPhotos');
-        }, 1000);
+        }, 400);
     }
 };
+
+window.OpenPhotoLightbox = function (src) {
+    const box = document.getElementById('photoLightbox');
+    const img = document.getElementById('photoLightboxImg');
+    if (!box || !img || !src) return;
+    img.src = src;
+    box.hidden = false;
+};
+
+window.ClosePhotoLightbox = function () {
+    const box = document.getElementById('photoLightbox');
+    const img = document.getElementById('photoLightboxImg');
+    if (img) img.src = '';
+    if (box) box.hidden = true;
+};
+
+function attachPhotoLightbox(el, src) {
+    if (!el || !src || el.dataset.lightboxBound === '1') return;
+    el.dataset.lightboxBound = '1';
+    el.style.cursor = 'zoom-in';
+    el.title = t('Double-click for full view<context="ui"/>');
+    el.addEventListener('dblclick', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.OpenPhotoLightbox(src);
+    });
+}
 
 window.LoadManageShowPhotosPage = function () {
     const globalSelect = document.getElementById('globalShowSelect');
@@ -2644,7 +2825,7 @@ window.LoadManageShowPhotosPage = function () {
             messageDiv.style.display = 'block';
             messageDiv.style.background = '#e74c3c';
             messageDiv.style.color = 'white';
-            messageDiv.innerText = "Please select a show first!";
+            messageDiv.innerText = t('Please select a show first!<context="ui"/>');
         }
         if (gridDiv) gridDiv.innerHTML = '';
         if (emptyDiv) emptyDiv.style.display = 'block';
@@ -2663,7 +2844,7 @@ window.LoadManageShowPhotosPage = function () {
     
     // Clear message
     if (messageDiv) messageDiv.style.display = 'none';
-    if (gridDiv) gridDiv.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;">Loading photos...</div>';
+    if (gridDiv) gridDiv.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;">' + t('Loading photos...<context="ui"/>') + '</div>';
     if (emptyDiv) emptyDiv.style.display = 'none';
     
     // Load show photos - use original show name for getShow (it will convert internally)
@@ -2682,14 +2863,7 @@ window.LoadManageShowPhotosPage = function () {
                 oldDurationContainer.remove();
             }
             
-            // ALSO remove any orphan duration divs from before the fix (they don't have IDs)
-            const orphanDivs = gridDiv.parentElement.querySelectorAll('div[style*="background:#ecf0f1"]');
-            orphanDivs.forEach(div => {
-                // Only remove if it's a duration info div (has the specific structure)
-                if (div.innerHTML.includes('Landscape') && div.innerHTML.includes('Portrait') && div.innerHTML.includes('Timer')) {
-                    div.remove();
-                }
-            });
+            gridDiv.parentElement.querySelectorAll('[data-duration-info]').forEach((div) => div.remove());
             
             if (imgs.length === 0) {
                 if (emptyDiv) emptyDiv.style.display = 'block';
@@ -2763,19 +2937,20 @@ window.LoadManageShowPhotosPage = function () {
             const durationContainer = document.createElement('div');
             durationContainer.id = 'durationInfoContainer';
             const durationInfo = document.createElement('div');
+            durationInfo.setAttribute('data-duration-info', '1');
             durationInfo.style.cssText = 'background:#ecf0f1; padding:12px; border-radius:8px; margin-bottom:15px; font-size:0.95rem; display:flex; justify-content:space-around; gap:15px;';
             durationInfo.innerHTML = `
                 <div style="text-align:center; flex:1;">
-                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">↔️ Landscape</div>
-                    <div style="color:#555;">${landscapeCount} photos · ${formatDuration(landscapeDuration)}</div>
+                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">↔️ ${t('Landscape<context="ui"/>')}</div>
+                    <div style="color:#555;">${t('<n/> photos · <duration/><context="ui"/>', { n: landscapeCount, duration: formatDuration(landscapeDuration) })}</div>
                 </div>
                 <div style="text-align:center; flex:1;">
-                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">↕️ Portrait</div>
-                    <div style="color:#555;">${portraitCount} photos · ${formatDuration(portraitDuration)}</div>
+                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">↕️ ${t('Portrait<context="ui"/>')}</div>
+                    <div style="color:#555;">${t('<n/> photos · <duration/><context="ui"/>', { n: portraitCount, duration: formatDuration(portraitDuration) })}</div>
                 </div>
                 <div style="text-align:center; flex:1;">
-                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">⏱️ Timer</div>
-                    <div style="color:#555;">${timer} min/photo</div>
+                    <div style="font-weight:bold; color:#2c3e50; margin-bottom:4px;">⏱️ ${t('Timer<context="ui"/>')}</div>
+                    <div style="color:#555;">${t('<n/> min/photo<context="ui"/>', { n: timer })}</div>
                 </div>
             `;
             durationContainer.appendChild(durationInfo);
@@ -2796,26 +2971,26 @@ window.LoadManageShowPhotosPage = function () {
                     : `max-width:100%; max-height:100%; object-fit:contain;`;
                 
                 // Determine orientation from first character of filename
-                let orientationIcon = '📐'; // Default
-                let orientationText = 'Unknown';
+                let orientationIcon = '📐';
+                let orientationText = t('Unknown<context="ui"/>');
                 if (imgName && imgName.length > 0) {
                     const firstChar = imgName.charAt(0);
                     switch(firstChar) {
                         case '0':
-                            orientationIcon = '↔️'; // Landscape
-                            orientationText = 'Landscape';
+                            orientationIcon = '↔️';
+                            orientationText = t('Landscape<context="ui"/>');
                             break;
                         case '1':
-                            orientationIcon = '↕️'; // Portrait
-                            orientationText = 'Portrait';
+                            orientationIcon = '↕️';
+                            orientationText = t('Portrait<context="ui"/>');
                             break;
                         case '2':
-                            orientationIcon = '↔️'; // Landscape inverted
-                            orientationText = 'Landscape (180°)';
+                            orientationIcon = '↔️';
+                            orientationText = t('Landscape (180°)<context="ui"/>');
                             break;
                         case '3':
-                            orientationIcon = '↕️'; // Portrait inverted
-                            orientationText = 'Portrait (270°)';
+                            orientationIcon = '↕️';
+                            orientationText = t('Portrait (270°)<context="ui"/>');
                             break;
                     }
                 }
@@ -2823,7 +2998,7 @@ window.LoadManageShowPhotosPage = function () {
                 // Check if original image is available for re-optimization
                 const hasOriginal = window.originalImages && window.originalImages[imgName];
                 const optimizeBtn = hasOriginal 
-                    ? `<button onclick="window.OptimizeShowPhoto('${imgName.replace(/'/g, "\\'")}')" style="width:100%; padding:6px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9rem; margin-bottom:5px;">⚙️ Optimize</button>`
+                    ? `<button onclick="window.OptimizeShowPhoto('${imgName.replace(/'/g, "\\'")}')" style="width:100%; padding:6px; background:#3498db; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9rem; margin-bottom:5px;">⚙️ ${t('Optimize<context="ui"/>')}</button>`
                     : '';
                 
                 thumbnailDiv.innerHTML = `
@@ -2832,7 +3007,7 @@ window.LoadManageShowPhotosPage = function () {
                         <div style="position:absolute; top:4px; right:4px; background:rgba(0,0,0,0.7); color:white; padding:4px 6px; border-radius:4px; font-size:0.8rem; line-height:1; z-index:10;" title="${orientationText}">${orientationIcon}</div>
                     </div>
                     ${optimizeBtn}
-                    <button onclick="window.DeleteShowPhoto('${imgName.replace(/'/g, "\\'")}')" style="width:100%; padding:6px; background:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9rem;">🗑️ Delete</button>
+                    <button onclick="window.DeleteShowPhoto('${imgName.replace(/'/g, "\\'")}')" style="width:100%; padding:6px; background:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9rem;">🗑️ ${t('Delete<context="ui"/>')}</button>
                 `;
                 gridDiv.appendChild(thumbnailDiv);
                 
@@ -2921,6 +3096,8 @@ window.LoadManageShowPhotosPage = function () {
                                             // Draw the image scaled to thumbnail size
                                             try {
                                                 ctx.drawImage(tempImg, 0, 0, thumbWidth, thumbHeight);
+                                                attachPhotoLightbox(thumbCanvas, tempImg.src);
+                                                if (thumbCanvas.parentElement) attachPhotoLightbox(thumbCanvas.parentElement, tempImg.src);
                                                 return true;
                                             } catch (err) {
                                                 console.error("Error drawing image for", imgName, err);
@@ -2999,6 +3176,8 @@ window.LoadManageShowPhotosPage = function () {
                                                     ctx.fillRect(0, 0, thumbWidth, thumbHeight);
                                                     try {
                                                         ctx.drawImage(tempImg, 0, 0, thumbWidth, thumbHeight);
+                                                        attachPhotoLightbox(thumbCanvasRetry, tempImg.src);
+                                                        if (thumbCanvasRetry.parentElement) attachPhotoLightbox(thumbCanvasRetry.parentElement, tempImg.src);
                                                         if (document.body.contains(tempImg)) {
                                                             document.body.removeChild(tempImg);
                                                         }
@@ -3081,42 +3260,22 @@ window.OptimizeShowPhoto = async function (imgName) {
         return;
     }
     
-    // Navigate to Photo Settings page and load the original image
-    // Set currentFile so Photo Settings can use it
-    currentFile = originalFile;
-    
-    // Load the image into Photo Settings
-    const fileInput = document.getElementById('photoSettingsInput');
-    if (fileInput) {
-        // Create a new FileList with the original file
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(originalFile);
-        fileInput.files = dataTransfer.files;
-        
-        // Trigger change event to load the image
-        const changeEvent = new Event('change', { bubbles: true });
-        fileInput.dispatchEvent(changeEvent);
-    }
-    
-    // Navigate to Photo Settings
+    currentFile = null;
+    currentInk = null;
+    window._optimizeReturnPage = 'ManageShowPhotos';
     window.ShowPage('PhotoSettings');
-    
-    // Show message that this is for replacing the existing image
-    setTimeout(() => {
-        const messageDiv = document.getElementById('photoSettingsMessage');
-        if (messageDiv) {
-            messageDiv.style.display = 'block';
-            messageDiv.style.background = '#3498db';
-            messageDiv.style.color = 'white';
-            messageDiv.innerText = `Optimizing "${imgName}". Adjust settings and click "Save Image" to replace the existing image.`;
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 5000);
-        }
-    }, 500);
-    
-    // Store the target image name for replacement
-    window._optimizeTargetImageName = imgName;
+    await loadPhotoSettingsFile(originalFile, imgName);
+
+    const messageDiv = document.getElementById('saveImageMessage') || document.getElementById('photoSettingsMessage');
+    if (messageDiv) {
+        messageDiv.style.display = 'block';
+        messageDiv.style.background = '#3498db';
+        messageDiv.style.color = 'white';
+        messageDiv.innerText = `Optimizing "${imgName}". Adjust settings and click "Save Image" to replace the existing image.`;
+        setTimeout(() => {
+            if (messageDiv.innerText.indexOf(imgName) !== -1) messageDiv.style.display = 'none';
+        }, 5000);
+    }
 };
 
 window.DeleteShowPhoto = function (imgName) {
@@ -3129,13 +3288,13 @@ window.DeleteShowPhoto = function (imgName) {
             messageDiv.style.display = 'block';
             messageDiv.style.background = '#e74c3c';
             messageDiv.style.color = 'white';
-            messageDiv.innerText = "Please select a show first!";
+            messageDiv.innerText = t('Please select a show first!<context="ui"/>');
         }
         return;
     }
     
     // Show confirmation
-    if (!confirm(`Are you sure you want to delete the photo "${imgName}"?`)) {
+    if (!confirm(t('Are you sure you want to delete the photo "<imgName/>"?<context="ui"/>', { imgName }))) {
         return;
     }
     
@@ -3144,7 +3303,7 @@ window.DeleteShowPhoto = function (imgName) {
         messageDiv.style.display = 'block';
         messageDiv.style.background = '#3498db';
         messageDiv.style.color = 'white';
-        messageDiv.innerText = "Deleting photo...";
+        messageDiv.innerText = t('Deleting photo...<context="ui"/>');
     }
     
     new RESTX().promiseCall('deleteShowImage', {
@@ -3168,7 +3327,7 @@ window.DeleteShowPhoto = function (imgName) {
             window.LoadManageShowPhotosPage();
             if (messageDiv) {
                 messageDiv.style.background = '#27ae60';
-                messageDiv.innerText = "Photo deleted successfully!";
+                messageDiv.innerText = t('Photo deleted successfully!<context="ui"/>');
                 setTimeout(() => {
                     messageDiv.style.display = 'none';
                 }, 2000);
@@ -3176,7 +3335,7 @@ window.DeleteShowPhoto = function (imgName) {
         } else {
             if (messageDiv) {
                 messageDiv.style.background = '#e74c3c';
-                messageDiv.innerText = "Error: Could not delete photo.";
+                messageDiv.innerText = t('Error: Could not delete photo.<context="ui"/>');
                 setTimeout(() => {
                     messageDiv.style.display = 'none';
                 }, 3000);
@@ -3836,11 +3995,16 @@ window.CreateNewShow = function () {
     });
 };
 
-function autoShowNameFromCatalog(fileNameOrName) {
+function parseCatalogJson(text) {
+    return JSON.parse(String(text || '').replace(/^\uFEFF/, ''));
+}
+
+function autoShowNameFromCatalog(fileNameOrName, catalog) {
+    const fromCatalog = catalog && String(catalog.name || '').trim();
+    if (fromCatalog) return fromCatalog;
     let n = String(fileNameOrName || 'Show').replace(/\\/g, '/').split('/').pop();
-    n = n.replace(/\.json$/i, '').replace(/_orgimgs$/i, '');
-    if (!n) n = 'Show';
-    return n.endsWith('.AutoShow') ? n : n + '.AutoShow';
+    n = n.replace(/\.json$/i, '').replace(/_orgimgs$/i, '').replace(/\.AutoShow$/i, '');
+    return n || 'Show';
 }
 
 function resolveCatalogImageUrl(url, catalogName) {
@@ -3850,6 +4014,24 @@ function resolveCatalogImageUrl(url, catalogName) {
     let rel = raw.replace(/\\/g, '/').replace(/^\/+/, '');
     if (rel.startsWith('readyToGoShows/')) return rel;
     return 'readyToGoShows/' + catalogName + '/' + rel.replace(/^\.\//, '');
+}
+
+function catalogImageCandidates(img, catalogName) {
+    const out = [];
+    const add = (u) => {
+        const resolved = resolveCatalogImageUrl(u, catalogName);
+        if (resolved && !out.includes(resolved)) out.push(resolved);
+    };
+    add(img && img.url);
+    add(img && img.downloadUrl);
+    add(img && img.originalUrl);
+    if (catalogName && img && img.name) {
+        const base = 'readyToGoShows/' + catalogName + '/';
+        add(base + 'imgs/' + img.name + '.png');
+        add(base + 'imgs/' + img.name + '.jpg');
+        add(base + 'orgimgs/' + img.name + '.jpg');
+    }
+    return out;
 }
 
 function fileFromBase64(base64, fileName, mime) {
@@ -3862,7 +4044,7 @@ function fileFromBase64(base64, fileName, mime) {
 window.LoadAutoShowPage = async function () {
     const sel = document.getElementById('autoShowCatalog');
     if (!sel) return;
-    sel.innerHTML = '<option value="">— choose a catalog —</option>';
+    sel.innerHTML = '<option value="">' + t('— choose a catalog —<context="ui"/>') + '</option>';
     try {
         const res = await new RESTX().promiseCall('listReadyShows', {});
         const catalogs = (res.ok && res.output && res.output.catalogs) || [];
@@ -3883,7 +4065,7 @@ window.LoadAutoShowPage = async function () {
         fileInput.addEventListener('change', () => {
             fileBtn.innerText = fileInput.files && fileInput.files[0]
                 ? '📄 ' + fileInput.files[0].name
-                : '📄 Or pick a *_orgimgs.json';
+                : '📄 ' + t('Or pick a catalog JSON<context="ui"/>');
         });
     }
 };
@@ -3898,13 +4080,7 @@ window.CreateAutoShow = async function () {
     const fileInput = document.getElementById('autoShowInput');
     const catalogSel = document.getElementById('autoShowCatalog');
 
-    const restErr = (err) => {
-        if (!err) return 'unknown error';
-        if (typeof err === 'string') return err;
-        if (err.message) return err.message;
-        if (err.error && err.error.msg) return err.error.msg;
-        try { return JSON.stringify(err.error || err); } catch (_) { return String(err); }
-    };
+    const restErr = formatRestErr;
     const say = (bg, text) => {
         if (!messageDiv) return;
         messageDiv.style.display = 'block';
@@ -3914,7 +4090,7 @@ window.CreateAutoShow = async function () {
     };
 
     if (!channelPick || !currentChannels[channelPick] || !displayId) {
-        say('#e74c3c', 'Choose a channel first. The channel sets the display type.');
+        say('#e74c3c', t('Choose a channel first. The channel sets the display type.<context="ui"/>'));
         return;
     }
 
@@ -3923,28 +4099,28 @@ window.CreateAutoShow = async function () {
     try {
         if (fileInput && fileInput.files && fileInput.files[0]) {
             const file = fileInput.files[0];
-            catalog = JSON.parse(await file.text());
-            catalogName = file.name.replace(/\.json$/i, '').replace(/_orgimgs$/i, '');
+            catalog = parseCatalogJson(await file.text());
+            catalogName = file.name.replace(/\.json$/i, '').replace(/_orgimgs$/i, '').replace(/\.AutoShow$/i, '');
         } else if (catalogSel && catalogSel.value) {
             catalogName = (catalogSel.selectedOptions[0] && catalogSel.selectedOptions[0].dataset.name) || '';
             const res = await new RESTX().promiseCall('fetchShowSource', { url: catalogSel.value, name: 'catalog' });
-            if (!res.ok || !res.output || !res.output.base64) throw new Error(res.error && res.error.msg ? res.error.msg : 'catalog not loaded');
+            if (!res.ok || !res.output || !res.output.base64) throw new Error(formatRestErr(res) || t('catalog not loaded<context="ui"/>'));
             const raw = Uint8Array.from(atob(res.output.base64), (c) => c.charCodeAt(0));
-            catalog = JSON.parse(new TextDecoder().decode(raw));
-            if (!catalogName) catalogName = autoShowNameFromCatalog(catalogSel.value).replace(/\.AutoShow$/, '');
+            catalog = parseCatalogJson(new TextDecoder().decode(raw));
+            if (!catalogName) catalogName = autoShowNameFromCatalog(catalogSel.value);
         }
     } catch (err) {
-        say('#e74c3c', 'Could not read catalog: ' + restErr(err));
+        say('#e74c3c', t('Could not read catalog: <err/><context="ui"/>', { err: restErr(err) }));
         return;
     }
 
     if (!catalog || !Array.isArray(catalog.images) || !catalog.images.length) {
-        say('#e74c3c', 'Pick a ready catalog or a *_orgimgs.json with an images list.');
+        say('#e74c3c', t('Pick a ready catalog or a JSON with an images list.<context="ui"/>'));
         return;
     }
 
-    const showName = autoShowNameFromCatalog(catalogName || catalog.name || 'Show');
-    say('#3498db', 'Creating ' + showName + '…');
+    const showName = autoShowNameFromCatalog(catalogName, catalog);
+    say('#3498db', t('Creating <name/>…<context="ui"/>', { name: showName }));
 
     try {
         try {
@@ -3970,14 +4146,10 @@ window.CreateAutoShow = async function () {
         const files = [];
         for (let i = 0; i < catalog.images.length; i++) {
             const img = catalog.images[i] || {};
-            say('#3498db', 'Loading image ' + (i + 1) + ' / ' + catalog.images.length + '…');
-            const url = resolveCatalogImageUrl(img.url, catalogName);
-            if (!url) continue;
-            const localGuess = catalogName && img.name
-                ? 'readyToGoShows/' + catalogName + '/orgimgs/' + img.name + '.jpg'
-                : '';
+            say('#3498db', t('Loading image <done/> / <total/>…<context="ui"/>', { done: i + 1, total: catalog.images.length }));
+            const tryUrls = catalogImageCandidates(img, catalogName);
+            if (!tryUrls.length) continue;
             let fetched;
-            const tryUrls = localGuess && localGuess !== url ? [localGuess, url] : [url];
             let lastFetchErr = '';
             for (const tryUrl of tryUrls) {
                 try {
@@ -3986,7 +4158,7 @@ window.CreateAutoShow = async function () {
                         name: img.name || ('img' + (i + 1))
                     });
                     if (fetched && fetched.ok && fetched.output && fetched.output.base64) break;
-                    lastFetchErr = (fetched && fetched.error && fetched.error.msg) || 'download failed';
+                    lastFetchErr = formatRestErr(fetched) || t('download failed<context="ui"/>');
                     fetched = null;
                 } catch (fetchErr) {
                     lastFetchErr = restErr(fetchErr);
@@ -3994,23 +4166,24 @@ window.CreateAutoShow = async function () {
                 }
             }
             if (!fetched) {
-                say('#e67e22', (img.name || url) + ': ' + lastFetchErr + ' — skip');
+                say('#e67e22', (img.name || tryUrls[0]) + ': ' + lastFetchErr + ' — skip');
                 continue;
             }
             if (!fetched.ok || !fetched.output || !fetched.output.base64) {
-                say('#e67e22', (img.name || url) + ': ' + ((fetched.error && fetched.error.msg) || 'download failed') + ' — skip');
+                say('#e67e22', (img.name || tryUrls[0]) + ': ' + (formatRestErr(fetched) || t('download failed<context="ui"/>')) + ' — skip');
                 continue;
             }
             files.push(fileFromBase64(fetched.output.base64, fetched.output.fileName || (img.name + '.jpg'), fetched.output.mime));
         }
-        if (!files.length) throw new Error('No images loaded from the catalog.');
+        if (!files.length) throw new Error(t('No images loaded from the catalog.<context="ui"/>'));
 
-        const sel = document.getElementById('globalShowSelect');
-        await window.UpdateGlobalShowSelect();
-        if (sel) {
-            sel.value = showName;
-            saveLastSelectedShow(showName);
-        }
+        saveLastSelectedShow(showName);
+        await window.UpdateGlobalShowSelect(showName);
+
+        const catalogStyle = catalog.optimize || catalog.style || '';
+        const uiStyle = getOptimizeStyle();
+        const optimize = (uiStyle && uiStyle !== 'balanced') ? uiStyle : (catalogStyle || uiStyle || 'balanced');
+        setOptimizeStyle(optimize);
 
         await window.ProcessAndAddPhotos({
             files,
@@ -4018,10 +4191,11 @@ window.CreateAutoShow = async function () {
             messageDiv,
             progressDiv,
             progressBar,
-            progressText
+            progressText,
+            optimize
         });
     } catch (err) {
-        say('#e74c3c', 'AutoShow failed: ' + restErr(err));
+        say('#e74c3c', t('AutoShow failed: <err/><context="ui"/>', { err: restErr(err) }));
     }
 };
 

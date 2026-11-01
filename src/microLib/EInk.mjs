@@ -8,6 +8,7 @@
  * @module EInk
  */
 import EInkDef from "./EInkDef.mjs?v=21";
+import { applyEinkToneRgb, nearestPaletteColor, suppressBrightEdgeHalos, floydErrorScaleToNeighbor } from "./einkContrast.mjs?v=8";
 
 /** Class with image helper functions.
  * @class EInk
@@ -196,44 +197,20 @@ export default class EInk {
     const wp = _opts.whitePointAdjust || 1.0;
 
     for (let i = 0; i < d.length; i += 4) {
-      let [hue, lig, sat] = this.#RGB2HLS(d[i], d[i + 1], d[i + 2]);
-
-      // Saturation
-      if (satAdj === 0.0) {
-        sat = 0; // Force grayscale when saturation is 0
-      } else {
-        sat = Math.min(1, sat * satAdj);
-      }
-
-      // Blackpoint & Whitepoint Logic
-      // Scale luminance to stretch or compress shadows/highlights
-      if (lig < 0.5) {
-        lig = lig / bp;
-      } else {
-        lig = 1.0 - ((1.0 - lig) / wp);
-      }
-
-      // Contrast
-      if (conAdj !== 1.0) {
-        lig = (lig - 0.5) * conAdj + 0.5;
-      }
-
-      lig = Math.max(0, Math.min(1, lig));
-
-      let [nr, ng, nb] = this.#HLS2RGB(hue, lig, sat);
+      const [nr, ng, nb] = applyEinkToneRgb(d[i], d[i + 1], d[i + 2], {
+        saturation: satAdj,
+        contrast: conAdj,
+        blackPoint: bp,
+        whitePoint: wp
+      });
       d[i] = nr; d[i + 1] = ng; d[i + 2] = nb;
     }
 
+    suppressBrightEdgeHalos(d, dw, dh);
+
     // --- DITHERING ---
     const palette = this.#display.colors.map(c => this.#Hex2RGB(c));
-    const findNearest = (r, g, b) => {
-      let bestDist = Infinity, bestCol = palette[0];
-      for (let col of palette) {
-        let dist = Math.pow(r - col.r, 2) + Math.pow(g - col.g, 2) + Math.pow(b - col.b, 2);
-        if (dist < bestDist) { bestDist = dist; bestCol = col; }
-      }
-      return bestCol;
-    };
+    const findNearest = (r, g, b) => nearestPaletteColor(r, g, b, palette);
 
     if (this.#ditherType === 'bayer') {
       const M8 = [
@@ -258,11 +235,16 @@ export default class EInk {
           let col = findNearest(oldR, oldG, oldB);
           d[idx] = col.r; d[idx + 1] = col.g; d[idx + 2] = col.b;
           let errR = oldR - col.r, errG = oldG - col.g, errB = oldB - col.b;
+          const srcLum = 0.2126 * oldR + 0.7152 * oldG + 0.0722 * oldB;
+          if (srcLum < 20 && col.r + col.g + col.b < 24) continue;
+          const errLum = 0.2126 * errR + 0.7152 * errG + 0.0722 * errB;
           const addErr = (dx, dy, f) => {
             let nx = x + dx, ny = y + dy;
             if (nx >= 0 && nx < dw && ny < dh) {
               let nIdx = (ny * dw + nx) * 4;
-              d[nIdx] += errR * f; d[nIdx + 1] += errG * f; d[nIdx + 2] += errB * f;
+              const nLum = 0.2126 * d[nIdx] + 0.7152 * d[nIdx + 1] + 0.0722 * d[nIdx + 2];
+              const rf = f * floydErrorScaleToNeighbor(srcLum, nLum, errLum);
+              d[nIdx] += errR * rf; d[nIdx + 1] += errG * rf; d[nIdx + 2] += errB * rf;
             }
           };
           addErr(1, 0, 7 / 16); addErr(-1, 1, 3 / 16); addErr(0, 1, 5 / 16); addErr(1, 1, 1 / 16);

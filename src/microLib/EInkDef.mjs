@@ -128,10 +128,10 @@ export default class EInkDef {
   contrastAdjust = 1.0;
 	// ...contrast adjustment
 	// 1.0: no change
-	blackPointAdjust = 10.0;
-	// ...black point adjustment
-	whitePointAdjust = 10.0;
-	// ...white point adjustment
+	blackPointAdjust = 1.0;
+	// ...black point: 1.0 = no change. Values around 10 were a range bug (formula uses a 1.0 scale).
+	whitePointAdjust = 1.0;
+	// ...white point: 1.0 = no change. Same 1.0 scale as contrast.
   ditherType = "floyd";
 
   

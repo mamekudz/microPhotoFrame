@@ -2,6 +2,20 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 12,
+		"date": "2026-11-01 14:30",
+		"beta": false,
+		"info": [
+			"Auto-optimize looks (contrast, colorful, vivid, soft) are percent offsets of the auto values; catalogs may set optimize.",
+			"Ready-to-go catalogs use {name}.json. Colorful Animals ships local images in imgs/; drafts and orgimgs stay private.",
+			"AutoShow uses the catalog name and no longer appends .AutoShow.",
+			"NeoFrame continues after the first image: the panel is reset and powered off instead of left hibernating.",
+			"Rest hours are optional. Node and PHP return GMT rest stamps for the frame timezone, including DST."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 11,
 		"date": "2026-10-28 19:40",
 		"beta": false,

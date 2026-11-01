@@ -59,19 +59,26 @@ shows/*
 !shows/.gitkeep
 !shows/shows.json
 
-# Ready-to-go shows: only include JSON, README and exported .zip/.show files
+# Ready-to-go shows: catalogs + imgs; never drafts or original dumps
 readyToGoShows/**/*_orgimgs/
+readyToGoShows/**/orgimgs/
 readyToGoShows/**/*.jpg
 readyToGoShows/**/*.jpeg
 readyToGoShows/**/*.png
 readyToGoShows/**/*.gif
 readyToGoShows/**/*.webp
 
-# Keep structure files
+# Keep catalogs, docs, packages, and published imgs
 !readyToGoShows/**/*.json
 !readyToGoShows/**/*.md
 !readyToGoShows/**/*.zip
 !readyToGoShows/**/*.show
+!readyToGoShows/**/imgs/**
+
+# Re-exclude drafts and original dumps after the keep rules
+readyToGoShows/drafts/
+readyToGoShows/**/orgimgs/
+readyToGoShows/**/*_orgimgs/
 
 node_modules
 ClassicalPaintings

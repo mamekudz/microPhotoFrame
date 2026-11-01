@@ -95,27 +95,35 @@ test('show must be created inside a channel and cannot change display', () => {
 	assert.equal(show.displayId, '9');
 	assert.equal(show.restStart, 22);
 	assert.equal(show.restEnd, 6);
+	assert.equal(show.restEnabled, false);
 });
 
-test('rest window 22-6 wraps overnight and same hour disables rest', () => {
-	const local = (y, m, d, h) => new Date(y, m, d, h, 0, 0, 0).getTime();
-	const evening = local(2026, 5, 15, 23);
-	const night = local(2026, 5, 16, 3);
-	const morning = local(2026, 5, 16, 6);
-	const day = local(2026, 5, 16, 10);
-	const eveOff = ch.restWindowUnix(22, 6, evening);
+test('rest window 22-6 wraps overnight in the frame timezone, GMT stamps', () => {
+	const utc = (iso) => Date.parse(iso);
+	const tz = 'Europe/Berlin';
+	const evening = utc('2026-06-15T21:00:00Z'); // 23:00 CEST
+	const night = utc('2026-06-16T01:00:00Z'); // 03:00 CEST
+	const morning = utc('2026-06-16T04:00:00Z'); // 06:00 CEST
+	const day = utc('2026-06-16T08:00:00Z'); // 10:00 CEST
+	const eveOff = ch.restWindowUnix(22, 6, evening, tz, true);
 	assert.equal(eveOff.restActive, true);
 	assert.ok(eveOff.restSleepUntil > eveOff.nextRestStart);
-	const nightWin = ch.restWindowUnix(22, 6, night);
-	assert.equal(nightWin.restActive, true);
-	const morningWin = ch.restWindowUnix(22, 6, morning);
-	assert.equal(morningWin.restActive, false);
-	const dayWin = ch.restWindowUnix(22, 6, day);
-	assert.equal(dayWin.restActive, false);
-	assert.equal(ch.restWindowUnix(8, 8, day).restActive, false);
-	assert.equal(ch.restWindowUnix(8, 8, day).nextRestStart, 0);
-	const afternoon = ch.restWindowUnix(13, 17, local(2026, 5, 16, 14));
-	assert.equal(afternoon.restActive, true);
+	assert.equal(eveOff.nextRestStart, utc('2026-06-15T20:00:00Z') / 1000);
+	assert.equal(eveOff.restSleepUntil, utc('2026-06-16T04:00:00Z') / 1000);
+	assert.equal(ch.restWindowUnix(22, 6, night, tz, true).restActive, true);
+	assert.equal(ch.restWindowUnix(22, 6, morning, tz, true).restActive, false);
+	assert.equal(ch.restWindowUnix(22, 6, day, tz, true).restActive, false);
+	assert.equal(ch.restWindowUnix(8, 8, day, tz, true).restActive, false);
+	assert.equal(ch.restWindowUnix(22, 6, evening, tz, false).restActive, false);
+	assert.equal(ch.restWindowUnix(13, 17, utc('2026-06-16T12:00:00Z'), tz, true).restActive, true);
+});
+
+test('rest window uses DST (Berlin spring-forward night is shorter)', () => {
+	const utc = (iso) => Date.parse(iso) / 1000;
+	const win = ch.restWindowUnix(22, 6, Date.parse('2026-03-28T22:30:00Z'), 'Europe/Berlin', true);
+	assert.equal(win.nextRestStart, utc('2026-03-28T21:00:00Z'));
+	assert.equal(win.restSleepUntil, utc('2026-03-29T04:00:00Z'));
+	assert.equal(win.restSleepUntil - win.nextRestStart, 7 * 3600);
 });
 
 test('same show name in two channels is found via the channel hint', () => {

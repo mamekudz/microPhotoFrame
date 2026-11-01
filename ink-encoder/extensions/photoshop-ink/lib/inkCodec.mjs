@@ -436,11 +436,18 @@ function hls2rgb(h, l, s) {
 }
 
 function findNearestColor(r, g, b, palette) {
+  const srcC = Math.max(r, g, b) - Math.min(r, g, b);
   let bestDist = Infinity;
   let bestIdx = 0;
   for (let i = 0; i < palette.length; i++) {
     const col = palette[i];
-    const dist = (r - col.r) ** 2 + (g - col.g) ** 2 + (b - col.b) ** 2;
+    let dist = (r - col.r) ** 2 + (g - col.g) ** 2 + (b - col.b) ** 2;
+    const colC = Math.max(col.r, col.g, col.b) - Math.min(col.r, col.g, col.b);
+    if (colC < 28) {
+      const u = Math.max(0, Math.min(1, (srcC - 36) / 36));
+      const t = u * u * (3 - 2 * u);
+      if (t > 0) dist += (srcC - 36) * (srcC - 36) * 2.2 * t;
+    }
     if (dist < bestDist) {
       bestDist = dist;
       bestIdx = i;
@@ -465,14 +472,19 @@ function applyFloydSteinbergDither(imgData, palette, w, h) {
       const errR = oldR - col.r;
       const errG = oldG - col.g;
       const errB = oldB - col.b;
+      const srcLum = 0.2126 * oldR + 0.7152 * oldG + 0.0722 * oldB;
+      if (srcLum < 20 && col.r + col.g + col.b < 24) continue;
+      const errLum = 0.2126 * errR + 0.7152 * errG + 0.0722 * errB;
       const addErr = (dx, dy, f) => {
         const nx = x + dx;
         const ny = y + dy;
         if (nx >= 0 && nx < w && ny < h) {
           const nIdx = (ny * w + nx) * 4;
-          data[nIdx] = Math.max(0, Math.min(255, data[nIdx] + errR * f));
-          data[nIdx + 1] = Math.max(0, Math.min(255, data[nIdx + 1] + errG * f));
-          data[nIdx + 2] = Math.max(0, Math.min(255, data[nIdx + 2] + errB * f));
+          const nLum = 0.2126 * data[nIdx] + 0.7152 * data[nIdx + 1] + 0.0722 * data[nIdx + 2];
+          const rf = (errLum > 0 && nLum < 48 && srcLum - nLum > 70) ? f * 0.12 : f;
+          data[nIdx] = Math.max(0, Math.min(255, data[nIdx] + errR * rf));
+          data[nIdx + 1] = Math.max(0, Math.min(255, data[nIdx + 1] + errG * rf));
+          data[nIdx + 2] = Math.max(0, Math.min(255, data[nIdx + 2] + errB * rf));
         }
       };
       addErr(1, 0, 7 / 16);
@@ -619,28 +631,99 @@ export function encodeInkFromRGBA(rgba, w, h, options = {}) {
     colorAdjust = {}
   } = options;
 
+  const applyEinkContrast = (lig, contrastVal) => {
+    const c = Number(contrastVal);
+    if (!Number.isFinite(c) || c === 1) return lig;
+    const pivot = 0.40;
+    const u = Math.max(0, Math.min(1, (lig - 0.28) / 0.46));
+    const hiMix = u * u * (3 - 2 * u);
+    const gain = c * (1 - hiMix) + (1 + (c - 1) * 0.70) * hiMix;
+    let out = pivot + (lig - pivot) * gain;
+    if (out > lig && lig > 0.68) {
+      const t = Math.max(0, Math.min(1, (lig - 0.68) / 0.24));
+      const fade = t * t * (3 - 2 * t);
+      out = lig + (out - lig) * (1 - fade * 0.65);
+    }
+    return out;
+  };
+
+  const applyEinkBlackWhite = (y, blackPoint, whitePoint) => {
+    const shadow = y / blackPoint;
+    const highlight = 1 - (1 - y) / whitePoint;
+    const u = Math.max(0, Math.min(1, (y - 0.22) / 0.56));
+    const w = u * u * (3 - 2 * u);
+    return shadow * (1 - w) + highlight * w;
+  };
+
+  const suppressBrightEdgeHalos = (buf, bw, bh) => {
+    if (!buf || bw < 3 || bh < 3) return;
+    const n = bw * bh;
+    const lum = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = i * 4;
+      lum[i] = (0.2126 * buf[o] + 0.7152 * buf[o + 1] + 0.0722 * buf[o + 2]) / 255;
+    }
+    for (let y = 1; y < bh - 1; y++) {
+      for (let x = 1; x < bw - 1; x++) {
+        const i = y * bw + x;
+        const L = lum[i];
+        let minN = 1, darkN = 0, brightN = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const Ln = lum[i + dy * bw + dx];
+            if (Ln < minN) minN = Ln;
+            if (Ln < 0.30) darkN++;
+            if (Ln > 0.72) brightN++;
+          }
+        }
+        if (darkN < 2 || brightN > 2 || minN >= 0.32 || L <= minN + 0.14 || L >= 0.90) continue;
+        const pull = Math.min(0.72, 0.30 + (L - minN) * 0.55);
+        const target = minN + (L - minN) * (1 - pull);
+        if (target >= L) continue;
+        const scale = L > 1e-6 ? target / L : 1;
+        const o = i * 4;
+        buf[o] *= scale;
+        buf[o + 1] *= scale;
+        buf[o + 2] *= scale;
+      }
+    }
+  };
+
   const { saturation = 1, contrast = 1, blackPoint = 1, whitePoint = 1 } = colorAdjust;
 
   if (rgba.length < w * h * 4) throw new Error("encodeInkFromRGBA: RGBA-Puffer zu klein");
 
+  const luma01 = (r, g, b) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   const data = new Uint8ClampedArray(rgba);
   for (let i = 0; i < data.length; i += 4) {
-    let r = data[i];
-    let g = data[i + 1];
-    let b = data[i + 2];
-    let { h: hue, l: lig, s: sat } = rgb2hls(r, g, b);
-    if (saturation === 0) sat = 0;
-    else sat = Math.min(1, sat * saturation);
-    if (lig < 0.5) lig = lig / blackPoint;
-    else lig = 1 - (1 - lig) / whitePoint;
-    if (contrast !== 1) lig = (lig - 0.5) * contrast + 0.5;
-    lig = Math.max(0, Math.min(1, lig));
-    const [nr, ng, nb] = hls2rgb(hue, lig, sat);
-    data[i] = nr;
-    data[i + 1] = ng;
-    data[i + 2] = nb;
+    let r = data[i], g = data[i + 1], b = data[i + 2];
+    let y = luma01(r, g, b);
+    const gy = y * 255;
+    if (saturation === 0) r = g = b = gy;
+    else if (saturation !== 1) {
+      r = gy + (r - gy) * saturation;
+      g = gy + (g - gy) * saturation;
+      b = gy + (b - gy) * saturation;
+    }
+    y = luma01(r, g, b);
+    let y2 = applyEinkBlackWhite(y, blackPoint, whitePoint);
+    y2 = applyEinkContrast(y2, contrast);
+    y2 = Math.max(0, Math.min(1, y2));
+    if (y2 < 0.07 && (Math.max(r, g, b) - Math.min(r, g, b)) < 16) y2 = 0;
+    if (y <= 1e-6) {
+      data[i] = data[i + 1] = data[i + 2] = y2 * 255;
+    } else {
+      let scale = y2 / y;
+      const maxC = Math.max(r, g, b) * scale;
+      if (maxC > 255) scale *= 255 / maxC;
+      data[i] = Math.max(0, Math.min(255, r * scale));
+      data[i + 1] = Math.max(0, Math.min(255, g * scale));
+      data[i + 2] = Math.max(0, Math.min(255, b * scale));
+    }
   }
 
+  suppressBrightEdgeHalos(data, w, h);
   const imgData = { data, width: w, height: h };
   const palette = colors.map((c) => hex2rgb(c));
 

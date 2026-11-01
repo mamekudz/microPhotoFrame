@@ -959,18 +959,32 @@ public partial class microPhotoFrame : System.Web.UI.Page {
     return abs;
   }
 
+  private static string FindReadyCatalogFile(string dir, string name) {
+    string[] preferred = { name + ".json", name + "_orgimgs.json" };
+    foreach (string f in preferred) {
+      if (File.Exists(Path.Combine(dir, f))) return f;
+    }
+    if (!Directory.Exists(dir)) return null;
+    foreach (string p in Directory.GetFiles(dir, "*.json")) {
+      return Path.GetFileName(p);
+    }
+    return null;
+  }
+
   public void ListReadyShows(dynamic _r) {
     JArray catalogs = new JArray();
     string root = PathCorrection("./readyToGoShows");
     if (Directory.Exists(root)) {
       foreach (string dir in Directory.GetDirectories(root)) {
         string name = Path.GetFileName(dir);
-        string jsonPath = Path.Combine(dir, name + "_orgimgs.json");
-        if (!File.Exists(jsonPath)) continue;
+        if (name.Equals("drafts", StringComparison.OrdinalIgnoreCase)) continue;
+        string jsonName = FindReadyCatalogFile(dir, name);
+        if (string.IsNullOrEmpty(jsonName)) continue;
+        string jsonPath = Path.Combine(dir, jsonName);
         string title = name;
         int count = 0;
         try {
-          JObject cat = JObject.Parse(File.ReadAllText(jsonPath));
+          JObject cat = JObject.Parse(File.ReadAllText(jsonPath).TrimStart('\uFEFF'));
           if (cat["name"] != null) title = (string)cat["name"];
           JArray imgs = cat["images"] as JArray;
           if (imgs != null) count = imgs.Count;
@@ -979,7 +993,7 @@ public partial class microPhotoFrame : System.Web.UI.Page {
         row["name"] = name;
         row["title"] = title;
         row["count"] = count;
-        row["path"] = "readyToGoShows/" + name + "/" + name + "_orgimgs.json";
+        row["path"] = "readyToGoShows/" + name + "/" + jsonName;
         catalogs.Add(row);
       }
     }

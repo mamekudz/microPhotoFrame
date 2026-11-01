@@ -1,4 +1,4 @@
-import i18x from "./microLib/i18x.mjs";
+import i18x from "./microLib/i18x.mjs?v=lid1";
 
 export const APP_LIDS = {
 	"en-US": "English",

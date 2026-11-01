@@ -1,80 +1,14 @@
-﻿# Ready-to-Go Shows für µPhotoFrame
+# Ready-to-go catalogs
 
-Dieses Verzeichnis enthält vorgefertigte Bildergalerien zum direkten Import.
+Published folders (no drafts/, no orgimgs/):
 
-## Verfügbare Shows
+| Folder | Images | Look |
+| --- | --- | --- |
+| ColorfulAnimals | 26 local files in imgs/ | colorful |
+| ClassicArt | Wikimedia URLs | vivid |
+| Animals | Wikimedia URLs | colorful |
+| Flowers | Wikimedia URLs | colorful |
 
-### 1. Colorful Animals
-**Für:** reTerminal E1002 (Full Color)
-**Bilder:** 10 farbenfrohe Tier-Fotos
-**Lizenz:** Unsplash License
+Each catalog is {Folder}/{Folder}.json. The old _orgimgs.json name is no longer required.
 
-Chamäleon, Ara, Morphofalter, Kampffisch, Pfau, Tukan, Pfeilgiftfrosch, Eisvogel, Mandrill, Korallenfische.
-
-**Status:** Bildquellen fertig, ZIP-Export: ColorFullAnimals_I.show (Display I)
-
-### 2. Classic Art
-**Für:** reTerminal E1002 (Full Color), auch andere Farb-Panels
-**Bilder:** 12 gemeinfreie Gemälde
-**Lizenz:** Public Domain (Wikimedia Commons)
-
-Vermeer (Perlenohrring, Milchmädchen), van Gogh (Sternennacht, Sonnenblumen), Hokusai (Große Welle), Leonardo (Mona Lisa), Botticelli (Geburt der Venus), Monet (Impression, Sonnenaufgang), Rembrandt (Nachtwache), Turner (Fighting Temeraire), Seurat (Grande Jatte), Klimt (Der Kuss).
-
-```bash
-node tools/downloadShowImages.mjs ClassicArt
-```
-
-**Status:** Bildquellen fertig. Originale nach `ClassicArt/ClassicArt_orgimgs/` laden, dann in der Webapp Add Photos.
-
-## Verwendung
-
-### Option 1: Über Webapp importieren
-1. Webapp öffnen
-2. Import Show
-3. ZIP- oder `.show`-Datei hochladen
-
-### Option 2: Originale herunterladen und verarbeiten
-1. `node tools/downloadShowImages.mjs <ShowName>`
-2. Show in der Webapp anlegen
-3. Add Photos auf den Ordner `*_orgimgs`
-
-## Bildquellen
-
-**Unsplash** (Colorful Animals): frei für privat und kommerziell.
-
-**Wikimedia Commons** (Classic Art): gemeinfreie Werke, Künstler tot seit mehr als 70 Jahren.
-
-## JSON-Format
-
-```json
-{
-  "name": "Show Name",
-  "description": "Beschreibung",
-  "displayId": "I",
-  "timer": 15,
-  "mode": "sequential",
-  "images": [
-    {
-      "name": "bild_name",
-      "url": "https://...",
-      "description": "...",
-      "source": "Wikimedia Commons"
-    }
-  ],
-  "credits": {
-    "source": "Quelle",
-    "license": "Lizenz",
-    "url": "https://..."
-  }
-}
-```
-
-Die Webapp verarbeitet die Fotos für das gewählte E-Ink-Display.
-
-Exportierte Pakete heißen Name_DisplayID.show, z. B. ColorFullAnimals_I.show. Nur fuer dieses Display importieren.
-
-## Dateinamen und AutoShow
-
-Exportierte Pakete heißen `Name_Kuerzel.show`, z. B. `ColorFullAnimals_SpectraBWR-2.13.show` oder `ClassicArt_Spectra6-7.3.show`. Offizielle Display-IDs bleiben 9 / I / f.
-
-In der Webapp: **AutoShow from catalog** legt `ColorfulAnimals.AutoShow` auf dem gewaehlten Kanal an. Bild-URLs duerfen https oder lokal `readyToGoShows/...` sein.
+AutoShow uses the catalog ame on the selected channel and processes the images for that display.

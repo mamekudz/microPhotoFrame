@@ -707,8 +707,10 @@ export default class RESTX extends XMLHttpRequest {
           _ret.error.msg = 'Unknown action.<context="server error text"/>'.I18xTrans();
           break;
         default:
-          _ret.error.title = 'Unknown Server Error<context="server error title"/>'.I18xTrans();
-          _ret.error.msg = 'Unknown server error, please try again later.<context="server error text"/>'.I18xTrans();
+          if (!_ret.error.msg) {
+            _ret.error.title = 'Unknown Server Error<context="server error title"/>'.I18xTrans();
+            _ret.error.msg = 'Unknown server error, please try again later.<context="server error text"/>'.I18xTrans();
+          }
       }
     }
 

@@ -6,7 +6,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="./styles/app.css?v=cursor1">
+    <link rel="stylesheet" href="./styles/app.css?v=cursor2">
 
     <!-- TensorFlow.js + COCO-SSD lokal; Gewichte: gulp INIT → src/libs/models/ -->
     <script src="/src/libs/tf.min.js"></script>
@@ -82,59 +82,69 @@
         </div>
 
         <div class="controls">
-            <button class="btn-action save-btn drop-target" id="photoSettingsFileBtn" onclick="document.getElementById('inputimg').click(); return false;">📄 Datei auswählen oder hierher ziehen</button>
+            <button class="btn-action save-btn drop-target" id="photoSettingsFileBtn" onclick="document.getElementById('inputimg').click(); return false;">📄 <span data-i18n='Choose a file or drop it here<context="ui"/>'>Choose a file or drop it here</span></button>
             <input type="file" id="inputimg" accept="image/*" onchange="window.InputImageChange(event)" class="file-input-hidden" />
             <div class="control-row">
                 <label data-i18n='Display:<context="ui"/>'>Display:</label>
                 <span id="photoSettingsDisplayLabel" style="flex:1; font-weight:600;">–</span>
             </div>
             <input type="hidden" id="displayID" value="EINK_SPECTRA6_730_sq_800x480" />
-            <div class="control-row"><label>Background:</label><input type="color" id="bgrdColor" value="#ffffff" oninput="window.UpdatePreview()" /></div>
+            <div class="control-row"><label data-i18n='Background:<context="ui"/>'>Background:</label><input type="color" id="bgrdColor" value="#ffffff" oninput="window.UpdatePreview()" /></div>
             <hr>
-            <div class="control-row"><label>Saturation:</label><input type="range" id="saturation" min="0" max="5" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-saturation">1.8</span></div>
-            <div class="control-row"><label>Contrast:</label><input type="range" id="contrast" min="0" max="5" step="0.1" value="1.4" oninput="window.UpdatePreview()" /><span id="val-contrast">1.4</span></div>
-            <div class="control-row"><label>Black Pt:</label><input type="range" id="blackpoint" min="0" max="5" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-blackpoint">1.8</span></div>
-            <div class="control-row"><label>White Pt:</label><input type="range" id="whitepoint" min="0" max="5" step="0.1" value="1.2" oninput="window.UpdatePreview()" /><span id="val-whitepoint">1.2</span></div>
+            <div class="control-row"><label data-i18n='Saturation:<context="ui"/>'>Saturation:</label><input type="range" id="saturation" min="0" max="3" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-saturation">1.8</span></div>
+            <div class="control-row"><label data-i18n='Contrast:<context="ui"/>'>Contrast:</label><input type="range" id="contrast" min="0.4" max="2.5" step="0.1" value="1.4" oninput="window.UpdatePreview()" /><span id="val-contrast">1.4</span></div>
+            <div class="control-row"><label data-i18n='Black Pt:<context="ui"/>'>Black Pt:</label><input type="range" id="blackpoint" min="0.4" max="2.5" step="0.1" value="1.0" oninput="window.UpdatePreview()" /><span id="val-blackpoint">1.0</span></div>
+            <div class="control-row"><label data-i18n='White Pt:<context="ui"/>'>White Pt:</label><input type="range" id="whitepoint" min="0.4" max="2.5" step="0.1" value="1.1" oninput="window.UpdatePreview()" /><span id="val-whitepoint">1.1</span></div>
             <hr>
-            <div class="control-row"><label>Zoom:</label><input type="range" id="zoom" min="0.1" max="5" step="0.1" value="1.0" oninput="window.UpdatePreview()" /><span id="val-zoom">1.0</span></div>
-            <div class="control-row"><label>Spot X:</label><input type="range" id="cutSpotX" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotX">0.5</span></div>
-            <div class="control-row"><label>Spot Y:</label><input type="range" id="cutSpotY" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotY">0.5</span></div>
+            <div class="control-row"><label data-i18n='Zoom:<context="ui"/>'>Zoom:</label><input type="range" id="zoom" min="0.1" max="5" step="0.1" value="1.0" oninput="window.UpdatePreview()" /><span id="val-zoom">1.0</span></div>
+            <div class="control-row"><label data-i18n='Spot X:<context="ui"/>'>Spot X:</label><input type="range" id="cutSpotX" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotX">0.5</span></div>
+            <div class="control-row"><label data-i18n='Spot Y:<context="ui"/>'>Spot Y:</label><input type="range" id="cutSpotY" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotY">0.5</span></div>
 
-            <button id="AutoSpotBtn" class="btn-action ai-btn" onclick="window.AutoDetectCenter()">AI Auto-Center</button>
-            <button id="AutoOptimizeBtn" class="btn-action ai-btn" onclick="window.AutoOptimizeCurrentImage()">✨ Auto Optimize</button>
-            <button class="btn-action reset-btn" onclick="window.ResetToDefault()">🔄 Reset to Default</button>
+            <button id="AutoSpotBtn" class="btn-action ai-btn" onclick="window.AutoDetectCenter()"><span data-i18n='AI Auto-Center<context="ui"/>'>AI Auto-Center</span></button>
+            <button id="AutoOptimizeBtn" class="btn-action ai-btn" onclick="window.AutoOptimizeCurrentImage()">✨ <span data-i18n='Auto Optimize<context="ui"/>'>Auto Optimize</span></button>
+            <button class="btn-action reset-btn" onclick="window.ResetToDefault()">🔄 <span data-i18n='Reset to Default<context="ui"/>'>Reset to Default</span></button>
             <div class="control-row" style="align-items:center; margin-top:8px;">
-                <label for="autoOptimize">Auto-optimize:</label>
+                <label for="autoOptimize" data-i18n='Auto-optimize:<context="ui"/>'>Auto-optimize:</label>
                 <input type="checkbox" id="autoOptimize" checked onchange="window.SyncAutoOptimize('autoOptimize')" />
             </div>
-            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;">Per image, locally: histogram plus AI subject, tuned for the selected display. No cloud.</p>
+            <div class="control-row" style="align-items:center;">
+                <label for="optimizeStyle" data-i18n='Look:<context="ui"/>'>Look:</label>
+                <select id="optimizeStyle" onchange="window.SyncOptimizeStyle('optimizeStyle')" style="flex:1">
+                    <option value="balanced" data-i18n='Balanced<context="ui"/>'>Balanced</option>
+                    <option value="contrast" data-i18n='More contrast<context="ui"/>'>More contrast</option>
+                    <option value="colorful" data-i18n='More colorful<context="ui"/>'>More colorful</option>
+                    <option value="vivid" data-i18n='Vivid<context="ui"/>'>Vivid</option>
+                    <option value="soft" data-i18n='Softer<context="ui"/>'>Softer</option>
+                </select>
+            </div>
+            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;" data-i18n='Per image, locally: histogram plus AI subject, tuned for the selected display. No cloud.<context="ui"/>'>Per image, locally: histogram plus AI subject, tuned for the selected display. No cloud.</p>
 
             <hr>
-            <div class="control-row"><label>Dithering:</label>
+            <div class="control-row"><label data-i18n='Dithering:<context="ui"/>'>Dithering:</label>
                 <select id="dither" onchange="window.UpdatePreview()" style="flex:1">
                     <option value="floyd">Floyd-Steinberg</option>
                     <option value="bayer">Bayer Matrix</option>
-                    <option value="none">None</option>
+                    <option value="none" data-i18n='None<context="ui"/>'>None</option>
                 </select>
             </div>
-            <div class="control-row"><label>Orientation:</label>
+            <div class="control-row"><label data-i18n='Orientation:<context="ui"/>'>Orientation:</label>
                 <select id="orientation" onchange="window.UpdatePreview()" style="flex:1">
-                    <option value="0">Landscape</option>
-                    <option value="-1">Portrait</option>
+                    <option value="0" data-i18n='Landscape<context="ui"/>'>Landscape</option>
+                    <option value="-1" data-i18n='Portrait<context="ui"/>'>Portrait</option>
                 </select>
             </div>
-            <div class="control-row"><label>Save versions:</label>
+            <div class="control-row"><label data-i18n='Save versions:<context="ui"/>'>Save versions:</label>
                 <select id="saveAspect" onchange="window.SyncSaveAspect('saveAspect')" style="flex:1">
-                    <option value="both">Landscape and portrait</option>
-                    <option value="landscape">Landscape only</option>
-                    <option value="portrait">Portrait only</option>
+                    <option value="both" data-i18n='Landscape and portrait<context="ui"/>'>Landscape and portrait</option>
+                    <option value="landscape" data-i18n='Landscape only<context="ui"/>'>Landscape only</option>
+                    <option value="portrait" data-i18n='Portrait only<context="ui"/>'>Portrait only</option>
                 </select>
             </div>
-            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;">When adding photos, only the chosen aspect is stored. The frame uses that one file in every orientation.</p>
+            <p style="font-size:0.8rem;color:#666;margin:4px 0 0 0;" data-i18n='When adding photos, only the chosen aspect is stored. The frame uses that one file in every orientation.<context="ui"/>'>When adding photos, only the chosen aspect is stored. The frame uses that one file in every orientation.</p>
         </div>
 
         <div class="preview-container">
-            <div id="preview-placeholder" style="display: none; color: #999; padding: 40px; text-align: center; font-size: 1.2rem;">Preview</div>
+            <div id="preview-placeholder" style="display: none; color: #999; padding: 40px; text-align: center; font-size: 1.2rem;" data-i18n='Preview<context="ui"/>'>Preview</div>
             <img id="testimg" alt="Preview" onload="updateFocusMarker()" style="display: none;" />
             <div id="focus-marker" class="focus-marker"></div>
         </div>
@@ -147,7 +157,7 @@
             </div>
             <textarea id="encoded_string" placeholder="Paste data:image/ink;base64,... string here or it will be generated from image..." style="width:100%; min-height: 80px;"></textarea>
             <div style="font-size: 10px; margin-bottom: 10px;">Binary Bytes: <span id="encoded_length">0</span>&nbsp;|&nbsp;Base64 Chars: <span id="encoded_64_length">0</span></div>
-            <button class="btn-action save-btn" onclick="window.SaveCurImage()">💾 SAVE TO SHOW</button>
+            <button class="btn-action save-btn" onclick="window.SaveCurImage()">💾 <span data-i18n='SAVE TO SHOW<context="ui"/>'>SAVE TO SHOW</span></button>
             <div id="saveImageMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
     </div>
@@ -226,15 +236,19 @@
                 <label data-i18n='Timer (minutes):<context="ui"/>'>Timer (minutes):</label>
                 <input type="number" id="showTimer" min="1" max="1440" value="1" style="flex:1; padding:8px; font-size:1rem;" />
             </div>
-            <div class="control-row">
-                <label data-i18n='Rest:<context="ui"/>'>Rest:</label>
+            <div class="control-row" style="align-items:center;">
+                <label for="showRestEnabled" data-i18n='Rest:<context="ui"/>'>Rest:</label>
+                <input type="checkbox" id="showRestEnabled" onchange="window.SyncShowRestEnabled()" />
+            </div>
+            <div class="control-row" id="showRestHoursRow">
+                <label data-i18n='Hours:<context="ui"/>'>Hours:</label>
                 <div class="rest-hours">
                     <select id="showRestStart"></select>
                     <span data-i18n='to<context="ui"/>'>to</span>
                     <select id="showRestEnd"></select>
                 </div>
             </div>
-            <p class="settings-hint" data-i18n='Deep sleep between these hours (server clock). Same hour turns rest off. Default 22:00–06:00.<context="ui"/>'>Deep sleep between these hours (server clock). Same hour turns rest off. Default 22:00–06:00.</p>
+            <p class="settings-hint" data-i18n='Optional. Hours are in the frame timezone (set when pairing). The server stores GMT and applies daylight saving.<context="ui"/>'>Optional. Hours are in the frame timezone (set when pairing). The server stores GMT and applies daylight saving.</p>
             <button class="btn-action save-btn" onclick="window.SaveShowSettings()">💾 <span data-i18n='Save Settings<context="ui"/>'>Save Settings</span></button>
             <div id="showSettingsMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
         </div>
@@ -247,30 +261,38 @@
         </div>
 
         <div class="controls">
-            <button class="btn-action ai-btn drop-target" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 Dateien auswählen oder hierher ziehen</button>
+            <button class="btn-action ai-btn drop-target" id="addPhotosFilesBtn" onclick="document.getElementById('addPhotosInput').click(); return false;">📁 <span data-i18n='Choose files or drop them here<context="ui"/>'>Choose files or drop them here</span></button>
             <input type="file" id="addPhotosInput" accept="image/*" multiple class="file-input-hidden" />
-            <div class="control-row"><label>Save versions:</label>
+            <div class="control-row"><label data-i18n='Save versions:<context="ui"/>'>Save versions:</label>
                 <select id="saveAspectAdd" onchange="window.SyncSaveAspect('saveAspectAdd')" style="flex:1">
-                    <option value="both">Landscape and portrait</option>
-                    <option value="landscape">Landscape only</option>
-                    <option value="portrait">Portrait only</option>
+                    <option value="both" data-i18n='Landscape and portrait<context="ui"/>'>Landscape and portrait</option>
+                    <option value="landscape" data-i18n='Landscape only<context="ui"/>'>Landscape only</option>
+                    <option value="portrait" data-i18n='Portrait only<context="ui"/>'>Portrait only</option>
                 </select>
             </div>
             <div class="control-row" style="align-items:center;">
-                <label for="autoOptimizeAdd">Auto-optimize each image:</label>
+                <label for="autoOptimizeAdd" data-i18n='Auto-optimize each image:<context="ui"/>'>Auto-optimize each image:</label>
                 <input type="checkbox" id="autoOptimizeAdd" checked onchange="window.SyncAutoOptimize('autoOptimizeAdd')" />
             </div>
-            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.
-            </p>
-            <button id="btnProcessAndAddPhotos" class="btn-action save-btn" onclick="window.ProcessAndAddPhotos()">📸 Process and Add Photos</button>
+            <div class="control-row" style="align-items:center;">
+                <label for="optimizeStyleAdd" data-i18n='Look:<context="ui"/>'>Look:</label>
+                <select id="optimizeStyleAdd" onchange="window.SyncOptimizeStyle('optimizeStyleAdd')" style="flex:1">
+                    <option value="balanced" data-i18n='Balanced<context="ui"/>'>Balanced</option>
+                    <option value="contrast" data-i18n='More contrast<context="ui"/>'>More contrast</option>
+                    <option value="colorful" data-i18n='More colorful<context="ui"/>'>More colorful</option>
+                    <option value="vivid" data-i18n='Vivid<context="ui"/>'>Vivid</option>
+                    <option value="soft" data-i18n='Softer<context="ui"/>'>Softer</option>
+                </select>
+            </div>
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;" data-i18n='Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.<context="ui"/>'>Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.</p>
+            <button id="btnProcessAndAddPhotos" class="btn-action save-btn" onclick="window.ProcessAndAddPhotos()">📸 <span data-i18n='Process and Add Photos<context="ui"/>'>Process and Add Photos</span></button>
             <div id="addPhotosMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
             <div id="addPhotosProgress" style="margin-top:15px; display:none;">
                 <div style="background:#f0f0f0; border-radius:4px; height:20px; position:relative; overflow:hidden;">
                     <div id="addPhotosProgressBar" style="background:#3498db; height:100%; width:0%; transition:width 0.3s;"></div>
                 </div>
                 <div id="addPhotosProgressText" style="margin-top:5px; font-size:0.9rem; color:#666;"></div>
-                <button id="addPhotosStopBtn" class="btn-action" onclick="window.StopAddPhotos()" style="margin-top:10px; background:#e74c3c; color:white; width:100%; display:none;">⏹ Stop Processing</button>
+                <button id="addPhotosStopBtn" class="btn-action" onclick="window.StopAddPhotos()" style="margin-top:10px; background:#e74c3c; color:white; width:100%; display:none;">⏹ <span data-i18n='Stop processing<context="ui"/>'>Stop processing</span></button>
             </div>
         </div>
     </div>
@@ -286,7 +308,7 @@
             <div id="managePhotosGrid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:15px; margin-top:20px;">
                 <!-- Thumbnails will be inserted here -->
             </div>
-            <p id="managePhotosEmpty" style="text-align:center; color:#999; margin-top:20px; display:none;">No photos in this show.</p>
+            <p id="managePhotosEmpty" style="text-align:center; color:#999; margin-top:20px; display:none;" data-i18n='No photos in this show.<context="ui"/>'>No photos in this show.</p>
         </div>
     </div>
 
@@ -325,21 +347,30 @@
     <div id="AutoShow" class="page">
         <div class="page-header">
             <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
-            <h2 class="page-title">AutoShow from catalog</h2>
+            <h2 class="page-title" data-i18n='AutoShow from catalog<context="ui"/>'>AutoShow from catalog</h2>
         </div>
         <div class="controls">
-            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;">
-                Creates <code>Name.AutoShow</code> on the selected channel and processes the catalog images for that display. URLs may be https or local paths under <code>readyToGoShows/</code>.
-            </p>
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;" data-i18n-html='Creates a show from the catalog name on the selected channel and processes the images for that display. URLs may be https or local paths under <code>readyToGoShows/</code>.<context="ui"/>'>Creates a show from the catalog name on the selected channel and processes the images for that display. URLs may be https or local paths under <code>readyToGoShows/</code>.</p>
             <div class="control-row">
-                <label for="autoShowCatalog">Ready catalog</label>
+                <label for="autoShowCatalog" data-i18n='Ready catalog<context="ui"/>'>Ready catalog</label>
                 <select id="autoShowCatalog">
                     <option value="">— choose a catalog —</option>
                 </select>
             </div>
-            <button class="btn-action save-btn drop-target" id="autoShowFileBtn" onclick="document.getElementById('autoShowInput').click()">📄 Or pick a *_orgimgs.json</button>
+            <button class="btn-action save-btn drop-target" id="autoShowFileBtn" onclick="document.getElementById('autoShowInput').click()">📄 <span data-i18n='Or pick a catalog JSON<context="ui"/>'>Or pick a catalog JSON</span></button>
             <input type="file" id="autoShowInput" accept=".json,application/json" class="file-input-hidden" />
-            <button class="btn-action save-btn" onclick="window.CreateAutoShow()">⚙ Create AutoShow</button>
+            <div class="control-row" style="align-items:center;">
+                <label for="optimizeStyleAutoShow" data-i18n='Look:<context="ui"/>'>Look:</label>
+                <select id="optimizeStyleAutoShow" onchange="window.SyncOptimizeStyle('optimizeStyleAutoShow')" style="flex:1">
+                    <option value="balanced" data-i18n='Balanced<context="ui"/>'>Balanced</option>
+                    <option value="contrast" data-i18n='More contrast<context="ui"/>'>More contrast</option>
+                    <option value="colorful" data-i18n='More colorful<context="ui"/>'>More colorful</option>
+                    <option value="vivid" data-i18n='Vivid<context="ui"/>'>Vivid</option>
+                    <option value="soft" data-i18n='Softer<context="ui"/>'>Softer</option>
+                </select>
+            </div>
+            <p style="font-size:0.8rem;color:#666;margin:0 0 12px 0;" data-i18n='Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 }. A choice here overrides that.<context="ui"/>'>Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 }. A choice here overrides that.</p>
+            <button class="btn-action save-btn" onclick="window.CreateAutoShow()">⚙ <span data-i18n='Create AutoShow<context="ui"/>'>Create AutoShow</span></button>
             <div id="autoShowProgress" style="display:none;margin-top:12px;">
                 <div id="autoShowProgressBar" style="height:8px;background:#2ecc71;width:0;"></div>
                 <p id="autoShowProgressText"></p>
@@ -462,6 +493,10 @@
         </div>
     </div>
 
+    <div id="photoLightbox" class="photo-lightbox" hidden>
+        <img id="photoLightboxImg" alt="" />
+    </div>
+
     <div id="PlaceholderPage" class="page">
         <div class="page-header">
             <button class="back-btn" onclick="window.Return2TopMenu()">⬅ <span data-i18n='Back<context="ui"/>'>Back</span></button>
@@ -474,6 +509,6 @@
 
 
     <!-- Application module -->
-    <script type="module" src="./src/app.mjs?v=autoshow1"></script>
+    <script type="module" src="./src/app.mjs?v=tone14"></script>
 
 </html>

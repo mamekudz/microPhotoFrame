@@ -226,6 +226,116 @@ function HEX2RGB(hex) {
   return { r: (tmp >> 16) & 255, g: (tmp >> 8) & 255, b: tmp & 255 };
 }
 
+/** Contrast without lifting dark / mid-dark toward paper white. Keep in sync with src/microLib/einkContrast.mjs */
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function smoothstep(edge0, edge1, x) {
+  if (edge1 <= edge0) return x >= edge1 ? 1 : 0;
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
+function applyEinkContrast(lig, contrast) {
+  const c = Number(contrast);
+  if (!Number.isFinite(c) || c === 1) return lig;
+  const pivot = 0.40;
+  const hiMix = smoothstep(0.28, 0.74, lig);
+  const gain = c * (1 - hiMix) + (1 + (c - 1) * 0.70) * hiMix;
+  let out = pivot + (lig - pivot) * gain;
+  if (out > lig && lig > 0.68) {
+    out = lig + (out - lig) * (1 - smoothstep(0.68, 0.92, lig) * 0.65);
+  }
+  return out;
+}
+
+function applyEinkBlackWhite(y, blackPoint, whitePoint) {
+  const shadow = y / blackPoint;
+  const highlight = 1 - (1 - y) / whitePoint;
+  const w = smoothstep(0.22, 0.78, y);
+  return shadow * (1 - w) + highlight * w;
+}
+
+function luma01(r, g, b) {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+function toneScale(raw, fallback = 1) {
+  let v = Number(raw);
+  if (!Number.isFinite(v) || v <= 0) return fallback;
+  if (v > 5) v /= 10;
+  return Math.max(0.4, Math.min(2.5, v));
+}
+
+function applyEinkToneRgb(r, g, b, opts) {
+  const satAdj = Number.isFinite(opts.saturation) ? Math.max(0, Math.min(3, opts.saturation)) : 1;
+  const blackPoint = toneScale(opts.blackPoint);
+  const whitePoint = toneScale(opts.whitePoint);
+  const contrast = toneScale(opts.contrast);
+  let y = luma01(r, g, b);
+  const gy = y * 255;
+  if (satAdj === 0) {
+    r = g = b = gy;
+  } else if (satAdj !== 1) {
+    r = gy + (r - gy) * satAdj;
+    g = gy + (g - gy) * satAdj;
+    b = gy + (b - gy) * satAdj;
+  }
+  y = luma01(r, g, b);
+  let y2 = applyEinkBlackWhite(y, blackPoint, whitePoint);
+  y2 = applyEinkContrast(y2, contrast);
+  y2 = Math.max(0, Math.min(1, y2));
+  if (y2 < 0.07 && chromaSpan(r, g, b) < 16) y2 = 0;
+  if (y <= 1e-6) {
+    const v = y2 * 255;
+    return [v, v, v];
+  }
+  let scale = y2 / y;
+  const maxC = Math.max(r, g, b) * scale;
+  if (maxC > 255) scale *= 255 / maxC;
+  return [
+    Math.max(0, Math.min(255, r * scale)),
+    Math.max(0, Math.min(255, g * scale)),
+    Math.max(0, Math.min(255, b * scale))
+  ];
+}
+
+function suppressBrightEdgeHalos(data, w, h) {
+  if (!data || w < 3 || h < 3) return;
+  const n = w * h;
+  const lum = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    lum[i] = (0.2126 * data[o] + 0.7152 * data[o + 1] + 0.0722 * data[o + 2]) / 255;
+  }
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const L = lum[i];
+      let minN = 1, darkN = 0, brightN = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const Ln = lum[i + dy * w + dx];
+          if (Ln < minN) minN = Ln;
+          if (Ln < 0.30) darkN++;
+          if (Ln > 0.72) brightN++;
+        }
+      }
+      if (darkN < 2 || brightN > 2 || minN >= 0.32 || L <= minN + 0.14 || L >= 0.90) continue;
+      const pull = Math.min(0.72, 0.30 + (L - minN) * 0.55);
+      const target = minN + (L - minN) * (1 - pull);
+      if (target >= L) continue;
+      const scale = L > 1e-6 ? target / L : 1;
+      const o = i * 4;
+      data[o] *= scale;
+      data[o + 1] *= scale;
+      data[o + 2] *= scale;
+    }
+  }
+}
+
 /**
  * Convert RGB to HLS
  */
@@ -295,12 +405,23 @@ function CreateGeometryMask(w, h, isRound) {
 /**
  * Find nearest color in palette
  */
+function chromaSpan(r, g, b) {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
 function FindNearestColor(r, g, b, palette) {
+  const srcC = chromaSpan(r, g, b);
   let bestDist = Infinity;
   let bestIdx = 0;
   for (let i = 0; i < palette.length; i++) {
     const col = palette[i];
-    const dist = Math.pow(r - col.r, 2) + Math.pow(g - col.g, 2) + Math.pow(b - col.b, 2);
+    let dist = Math.pow(r - col.r, 2) + Math.pow(g - col.g, 2) + Math.pow(b - col.b, 2);
+    const colC = chromaSpan(col.r, col.g, col.b);
+    if (colC < 28) {
+      const u = Math.max(0, Math.min(1, (srcC - 36) / 36));
+      const t = u * u * (3 - 2 * u);
+      if (t > 0) dist += (srcC - 36) * (srcC - 36) * 2.2 * t;
+    }
     if (dist < bestDist) {
       bestDist = dist;
       bestIdx = i;
@@ -454,14 +575,19 @@ function ApplyFloydSteinbergDither(imgData, palette, w, h) {
       const errR = oldR - col.r;
       const errG = oldG - col.g;
       const errB = oldB - col.b;
+      const srcLum = 0.2126 * oldR + 0.7152 * oldG + 0.0722 * oldB;
+      if (srcLum < 20 && col.r + col.g + col.b < 24) continue;
+      const errLum = 0.2126 * errR + 0.7152 * errG + 0.0722 * errB;
       const _AddErr = (dx, dy, f) => {
         const nx = x + dx;
         const ny = y + dy;
         if (nx >= 0 && nx < w && ny < h) {
           const nIdx = (ny * w + nx) * 4;
-          data[nIdx] = Math.max(0, Math.min(255, data[nIdx] + errR * f));
-          data[nIdx + 1] = Math.max(0, Math.min(255, data[nIdx + 1] + errG * f));
-          data[nIdx + 2] = Math.max(0, Math.min(255, data[nIdx + 2] + errB * f));
+          const nLum = 0.2126 * data[nIdx] + 0.7152 * data[nIdx + 1] + 0.0722 * data[nIdx + 2];
+          const rf = (errLum > 0 && nLum < 48 && srcLum - nLum > 70) ? f * 0.12 : f;
+          data[nIdx] = Math.max(0, Math.min(255, data[nIdx] + errR * rf));
+          data[nIdx + 1] = Math.max(0, Math.min(255, data[nIdx + 1] + errG * rf));
+          data[nIdx + 2] = Math.max(0, Math.min(255, data[nIdx + 2] + errB * rf));
         }
       };
       _AddErr(1, 0, 7 / 16);
@@ -604,41 +730,15 @@ export async function EncodeInk(inputPath, options = {}) {
   // Apply color adjustments
   const adjustedData = new Uint8ClampedArray(imgData.data);
   for (let i = 0; i < adjustedData.length; i += 4) {
-    let r = adjustedData[i];
-    let g = adjustedData[i + 1];
-    let b = adjustedData[i + 2];
-
-    // Convert to HLS
-    let { h: hue, l: lig, s: sat } = RGB2HLS(r, g, b);
-
-    // Saturation
-    if (saturation === 0.0) {
-      sat = 0;
-    } else {
-      sat = Math.min(1, sat * saturation);
-    }
-
-    // Blackpoint & Whitepoint
-    if (lig < 0.5) {
-      lig = lig / blackPoint;
-    } else {
-      lig = 1.0 - ((1.0 - lig) / whitePoint);
-    }
-
-    // Contrast
-    if (contrast !== 1.0) {
-      lig = (lig - 0.5) * contrast + 0.5;
-    }
-
-    lig = Math.max(0, Math.min(1, lig));
-
-    // Convert back to RGB
-    const [nr, ng, nb] = HLS2RGB(hue, lig, sat);
+    const [nr, ng, nb] = applyEinkToneRgb(adjustedData[i], adjustedData[i + 1], adjustedData[i + 2], {
+      saturation, contrast, blackPoint, whitePoint
+    });
     adjustedData[i] = nr;
     adjustedData[i + 1] = ng;
     adjustedData[i + 2] = nb;
   }
 
+  suppressBrightEdgeHalos(adjustedData, w, h);
   imgData.data = adjustedData;
 
   // Convert palette to RGB

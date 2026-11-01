@@ -8,6 +8,75 @@ function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
 }
 
+/** Named looks as percent on top of the auto values. JSON: "optimize": "vivid" */
+export const EINK_OPTIMIZE_STYLES = {
+    balanced: { contrast: 0, saturation: 0, blackPoint: 0, whitePoint: 0 },
+    contrast: { contrast: 10, saturation: 0, blackPoint: 4, whitePoint: 0 },
+    colorful: { contrast: 0, saturation: 30, blackPoint: 0, whitePoint: 0 },
+    vivid: { contrast: 10, saturation: 30, blackPoint: 4, whitePoint: 0 },
+    soft: { contrast: -10, saturation: -15, blackPoint: -5, whitePoint: 4 }
+};
+
+const STYLE_ALIASES = {
+    default: 'balanced',
+    punchy: 'contrast',
+    'more-contrast': 'contrast',
+    kontrastreicher: 'contrast',
+    'more-colorful': 'colorful',
+    farbenfroher: 'colorful',
+    colour: 'colorful',
+    softer: 'soft'
+};
+
+export function ResolveOptimizeBias(raw) {
+    if (raw == null || raw === '') {
+        return { id: 'balanced', ...EINK_OPTIMIZE_STYLES.balanced };
+    }
+    if (typeof raw === 'string') {
+        const key = raw.trim().toLowerCase();
+        const id = STYLE_ALIASES[key] || (EINK_OPTIMIZE_STYLES[key] ? key : 'balanced');
+        return { id, ...EINK_OPTIMIZE_STYLES[id] };
+    }
+    if (typeof raw === 'object') {
+        const key = String(raw.style || raw.id || '').trim().toLowerCase();
+        const id = STYLE_ALIASES[key] || (EINK_OPTIMIZE_STYLES[key] ? key : 'custom');
+        const base = EINK_OPTIMIZE_STYLES[id] || EINK_OPTIMIZE_STYLES.balanced;
+        const num = (v, fallback) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : fallback;
+        };
+        return {
+            id,
+            contrast: num(raw.contrast ?? raw.contrastPct, base.contrast),
+            saturation: num(raw.saturation ?? raw.saturationPct, base.saturation),
+            blackPoint: num(raw.blackPoint ?? raw.blackPointPct, base.blackPoint),
+            whitePoint: num(raw.whitePoint ?? raw.whitePointPct, base.whitePoint)
+        };
+    }
+    return { id: 'balanced', ...EINK_OPTIMIZE_STYLES.balanced };
+}
+
+function scaleByPct(value, pct, lo, hi) {
+    const v = Number(value);
+    const p = Number(pct) || 0;
+    if (!Number.isFinite(v)) return v;
+    return round1(clamp(v * (1 + p / 100), lo, hi));
+}
+
+export function ApplyOptimizeBias(settings, raw) {
+    if (!settings) return settings;
+    const b = ResolveOptimizeBias(raw);
+    const sat0 = Number(settings.colorSaturationAdjust);
+    const next = { ...settings };
+    next.contrastAdjust = scaleByPct(settings.contrastAdjust || 1, b.contrast, 0.4, 2.5);
+    if (Number.isFinite(sat0) && sat0 > 0) {
+        next.colorSaturationAdjust = scaleByPct(sat0, b.saturation, 0, 3);
+    }
+    next.blackPointAdjust = scaleByPct(settings.blackPointAdjust || 1, b.blackPoint, 0.4, 2.5);
+    next.whitePointAdjust = scaleByPct(settings.whitePointAdjust || 1, b.whitePoint, 0.4, 2.5);
+    return next;
+}
+
 function round1(v) {
     return Math.round(v * 10) / 10;
 }
@@ -249,41 +318,67 @@ export function SuggestEinkSettings(stats, display, extras = {}) {
     const darkMass = mix(darkFrac, extras.subjectDarkFrac ?? stats.subjectDarkFrac ?? darkFrac, subW);
     const brightMass = mix(brightFrac, extras.subjectBrightFrac ?? stats.subjectBrightFrac ?? brightFrac, subW);
 
-    const lowKey = toneCenter < 0.32 && darkMass >= 0.42;
+    const subjectTone = extras.subjectTrimMean ?? stats.subjectTrimMean ?? extras.subjectMean ?? stats.subjectMean ?? toneCenter;
+    const subjectDark = extras.subjectDarkFrac ?? stats.subjectDarkFrac ?? darkMass;
+    const subjectP25v = extras.subjectP25 ?? stats.subjectP25 ?? p25;
+    const subjectP75v = extras.subjectP75 ?? stats.subjectP75 ?? p75;
+    const subjectIqr = Math.max(0, subjectP75v - subjectP25v);
+    const subjectFrac = extras.subjectFrac ?? stats.subjectFrac ?? 0;
+    const contrastIqr = subjectFrac > 0.08 ? subjectIqr : iqr;
+
+    // Dark frame + lighter subject (Vermeer): crush the void, do not lift it.
+    const darkBackground = darkFrac >= 0.38 && subjectTone > 0.30 && subjectDark < 0.45;
+    // Night / dark subject: lift shadows.
+    const lowKey = !darkBackground && subjectTone < 0.32 && subjectDark >= 0.42;
     const highKey = toneCenter > 0.60 && brightMass >= 0.42;
     const brightBgDarkSubject = brightMass - darkMass > 0.22 && toneCenter < 0.42 && brightFrac > 0.35;
+    // Mona Lisa: face/landscape are flat even if dress+sky make global IQR look large.
+    const hazySubject = contrastIqr < 0.22 && subjectTone > 0.32 && subjectTone < 0.68;
 
     let bp = 1.0;
     let wp = 1.1;
-    let contrast = 1.32;
+    let contrast = kind === 'e6' ? 1.42 : 1.32;
 
-    if (lowKey) {
-        const lift = clamp((0.40 - toneCenter) * 1.6 + (darkMass - 0.42) * 0.35, 0.12, 0.48);
+    if (darkBackground) {
+        // Paintings (low skin): crush the void. Photos of people: stay gentler
+        // or hair anti-alias becomes a white rim and faces blow out.
+        if (skinFrac > 0.10) {
+            bp = clamp(1.06 + (darkFrac - 0.38) * 0.25, 1.04, 1.16);
+            wp = clamp(1.06 + (0.70 - bulkHigh) * 0.3, 0.98, 1.16);
+            contrast = clamp(1.42 + (0.26 - Math.min(contrastIqr, 0.32)) * 0.75, 1.32, 1.62);
+        } else {
+            bp = clamp(1.16 + (darkFrac - 0.38) * 0.7, 1.12, 1.45);
+            wp = clamp(1.08 + (0.70 - bulkHigh) * 0.35, 0.98, 1.22);
+            contrast = clamp(1.38 + (0.24 - Math.min(contrastIqr, 0.30)) * 0.8, 1.28, 1.62);
+        }
+    } else if (lowKey) {
+        const lift = clamp((0.40 - subjectTone) * 1.6 + (subjectDark - 0.42) * 0.35, 0.12, 0.48);
         bp = clamp(1.0 - lift, 0.50, 0.88);
         wp = clamp(1.06 + (0.62 - bulkHigh) * 0.4, 0.96, 1.20);
-        contrast = clamp(1.10 + (0.22 - Math.min(iqr, 0.28)) * 0.6, 1.04, 1.28);
+        contrast = clamp(1.10 + (0.22 - Math.min(contrastIqr, 0.28)) * 0.6, 1.04, 1.28);
     } else if (highKey) {
         bp = clamp(1.0 + (bulkLow - 0.28) * 0.25, 0.92, 1.12);
         wp = clamp(1.04 + (0.78 - bulkHigh) * 0.5, 0.92, 1.18);
-        contrast = clamp(1.16 + (0.20 - Math.min(iqr, 0.26)) * 0.5, 1.05, 1.32);
+        contrast = clamp(1.32 + (0.22 - Math.min(contrastIqr, 0.28)) * 0.6, 1.22, 1.52);
     } else if (brightBgDarkSubject) {
         const lift = clamp((0.38 - toneCenter) * 1.3 + darkMass * 0.2, 0.06, 0.36);
         bp = clamp(1.0 - lift, 0.60, 1.05);
         wp = clamp(1.06 + (0.76 - bulkHigh) * 0.4, 0.94, 1.18);
-        contrast = clamp(1.18 + (0.24 - Math.min(iqr, 0.30)) * 0.45, 1.08, 1.38);
+        contrast = clamp(1.24 + (0.24 - Math.min(contrastIqr, 0.30)) * 0.5, 1.14, 1.48);
     } else {
-        const haze = bulkLow > 0.18 && iqr < 0.18 && toneCenter > 0.34 && toneCenter < 0.62;
+        const haze = hazySubject || (bulkLow > 0.18 && contrastIqr < 0.18 && toneCenter > 0.34 && toneCenter < 0.62);
         const darkPull = (darkMass - brightMass) * 0.22;
         bp = haze
-            ? clamp(1.0 + (bulkLow - 0.16) * 0.7, 0.92, 1.18)
-            : clamp(1.0 - darkPull + (bulkLow - 0.16) * 0.35, 0.82, 1.18);
-        wp = clamp(1.08 + (0.72 - bulkHigh) * 0.55 + (0.22 - brightMass) * 0.25, 0.92, 1.32);
-        contrast = clamp(1.28 + (0.26 - iqr) * 1.1, 1.10, 1.58);
+            ? clamp(1.08 + (bulkLow - 0.16) * 0.55, 1.02, 1.28)
+            : clamp(1.0 - darkPull + (bulkLow - 0.16) * 0.35, 0.82, 1.22);
+        wp = clamp(1.06 + (0.70 - bulkHigh) * 0.45 + (0.22 - brightMass) * 0.2, 0.92, 1.24);
+        contrast = clamp(1.48 + (0.28 - contrastIqr) * 0.70, 1.36, 1.78);
+        if (haze) contrast = Math.max(contrast, 1.56);
     }
 
-    if (toneCenter < 0.34 && darkMass >= 0.30 && !highKey) {
-        bp = Math.min(bp, clamp(1.0 - (0.36 - toneCenter) * 1.1, 0.55, 0.95));
-        contrast = Math.min(contrast, 1.36);
+    if (!darkBackground && subjectTone < 0.34 && subjectDark >= 0.30 && !highKey) {
+        bp = Math.min(bp, clamp(1.0 - (0.36 - subjectTone) * 1.1, 0.55, 0.95));
+        contrast = Math.min(contrast, 1.50);
     }
 
     let sat;
@@ -366,7 +461,7 @@ export async function OptimizeImageForEink(img, options = {}) {
     }
 
     const stats = SampleImageStats(img, 160, { bbox: focus.bbox });
-    const settings = SuggestEinkSettings(stats, display, {
+    const settings = ApplyOptimizeBias(SuggestEinkSettings(stats, display, {
         bbox: focus.bbox,
         subjectMean: stats.subjectMean,
         subjectTrimMean: stats.subjectTrimMean,
@@ -375,7 +470,7 @@ export async function OptimizeImageForEink(img, options = {}) {
         subjectDarkFrac: stats.subjectDarkFrac,
         subjectBrightFrac: stats.subjectBrightFrac,
         subjectFrac: stats.subjectFrac
-    });
+    }), options.style ?? options.optimize);
     return {
         settings: {
             ...settings,

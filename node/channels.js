@@ -40,6 +40,12 @@ function normalizeRestHour(raw, fallback) {
 	return n;
 }
 
+function parseRestEnabled(raw, restStart, restEnd) {
+	if (raw === false || raw === 0 || raw === '0' || raw === 'false') return false;
+	if (raw === true || raw === 1 || raw === '1' || raw === 'true') return true;
+	return normalizeRestHour(restStart, DEFAULT_REST_START) !== normalizeRestHour(restEnd, DEFAULT_REST_END);
+}
+
 function applyShowRestDefaults(show) {
 	if (!show || typeof show !== 'object') return show;
 	show.restStart = show.restStart === undefined
@@ -48,6 +54,11 @@ function applyShowRestDefaults(show) {
 	show.restEnd = show.restEnd === undefined
 		? DEFAULT_REST_END
 		: normalizeRestHour(show.restEnd, DEFAULT_REST_END);
+	if (show.restEnabled === undefined) {
+		show.restEnabled = show.restStart !== show.restEnd;
+	} else {
+		show.restEnabled = parseRestEnabled(show.restEnabled, show.restStart, show.restEnd);
+	}
 	return show;
 }
 
@@ -57,22 +68,74 @@ function stripShowRestWindow(show) {
 	delete show.nextRestStart;
 	delete show.restSleepUntil;
 	delete show.tzOffsetMin;
+	delete show.timeZone;
 	return show;
 }
 
-/** restStart===restEnd → off. Overnight wrap (22–6) is allowed. Hours are server-local. */
-function restWindowUnix(restStart, restEnd, nowMs = Date.now()) {
+function normalizeTimeZone(raw) {
+	const s = String(raw == null ? '' : raw).trim();
+	if (!s || /^gmt$/i.test(s) || /^utc$/i.test(s) || s === 'Etc/UTC' || s === 'Etc/GMT') return 'UTC';
+	try {
+		Intl.DateTimeFormat('en-US', { timeZone: s }).format(new Date());
+		return s;
+	} catch (_) {
+		return 'UTC';
+	}
+}
+
+function zonedParts(timeZone, atMs) {
+	const fmt = new Intl.DateTimeFormat('en-US', {
+		timeZone: normalizeTimeZone(timeZone),
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hourCycle: 'h23'
+	});
+	const bag = {};
+	for (const p of fmt.formatToParts(new Date(atMs))) {
+		if (p.type !== 'literal') bag[p.type] = p.value;
+	}
+	let hour = Number(bag.hour);
+	if (hour === 24) hour = 0;
+	return {
+		y: Number(bag.year),
+		m: Number(bag.month) - 1,
+		d: Number(bag.day),
+		h: hour,
+		min: Number(bag.minute) || 0,
+		sec: Number(bag.second) || 0
+	};
+}
+
+function tzOffsetMinutes(timeZone, atMs) {
+	const p = zonedParts(timeZone, atMs);
+	const asUtc = Date.UTC(p.y, p.m, p.d, p.h, p.min, p.sec);
+	return Math.round((asUtc - atMs) / 60000);
+}
+
+function zonedHourToUnix(timeZone, y, m, d, hour) {
+	const guess = Date.UTC(y, m, d, hour, 0, 0);
+	let off = tzOffsetMinutes(timeZone, guess);
+	let utcMs = guess - off * 60000;
+	off = tzOffsetMinutes(timeZone, utcMs);
+	utcMs = guess - off * 60000;
+	return Math.floor(utcMs / 1000);
+}
+
+/** Hours are in the frame timezone. Returned stamps are GMT/UTC. */
+function restWindowUnix(restStart, restEnd, nowMs = Date.now(), timeZone = 'UTC', restEnabled = true) {
 	const start = normalizeRestHour(restStart, DEFAULT_REST_START);
 	const end = normalizeRestHour(restEnd, DEFAULT_REST_END);
-	if (start === end) {
+	if (!restEnabled || start === end) {
 		return { restActive: false, nextRestStart: 0, restSleepUntil: 0 };
 	}
-	const now = new Date(nowMs);
-	const h = now.getHours();
-	const atHour = (dayOffset, hour) => {
-		const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, 0, 0, 0);
-		return Math.floor(t.getTime() / 1000);
-	};
+	const tz = normalizeTimeZone(timeZone);
+	const local = zonedParts(tz, nowMs);
+	const atHour = (dayOffset, hour) => zonedHourToUnix(tz, local.y, local.m, local.d + dayOffset, hour);
+	const h = local.h;
 	let nextRestStart;
 	let restSleepUntil;
 	if (start > end) {
@@ -104,14 +167,16 @@ function restWindowUnix(restStart, restEnd, nowMs = Date.now()) {
 	};
 }
 
-function attachShowRestWindow(show, nowMs = Date.now()) {
+function attachShowRestWindow(show, nowMs = Date.now(), timeZone = 'UTC') {
 	if (!show || typeof show !== 'object') return show;
 	applyShowRestDefaults(show);
-	const win = restWindowUnix(show.restStart, show.restEnd, nowMs);
+	const tz = normalizeTimeZone(timeZone);
+	const win = restWindowUnix(show.restStart, show.restEnd, nowMs, tz, !!show.restEnabled);
 	show.restActive = win.restActive;
 	show.nextRestStart = win.nextRestStart;
 	show.restSleepUntil = win.restSleepUntil;
-	show.tzOffsetMin = -new Date(nowMs).getTimezoneOffset();
+	show.tzOffsetMin = tzOffsetMinutes(tz, nowMs);
+	show.timeZone = tz;
 	return show;
 }
 
@@ -579,6 +644,7 @@ function createShow(showsDir, shows, { showName, channel } = {}) {
 		imgs: [],
 		timer: 1,
 		mode: 'random',
+		restEnabled: false,
 		restStart: DEFAULT_REST_START,
 		restEnd: DEFAULT_REST_END,
 		displayId: parsed.displayId
@@ -645,8 +711,11 @@ module.exports = {
 	DEFAULT_REST_START,
 	DEFAULT_REST_END,
 	normalizeRestHour,
+	parseRestEnabled,
 	applyShowRestDefaults,
 	stripShowRestWindow,
+	normalizeTimeZone,
+	tzOffsetMinutes,
 	restWindowUnix,
 	attachShowRestWindow
 };

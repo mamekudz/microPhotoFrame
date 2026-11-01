@@ -40,7 +40,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.11"
+#define FIRMWARE_VERSION "1.5.12"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -165,6 +165,19 @@ DNSServer dnsServer;
 GxEPD2_DISPLAY_CLASS<GxEPD2_DRIVER_CLASS, MAX_HEIGHT(GxEPD2_DRIVER_CLASS)>
     display(GxEPD2_DRIVER_CLASS(/*CS=*/EPD_CS_PIN, /*DC=*/EPD_DC_PIN,
                                 /*RST=*/EPD_RES_PIN, /*BUSY=*/EPD_BUSY_PIN));
+
+/** Hibernate after the first .ink leaves BUSY stuck; the next init() never returns. */
+static void epdBeginRefresh() {
+  epdPowerOn();
+  pinMode(EPD_RES_PIN, OUTPUT);
+  digitalWrite(EPD_RES_PIN, HIGH);
+  delay(10);
+  digitalWrite(EPD_RES_PIN, LOW);
+  delay(20);
+  digitalWrite(EPD_RES_PIN, HIGH);
+  delay(20);
+  display.init(115200, true);
+}
 
 // === Configuration Variables ===
 String wifiSSID = "";
@@ -1667,8 +1680,7 @@ static bool g_epdInited = false;
 
 static void ensureEpdInited() {
   if (g_epdInited) return;
-  epdPowerOn();
-  display.init(115200);
+  epdBeginRefresh();
   g_epdInited = true;
 }
 
@@ -1746,8 +1758,7 @@ static void beginTextScreen() {
   // Always re-init: after .ink hibernate the panel is asleep. Rotation 1/2/3
   // on Spectra 6 leaves the right half of the 800×480 panel stale (startup
   // image or color noise). Text screens stay native landscape.
-  epdPowerOn();
-  display.init(115200);
+  epdBeginRefresh();
   g_epdInited = true;
   display.setRotation(0);
   display.setFullWindow();
@@ -2415,6 +2426,8 @@ bool loadShowData() {
   JsonObject show = doc["output"]["show"];
   currentShowMode = show["mode"].as<String>();
   currentShowTimer = show["timer"].as<int>();
+  if (currentShowTimer < 1) currentShowTimer = 5;
+  if (currentShowTimer > 1440) currentShowTimer = 1440;
   currentRestStart = show["restStart"] | 22;
   currentRestEnd = show["restEnd"] | 6;
   if (currentRestStart < 0 || currentRestStart > 23) currentRestStart = 22;
@@ -2798,8 +2811,7 @@ static bool offlineBadgePixel(int x, int y, int dw, int dh, uint16_t& outColor) 
 static void displayPixels(uint8_t* result, int resIdx,
                           int displayWidth, int displayHeight, int fileOrientation,
                           bool offlineHint) {
-  epdPowerOn();
-  display.init(115200);
+  epdBeginRefresh();
   // Pixel liegen im nativen Panelraster; Hochkant steckt schon im .ink-Inhalt.
   // setRotation(1) würde das Raster drehen und drawPixel außerhalb verwerfen.
   display.setRotation(0);
@@ -2831,7 +2843,10 @@ static void displayPixels(uint8_t* result, int resIdx,
       }
     }
   } while (display.nextPage());
-  display.hibernate();
+  // Hibernate after the first photo left BUSY stuck on NeoFrame (2nd image never came).
+  // Deep sleep still needs the panel asleep; otherwise just powerOff.
+  if (configSlideshowDeepSleep) display.hibernate();
+  else display.powerOff();
 }
 
 static String buildImageUrlForShow(const String& imageName, bool nested) {

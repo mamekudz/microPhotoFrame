@@ -750,3 +750,26 @@
             text-align: center;
             margin-top: 10px;
         }
+
+        .photo-lightbox {
+            position: fixed;
+            inset: 0;
+            z-index: 2400;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.88);
+            cursor: zoom-out;
+        }
+
+        .photo-lightbox[hidden] {
+            display: none;
+        }
+
+        .photo-lightbox img {
+            max-width: 96vw;
+            max-height: 96vh;
+            object-fit: contain;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+            image-rendering: auto;
+        }

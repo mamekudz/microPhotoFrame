@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Download images from Unsplash URLs specified in _orgimgs.json
+ * Download images from URLs specified in the catalog JSON.
  * Usage: node downloadShowImages.mjs <ShowName>
  * Example: node downloadShowImages.mjs ColorfulAnimals
  */
@@ -25,12 +25,15 @@ if (!showName) {
 }
 
 const showDir = path.join(__dirname, '..', 'readyToGoShows', showName);
-const jsonFile = path.join(showDir, `${showName}_orgimgs.json`);
-const outputDir = path.join(showDir, `${showName}_orgimgs`);
+const jsonFile = [
+  path.join(showDir, `${showName}.json`),
+  path.join(showDir, `${showName}_orgimgs.json`)
+].find((p) => fs.existsSync(p));
+const outputDir = path.join(showDir, 'imgs');
 
 // Check if JSON file exists
-if (!fs.existsSync(jsonFile)) {
-  console.error(`❌ Error: JSON file not found: ${jsonFile}`);
+if (!jsonFile) {
+  console.error(`❌ Error: JSON file not found: ${showName}.json`);
   process.exit(1);
 }
 
@@ -40,7 +43,7 @@ if (!fs.existsSync(outputDir)) {
 }
 
 // Read and parse JSON
-console.log(`📖 Reading ${showName}_orgimgs.json...`);
+console.log(`📖 Reading ${path.basename(jsonFile)}...`);
 const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
 
 if (!data.images || !Array.isArray(data.images)) {

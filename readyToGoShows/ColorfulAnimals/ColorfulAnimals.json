@@ -1,0 +1,146 @@
+{
+  "name": "Colorful Animals",
+  "optimize": "colorful",
+  "description": "A vibrant collection of colorful animal artwork — perfect for showcasing the full color capabilities of your E-Ink display.",
+  "version": "1.1.0",
+  "displayId": "I",
+  "timer": 5,
+  "mode": "random",
+  "dither": "floyd",
+  "images": [
+    {
+      "name": "01_katze",
+      "url": "imgs/01_katze.png",
+      "description": "Cat"
+    },
+    {
+      "name": "02_hund",
+      "url": "imgs/02_hund.png",
+      "description": "Dog"
+    },
+    {
+      "name": "03_papagei",
+      "url": "imgs/03_papagei.png",
+      "description": "Parrot"
+    },
+    {
+      "name": "04_fuchs",
+      "url": "imgs/04_fuchs.png",
+      "description": "Fox"
+    },
+    {
+      "name": "05_eule",
+      "url": "imgs/05_eule.png",
+      "description": "Owl"
+    },
+    {
+      "name": "06_elefant",
+      "url": "imgs/06_elefant.png",
+      "description": "Elephant"
+    },
+    {
+      "name": "07_chamaeleon",
+      "url": "imgs/07_chamaeleon.png",
+      "description": "Chameleon"
+    },
+    {
+      "name": "08_tiger",
+      "url": "imgs/08_tiger.png",
+      "description": "Tiger"
+    },
+    {
+      "name": "09_panda",
+      "url": "imgs/09_panda.png",
+      "description": "Panda"
+    },
+    {
+      "name": "10_koala",
+      "url": "imgs/10_koala.png",
+      "description": "Koala"
+    },
+    {
+      "name": "11_pinguin",
+      "url": "imgs/11_pinguin.png",
+      "description": "Penguin"
+    },
+    {
+      "name": "12_schildkroete",
+      "url": "imgs/12_schildkroete.png",
+      "description": "Turtle"
+    },
+    {
+      "name": "13_schmetterling",
+      "url": "imgs/13_schmetterling.png",
+      "description": "Butterfly"
+    },
+    {
+      "name": "14_oktopus",
+      "url": "imgs/14_oktopus.png",
+      "description": "Octopus"
+    },
+    {
+      "name": "15_seepferdchen",
+      "url": "imgs/15_seepferdchen.png",
+      "description": "Seahorse"
+    },
+    {
+      "name": "16_kaninchen",
+      "url": "imgs/16_kaninchen.png",
+      "description": "Rabbit"
+    },
+    {
+      "name": "17_igel",
+      "url": "imgs/17_igel.png",
+      "description": "Hedgehog"
+    },
+    {
+      "name": "18_frosch",
+      "url": "imgs/18_frosch.png",
+      "description": "Frog"
+    },
+    {
+      "name": "19_mandrill",
+      "url": "imgs/19_mandrill.png",
+      "description": "Mandrill"
+    },
+    {
+      "name": "20_pelikan",
+      "url": "imgs/20_pelikan.png",
+      "description": "Pelican"
+    },
+    {
+      "name": "21_mosaik_gecko",
+      "url": "imgs/21_mosaik_gecko.png",
+      "description": "Mosaic gecko"
+    },
+    {
+      "name": "22_mosaik_eisvogel",
+      "url": "imgs/22_mosaik_eisvogel.png",
+      "description": "Mosaic kingfisher"
+    },
+    {
+      "name": "23_mosaik_fennek",
+      "url": "imgs/23_mosaik_fennek.png",
+      "description": "Mosaic fennec"
+    },
+    {
+      "name": "24_mosaik_axolotl",
+      "url": "imgs/24_mosaik_axolotl.png",
+      "description": "Mosaic axolotl"
+    },
+    {
+      "name": "25_mosaik_guerteltier",
+      "url": "imgs/25_mosaik_guerteltier.png",
+      "description": "Mosaic armadillo"
+    },
+    {
+      "name": "26_mosaik_widder",
+      "url": "imgs/26_mosaik_widder.png",
+      "description": "Mosaic ram"
+    }
+  ],
+  "credits": {
+    "source": "Local catalog images in readyToGoShows/ColorfulAnimals/imgs",
+    "license": "See individual image credits in the catalog folder."
+  }
+}

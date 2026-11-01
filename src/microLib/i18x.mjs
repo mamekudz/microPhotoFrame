@@ -1774,8 +1774,8 @@ export default class i18x {
 			defattrs, removews = 0,
 			removesw = 0, isIfIn = false;
 		let openChar = "<", closeChar = ">";
+		if (_lid == null) _lid = i18x.curLid;
 		if (!i18x.templates.hasOwnProperty(_lid)) return _text;
-		if (_lid === null) _lid = i18x.curLid;
 		if (i18x.IS_I18XEDIT) {
 			value = _text;
 			value = value.I18xNotationNormalizeTranslation("", false);

@@ -264,17 +264,34 @@ function resolveReadyShowPath($rawUrl) {
     return $abs;
 }
 
+function findReadyCatalogFile($dir, $name) {
+    foreach ([$name . '.json', $name . '_orgimgs.json'] as $f) {
+        if (is_file($dir . DIRECTORY_SEPARATOR . $f)) return $f;
+    }
+    if (!is_dir($dir)) return '';
+    foreach (scandir($dir) as $f) {
+        if ($f === '.' || $f === '..') continue;
+        if (preg_match('/\.json$/i', $f)) return $f;
+    }
+    return '';
+}
+
 function listReadyShows(&$rest) {
     $catalogs = [];
     $root = __DIR__ . '/../readyToGoShows';
     if (is_dir($root)) {
         foreach (scandir($root) as $name) {
-            if ($name === '.' || $name === '..') continue;
-            $json = $root . DIRECTORY_SEPARATOR . $name . DIRECTORY_SEPARATOR . $name . '_orgimgs.json';
-            if (!is_file($json)) continue;
+            if ($name === '.' || $name === '..' || $name === 'drafts') continue;
+            $dir = $root . DIRECTORY_SEPARATOR . $name;
+            if (!is_dir($dir)) continue;
+            $jsonName = findReadyCatalogFile($dir, $name);
+            if ($jsonName === '') continue;
+            $json = $dir . DIRECTORY_SEPARATOR . $jsonName;
             $title = $name;
             $count = 0;
-            $cat = @json_decode(@file_get_contents($json), true);
+            $raw = @file_get_contents($json);
+            if (is_string($raw) && substr($raw, 0, 3) === "\xEF\xBB\xBF") $raw = substr($raw, 3);
+            $cat = @json_decode($raw, true);
             if (is_array($cat)) {
                 if (!empty($cat['name'])) $title = $cat['name'];
                 if (!empty($cat['images']) && is_array($cat['images'])) $count = count($cat['images']);
@@ -283,7 +300,7 @@ function listReadyShows(&$rest) {
                 'name' => $name,
                 'title' => $title,
                 'count' => $count,
-                'path' => 'readyToGoShows/' . $name . '/' . $name . '_orgimgs.json'
+                'path' => 'readyToGoShows/' . $name . '/' . $jsonName
             ];
         }
     }
@@ -529,6 +546,12 @@ function normalizeRestHour($raw, $fallback) {
     return ($n >= 0 && $n <= 23) ? $n : $fallback;
 }
 
+function parseRestEnabled($raw, $restStart, $restEnd) {
+    if ($raw === false || $raw === 0 || $raw === '0' || $raw === 'false') return false;
+    if ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') return true;
+    return normalizeRestHour($restStart, 22) !== normalizeRestHour($restEnd, 6);
+}
+
 function applyShowRestDefaults(&$show) {
     if (!is_array($show)) return $show;
     $show['restStart'] = array_key_exists('restStart', $show)
@@ -537,28 +560,66 @@ function applyShowRestDefaults(&$show) {
     $show['restEnd'] = array_key_exists('restEnd', $show)
         ? normalizeRestHour($show['restEnd'], 6)
         : 6;
+    if (!array_key_exists('restEnabled', $show)) {
+        $show['restEnabled'] = $show['restStart'] !== $show['restEnd'];
+    } else {
+        $show['restEnabled'] = parseRestEnabled($show['restEnabled'], $show['restStart'], $show['restEnd']);
+    }
     return $show;
 }
 
 function stripShowRestWindow(&$show) {
     if (!is_array($show)) return $show;
-    unset($show['restActive'], $show['nextRestStart'], $show['restSleepUntil'], $show['tzOffsetMin']);
+    unset($show['restActive'], $show['nextRestStart'], $show['restSleepUntil'], $show['tzOffsetMin'], $show['timeZone']);
     return $show;
 }
 
-function restWindowUnix($restStart, $restEnd, $now = null) {
+function normalizeTimeZone($raw) {
+    $s = trim((string)$raw);
+    if ($s === '' || strcasecmp($s, 'GMT') === 0 || strcasecmp($s, 'UTC') === 0 || $s === 'Etc/UTC' || $s === 'Etc/GMT') {
+        return 'UTC';
+    }
+    try {
+        new DateTimeZone($s);
+        return $s;
+    } catch (Exception $e) {
+        return 'UTC';
+    }
+}
+
+function inputTimeZone($input) {
+    if (!is_array($input)) return 'UTC';
+    $d = $input['deviceInfo'] ?? [];
+    $raw = $d['timeZone'] ?? $d['timezone'] ?? $d['tz'] ?? $input['timeZone'] ?? $input['timezone'] ?? 'UTC';
+    return normalizeTimeZone($raw);
+}
+
+function zonedHourToUnix($tzName, $y, $m, $d, $hour) {
+    $tz = new DateTimeZone($tzName);
+    $dt = new DateTime('now', $tz);
+    $dt->setDate($y, $m, $d);
+    $dt->setTime($hour, 0, 0);
+    return $dt->getTimestamp();
+}
+
+function restWindowUnix($restStart, $restEnd, $now = null, $timeZone = 'UTC', $restEnabled = true) {
     $start = normalizeRestHour($restStart, 22);
     $end = normalizeRestHour($restEnd, 6);
-    if ($start === $end) {
+    if (!$restEnabled || $start === $end) {
         return ['restActive' => false, 'nextRestStart' => 0, 'restSleepUntil' => 0];
     }
     $now = $now === null ? time() : intval($now);
-    $h = intval(date('G', $now));
-    $y = intval(date('Y', $now));
-    $m = intval(date('n', $now));
-    $d = intval(date('j', $now));
-    $atHour = function ($dayOffset, $hour) use ($y, $m, $d) {
-        return mktime($hour, 0, 0, $m, $d + $dayOffset, $y);
+    $tzName = normalizeTimeZone($timeZone);
+    $local = new DateTime('@' . $now);
+    $local->setTimezone(new DateTimeZone($tzName));
+    $y = intval($local->format('Y'));
+    $m = intval($local->format('n'));
+    $d = intval($local->format('j'));
+    $h = intval($local->format('G'));
+    $atHour = function ($dayOffset, $hour) use ($tzName, $y, $m, $d) {
+        $base = new DateTime(sprintf('%04d-%02d-%02d', $y, $m, $d), new DateTimeZone($tzName));
+        if ($dayOffset !== 0) $base->modify(($dayOffset > 0 ? '+' : '') . $dayOffset . ' day');
+        return zonedHourToUnix($tzName, intval($base->format('Y')), intval($base->format('n')), intval($base->format('j')), $hour);
     };
     if ($start > $end) {
         if ($h >= $start) {
@@ -588,14 +649,18 @@ function restWindowUnix($restStart, $restEnd, $now = null) {
     ];
 }
 
-function attachShowRestWindow(&$show) {
+function attachShowRestWindow(&$show, $timeZone = 'UTC') {
     if (!is_array($show)) return $show;
     applyShowRestDefaults($show);
-    $win = restWindowUnix($show['restStart'], $show['restEnd']);
+    $tz = normalizeTimeZone($timeZone);
+    $win = restWindowUnix($show['restStart'], $show['restEnd'], time(), $tz, !empty($show['restEnabled']));
     $show['restActive'] = $win['restActive'];
     $show['nextRestStart'] = $win['nextRestStart'];
     $show['restSleepUntil'] = $win['restSleepUntil'];
-    $show['tzOffsetMin'] = intval(round((int)date('Z') / 60));
+    $show['timeZone'] = $tz;
+    $utc = new DateTime('now', new DateTimeZone('UTC'));
+    $here = new DateTime('now', new DateTimeZone($tz));
+    $show['tzOffsetMin'] = intval(round(($here->getOffset() - $utc->getOffset()) / 60));
     return $show;
 }
 
