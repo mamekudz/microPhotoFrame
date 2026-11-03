@@ -73,7 +73,37 @@ internal static class InkDecoder
 
         List<int> decodedPixels;
 
-        if (version >= 1 && version <= 3)
+        var bgIndex = 0;
+        var cx = 0;
+        var cy = 0;
+        var cw = w;
+        var ch = h;
+        if (version == 4)
+        {
+            if (uint8Data.Length < 12)
+                throw new InvalidDataException("INK v4: Header zu kurz.");
+            bgIndex = (uint8Data[3] >> 1) & 0x0F;
+            cx = uint8Data[4] | (uint8Data[5] << 8);
+            cy = uint8Data[6] | (uint8Data[7] << 8);
+            cw = uint8Data[8] | (uint8Data[9] << 8);
+            ch = uint8Data[10] | (uint8Data[11] << 8);
+            dataPtr = 12;
+            if (cw < 1 || ch < 1 || cx + cw > w || cy + ch > h)
+                throw new InvalidDataException("INK v4: ungültiges Rechteck.");
+        }
+
+        if (version == 4)
+        {
+            var contentN = cw * ch;
+            var inflated = RawDeflateInflate(uint8Data, dataPtr);
+            if (inflated.Length < contentN)
+                throw new InvalidDataException($"INK v4: nach Inflate {inflated.Length} B, erwartet {contentN}.");
+            InversePaethInPlace(inflated, contentN, cw, numColors);
+            decodedPixels = new List<int>(contentN);
+            for (var i = 0; i < contentN; i++)
+                decodedPixels.Add(inflated[i]);
+        }
+        else if (version >= 1 && version <= 3)
         {
             if (legacyFiveByte)
             {
@@ -117,28 +147,56 @@ internal static class InkDecoder
         }
 
         var rgba = new byte[totalPixels * 4];
-        var decodedIdx = 0;
-        for (var i = 0; i < totalPixels; i++)
+        if (version == 4)
         {
-            Color color;
-            if (mask != null && mask[i] == 0)
-                color = defaultColor;
-            else
+            var bg = bgIndex >= 0 && bgIndex < palette.Length ? palette[bgIndex] : defaultColor;
+            for (var i = 0; i < totalPixels; i++)
             {
-                var idx = decodedPixels[decodedIdx++];
-                color = idx >= 0 && idx < palette.Length ? palette[idx] : defaultColor;
+                var pos = i * 4;
+                rgba[pos] = bg.R;
+                rgba[pos + 1] = bg.G;
+                rgba[pos + 2] = bg.B;
+                rgba[pos + 3] = 255;
             }
+            for (var y = 0; y < ch; y++)
+            {
+                for (var x = 0; x < cw; x++)
+                {
+                    var idx = decodedPixels[y * cw + x];
+                    var color = idx >= 0 && idx < palette.Length ? palette[idx] : bg;
+                    var pos = ((cy + y) * w + (cx + x)) * 4;
+                    rgba[pos] = color.R;
+                    rgba[pos + 1] = color.G;
+                    rgba[pos + 2] = color.B;
+                    rgba[pos + 3] = 255;
+                }
+            }
+        }
+        else
+        {
+            var decodedIdx = 0;
+            for (var i = 0; i < totalPixels; i++)
+            {
+                Color color;
+                if (mask != null && mask[i] == 0)
+                    color = defaultColor;
+                else
+                {
+                    var idx = decodedPixels[decodedIdx++];
+                    color = idx >= 0 && idx < palette.Length ? palette[idx] : defaultColor;
+                }
 
-            var pos = i * 4;
-            rgba[pos] = color.R;
-            rgba[pos + 1] = color.G;
-            rgba[pos + 2] = color.B;
-            rgba[pos + 3] = 255;
+                var pos = i * 4;
+                rgba[pos] = color.R;
+                rgba[pos + 1] = color.G;
+                rgba[pos + 2] = color.B;
+                rgba[pos + 3] = 255;
+            }
         }
 
         var bmp = RgbaToBitmap(rgba, w, h);
         // Hochkant: Kopf zeigt im Raster nach links → Rotate270 stellt aufrecht. Empirisch verifiziert.
-        if (version is >= 1 and <= 3 && (uint8Data[3] & 1) != 0 && !display.IsRound)
+        if (version is >= 1 and <= 4 && (uint8Data[3] & 1) != 0 && !display.IsRound)
             bmp.RotateFlip(RotateFlipType.Rotate270FlipNone);
 
         return bmp;

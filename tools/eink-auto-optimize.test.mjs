@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SuggestEinkSettings, ApplyOptimizeBias, ResolveOptimizeBias } from '../src/microLib/EInkAutoOptimize.mjs';
+import { SuggestEinkSettings, ApplyOptimizeBias, ResolveOptimizeBias, ZoomToSubject, SubjectFitRect, ContentBBoxFromRgba, InferBackgroundColor } from '../src/microLib/EInkAutoOptimize.mjs';
 
 const e6 = { colors: ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', '#ffff00'] };
 
@@ -215,6 +215,86 @@ test('catalog optimize string and object resolve', () => {
 	assert.equal(ResolveOptimizeBias('kontrastreicher').id, 'contrast');
 	assert.equal(ResolveOptimizeBias({ style: 'colorful' }).saturation, 30);
 	assert.equal(ResolveOptimizeBias({ contrast: 12, saturation: 25 }).contrast, 12);
+});
+
+test('SubjectFitRect centers a square animal in landscape', () => {
+	const r = SubjectFitRect([293, 299, 438, 423], 1024, 1024, 800, 480);
+	assert.ok(r, 'fit');
+	assert.ok(Math.abs((r.dx + r.dw / 2) - 400) < 2, 'cx=' + (r.dx + r.dw / 2));
+	assert.ok(Math.abs((r.dy + r.dh / 2) - 240) < 2, 'cy=' + (r.dy + r.dh / 2));
+	assert.ok(r.dh > 450, 'fills height dh=' + r.dh);
+	assert.ok(r.dw < 720, 'letterbox sides dw=' + r.dw);
+});
+
+test('InferBackgroundColor snaps a dark border to black', () => {
+	const w = 24, h = 16;
+	const data = new Uint8ClampedArray(w * h * 4);
+	for (let i = 0; i < data.length; i += 4) {
+		data[i + 3] = 255;
+	}
+	for (let y = 5; y <= 10; y++) {
+		for (let x = 8; x <= 15; x++) {
+			const i = (y * w + x) * 4;
+			data[i] = 220; data[i + 1] = 80; data[i + 2] = 40;
+		}
+	}
+	assert.equal(InferBackgroundColor(data, w, h), '#000000');
+});
+
+test('InferBackgroundColor snaps a light border to white', () => {
+	const w = 24, h = 16;
+	const data = new Uint8ClampedArray(w * h * 4);
+	for (let i = 0; i < data.length; i += 4) {
+		data[i] = 250; data[i + 1] = 248; data[i + 2] = 246; data[i + 3] = 255;
+	}
+	for (let y = 5; y <= 10; y++) {
+		for (let x = 8; x <= 15; x++) {
+			const i = (y * w + x) * 4;
+			data[i] = 20; data[i + 1] = 20; data[i + 2] = 20;
+		}
+	}
+	assert.equal(InferBackgroundColor(data, w, h), '#ffffff');
+});
+
+test('ContentBBoxFromRgba finds an isolated blob', () => {
+	const w = 20, h = 10;
+	const data = new Uint8ClampedArray(w * h * 4);
+	for (let y = 3; y <= 6; y++) {
+		for (let x = 8; x <= 12; x++) {
+			const i = (y * w + x) * 4;
+			data[i] = 200; data[i + 1] = 40; data[i + 2] = 40; data[i + 3] = 255;
+		}
+	}
+	const box = ContentBBoxFromRgba(data, w, h);
+	assert.deepEqual(box, [8, 3, 5, 4]);
+});
+
+test('ZoomToSubject enlarges a small central object', () => {
+	const z = ZoomToSubject([350, 180, 100, 120], 800, 480, 800 / 480);
+	assert.ok(z >= 2.2, 'zoom=' + z);
+});
+
+test('ZoomToSubject stays near 1 when the subject already fills the frame', () => {
+	const z = ZoomToSubject([40, 20, 720, 440], 800, 480, 800 / 480);
+	assert.ok(z <= 1.2, 'zoom=' + z);
+});
+
+test('SuggestEinkSettings crop-to-subject zooms a small bbox', () => {
+	const s = SuggestEinkSettings({
+		p25: 0.22, p50: 0.48, p75: 0.74, trimMean: 0.47, mean: 0.47,
+		iqr: 0.52, darkFrac: 0.18, brightFrac: 0.16, meanSat: 0.28, skinFrac: 0.05,
+		width: 800, height: 480
+	}, e6, { bbox: [350, 180, 100, 120], cropToSubject: true, displayWidth: 800, displayHeight: 480 });
+	assert.ok(s.zoom >= 2.2, 'zoom=' + s.zoom);
+});
+
+test('SuggestEinkSettings without crop keeps a mild zoom cap', () => {
+	const s = SuggestEinkSettings({
+		p25: 0.22, p50: 0.48, p75: 0.74, trimMean: 0.47, mean: 0.47,
+		iqr: 0.52, darkFrac: 0.18, brightFrac: 0.16, meanSat: 0.28, skinFrac: 0.05,
+		width: 800, height: 480
+	}, e6, { bbox: [350, 180, 100, 120], cropToSubject: false });
+	assert.ok(s.zoom <= 1.5, 'zoom=' + s.zoom);
 });
 
 test('bw saturation stays zero under colorful', () => {

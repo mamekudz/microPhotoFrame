@@ -13,7 +13,7 @@ import {
 	GetPathDisplayId,
 } from '../src/inkEncoder.mjs';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-encoder-2.1.0-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-encoder-2.2.0-'));
 const pngPath = path.join(tmp, 'synthetic.png');
 const inkPath = path.join(tmp, 'synthetic.ink');
 const decodedPath = path.join(tmp, 'decoded.png');
@@ -56,8 +56,40 @@ test('Waveshare 1.54G short id is f', () => {
 	assert.match(display?.name || '', /Waveshare/);
 });
 
-test('EncodeInk writes v3 header and DecodeInk round-trips', async () => {
+test('EncodeInk writes v4 when a subject sits on a flat background', async () => {
+	const letterbox = path.join(tmp, 'letterbox.png');
+	const { data } = await sharp({
+		create: { width: 800, height: 480, channels: 3, background: { r: 0, g: 0, b: 0 } },
+	}).raw().toBuffer({ resolveWithObject: true });
+	for (let y = 120; y < 360; y++) {
+		for (let x = 250; x < 550; x++) {
+			const i = (y * 800 + x) * 3;
+			data[i] = 220; data[i + 1] = 40; data[i + 2] = 40;
+		}
+	}
+	await sharp(data, { raw: { width: 800, height: 480, channels: 3 } }).png().toFile(letterbox);
 	const options = GetOptionsFromDisplayId('9', { dither: 'none', compression: 'deflatePaeth' });
+	const ink = await EncodeInk(letterbox, options);
+	assert.equal(ink[0], 4);
+	const cw = ink[8] | (ink[9] << 8);
+	const ch = ink[10] | (ink[11] << 8);
+	assert.ok(cw * ch < 800 * 480 * 0.7, 'compact rect ' + cw + 'x' + ch);
+	const png = await DecodeInk(ink, {
+		colors: options.colors,
+		width: options.width,
+		height: options.height,
+		isRound: options.isRound,
+	});
+	const dec = await sharp(png).raw().toBuffer({ resolveWithObject: true });
+	const corner = dec.data[0] + dec.data[1] + dec.data[2];
+	assert.ok(corner < 40, 'bg filled');
+	const mid = ((240 * 800 + 400) * 3);
+	assert.ok(dec.data[mid] > 160, 'subject kept');
+});
+
+test('EncodeInk writes v3 header and DecodeInk round-trips', async () => {
+	const options = GetOptionsFromDisplayId('9', { dither: 'none', compression: 'deflatePaeth', compact: false });
+	assert.equal(options.compact, false);
 	const ink = await EncodeInk(pngPath, options);
 	assert.ok(ink instanceof Uint8Array);
 	assert.equal(ink[0], 3);

@@ -204,6 +204,7 @@ export function GetOptionsFromDisplayId(_displayShortId, _overrides = {}) {
     orientation: _overrides.orientation || 0,
     compression: _overrides.compression || "deflatePaeth",
     inkFormat: _overrides.inkFormat,
+    compact: _overrides.compact,
     colorAdjust: _overrides.colorAdjust || {
       saturation: 1.0,
       contrast: 1.0,
@@ -670,12 +671,73 @@ function ditherToByte(dither) {
 
 /** Kompatibel zu microPhotoFrame main.cpp decodeAndDisplayInk */
 function resolveInkFormatVersion(compression, inkFormat) {
-  if (typeof inkFormat === "number" && inkFormat >= 1 && inkFormat <= 3) return inkFormat;
+  if (typeof inkFormat === "number" && inkFormat >= 1 && inkFormat <= 4) return inkFormat;
   const c = String(compression || "").toLowerCase();
   if (c === "lzw" || c === "v1") return 1;
   if (c === "deflate" || c === "zlib" || c === "v2") return 2;
   if (c === "deflatepaeth" || c === "paeth" || c === "v3") return 3;
+  if (c === "v4" || c === "compact") return 4;
   return 3;
+}
+
+function inferBgIndex(pixels, w, h) {
+  const votes = [pixels[0], pixels[w - 1], pixels[(h - 1) * w], pixels[h * w - 1]];
+  const counts = new Map();
+  for (const v of votes) counts.set(v, (counts.get(v) || 0) + 1);
+  let best = votes[0] || 0, n = 0;
+  for (const [k, c] of counts) if (c > n) { n = c; best = k; }
+  return best;
+}
+
+function contentRectFromIndices(pixels, w, h, bg) {
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (pixels[y * w + x] === bg) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) return { x: 0, y: 0, w: 1, h: 1 };
+  if (minX > 0) minX--;
+  if (minY > 0) minY--;
+  if (maxX < w - 1) maxX++;
+  if (maxY < h - 1) maxY++;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+function extractIndexRect(pixels, srcW, rect) {
+  const out = new Uint8Array(rect.w * rect.h);
+  for (let y = 0; y < rect.h; y++) {
+    const src = (rect.y + y) * srcW + rect.x;
+    out.set(pixels.subarray(src, src + rect.w), y * rect.w);
+  }
+  return out;
+}
+
+function inflatePayload(bytes) {
+  const buf = Buffer.from(bytes);
+  try {
+    return new Uint8Array(zlib.inflateSync(buf));
+  } catch {
+    return new Uint8Array(zlib.inflateRawSync(buf));
+  }
+}
+
+function packInkV4(displayId, dither, orientation, bg, rect, payload) {
+  const out = new Uint8Array(12 + payload.length);
+  out[0] = 4;
+  out[1] = String(displayId).charCodeAt(0);
+  out[2] = ditherToByte(dither);
+  out[3] = (orientation & 1) | ((bg & 0x0f) << 1);
+  out[4] = rect.x & 0xff; out[5] = (rect.x >> 8) & 0xff;
+  out[6] = rect.y & 0xff; out[7] = (rect.y >> 8) & 0xff;
+  out[8] = rect.w & 0xff; out[9] = (rect.w >> 8) & 0xff;
+  out[10] = rect.h & 0xff; out[11] = (rect.h >> 8) & 0xff;
+  out.set(payload, 12);
+  return out;
 }
 
 export async function EncodeInk(inputPath, options = {}) {
@@ -689,6 +751,7 @@ export async function EncodeInk(inputPath, options = {}) {
     orientation = 0,
     compression = "deflatePaeth",
     inkFormat: inkFormatOpt,
+    compact = "auto",
     colorAdjust = {}
   } = options;
 
@@ -777,14 +840,26 @@ export async function EncodeInk(inputPath, options = {}) {
   }
 
   let fmt = resolveInkFormatVersion(compression, inkFormatOpt);
-  if (isRound && fmt === 3) {
-    console.warn("ink-encoder: v3 (Paeth) erwartet eine volle Rechteck-Rasterung; bei isRound wird v2 (Deflate) verwendet.");
+  if (isRound && (fmt === 3 || fmt === 4)) {
+    console.warn("ink-encoder: v3/v4 (Paeth) erwartet eine volle Rechteck-Rasterung; bei isRound wird v2 (Deflate) verwendet.");
     fmt = 2;
   }
   const cLow = String(compression || "").toLowerCase();
   if ((cLow === "rle" || cLow === "none") && inkFormatOpt == null) {
     console.warn('ink-encoder: "rle"/"none" ist nicht firmware-kompatibel — verwende LZW (inkFormat 1).');
     fmt = 1;
+  }
+
+  const wantCompact = compact !== false && !mask && (fmt === 3 || fmt === 4);
+  if (wantCompact) {
+    const bg = inferBgIndex(allPixels, w, h);
+    const rect = contentRectFromIndices(allPixels, w, h, bg);
+    if (rect.w * rect.h < w * h * 0.92 && (rect.w < w || rect.h < h)) {
+      const block = extractIndexRect(allPixels, w, rect);
+      const deltas = forwardPaethDeltas(block, block.length, rect.w, colors.length);
+      const payload = zlib.deflateRawSync(Buffer.from(deltas), { level: zlib.constants.Z_BEST_COMPRESSION });
+      return packInkV4(displayId, dither, orientation, bg, rect, payload);
+    }
   }
 
   const orientByte = orientation & 1;
@@ -803,7 +878,7 @@ export async function EncodeInk(inputPath, options = {}) {
   }
 
   const out = new Uint8Array(4 + payload.length);
-  out[0] = fmt;
+  out[0] = fmt === 4 ? 3 : fmt;
   out[1] = displayId.charCodeAt(0);
   out[2] = ditherToByte(dither);
   out[3] = orientByte;
@@ -966,7 +1041,29 @@ export async function DecodeInk(inputPath, options = {}) {
   /** @type {number[]} */
   let decodedPixels;
 
-  if (version >= 1 && version <= 3) {
+  let bgIndex = 0, cx = 0, cy = 0, cw = w, ch = h;
+  if (version === 4) {
+    if (uint8Data.length < 12) throw new Error("INK v4: Header zu kurz");
+    bgIndex = (uint8Data[3] >> 1) & 0x0f;
+    cx = uint8Data[4] | (uint8Data[5] << 8);
+    cy = uint8Data[6] | (uint8Data[7] << 8);
+    cw = uint8Data[8] | (uint8Data[9] << 8);
+    ch = uint8Data[10] | (uint8Data[11] << 8);
+    dataPtr = 12;
+    if (cw < 1 || ch < 1 || cx + cw > w || cy + ch > h) {
+      throw new Error(`INK v4: ungültiges Rechteck ${cx},${cy} ${cw}x${ch}`);
+    }
+  }
+
+  if (version === 4) {
+    const buf = inflatePayload(uint8Data.subarray(dataPtr));
+    const contentN = cw * ch;
+    if (buf.length < contentN) {
+      throw new Error(`INK v4: nach Inflate ${buf.length} Bytes, erwartet ${contentN}`);
+    }
+    inversePaethInPlace(buf, contentN, cw, numColors);
+    decodedPixels = Array.from(buf.subarray(0, contentN));
+  } else if (version >= 1 && version <= 3) {
     if (legacyFiveByte) {
       if (legacyCompression === 1) {
         decodedPixels = DecompressRLE(uint8Data, dataPtr, validPixelCount);
@@ -976,8 +1073,7 @@ export async function DecodeInk(inputPath, options = {}) {
         decodedPixels = DecompressLZW(uint8Data, dataPtr, 3, validPixelCount);
       }
     } else if (version === 3) {
-      const inflated = zlib.inflateSync(Buffer.from(uint8Data.subarray(dataPtr)));
-      const buf = new Uint8Array(inflated);
+      const buf = inflatePayload(uint8Data.subarray(dataPtr));
       if (buf.length < validPixelCount) {
         throw new Error(
           `INK v3: nach Inflate ${buf.length} Bytes, erwartet ${validPixelCount}`
@@ -986,8 +1082,7 @@ export async function DecodeInk(inputPath, options = {}) {
       inversePaethInPlace(buf, validPixelCount, rowWidth, numColors);
       decodedPixels = Array.from(buf.subarray(0, validPixelCount));
     } else if (version === 2) {
-      const inflated = zlib.inflateSync(Buffer.from(uint8Data.subarray(dataPtr)));
-      const arr = new Uint8Array(inflated);
+      const arr = inflatePayload(uint8Data.subarray(dataPtr));
       if (arr.length < validPixelCount) {
         throw new Error(
           `INK v2: nach Inflate ${arr.length} Bytes, erwartet mindestens ${validPixelCount}`
@@ -1006,20 +1101,42 @@ export async function DecodeInk(inputPath, options = {}) {
   }
 
   const result = new Uint8ClampedArray(totalPixels * 4);
-  let decodedIdx = 0;
-  for (let i = 0; i < totalPixels; i++) {
-    let color;
-    if (mask && mask[i] === 0) {
-      color = defaultColor;
-    } else {
-      const idx = decodedPixels[decodedIdx++];
-      color = palette[idx] ?? defaultColor;
+  const bgColor = palette[bgIndex] ?? defaultColor;
+  if (version === 4) {
+    for (let i = 0; i < totalPixels; i++) {
+      const pos = i * 4;
+      result[pos] = bgColor.r;
+      result[pos + 1] = bgColor.g;
+      result[pos + 2] = bgColor.b;
+      result[pos + 3] = 255;
     }
-    const pos = i * 4;
-    result[pos] = color.r;
-    result[pos + 1] = color.g;
-    result[pos + 2] = color.b;
-    result[pos + 3] = 255;
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const idx = decodedPixels[y * cw + x];
+        const color = palette[idx] ?? bgColor;
+        const pos = ((cy + y) * w + (cx + x)) * 4;
+        result[pos] = color.r;
+        result[pos + 1] = color.g;
+        result[pos + 2] = color.b;
+        result[pos + 3] = 255;
+      }
+    }
+  } else {
+    let decodedIdx = 0;
+    for (let i = 0; i < totalPixels; i++) {
+      let color;
+      if (mask && mask[i] === 0) {
+        color = defaultColor;
+      } else {
+        const idx = decodedPixels[decodedIdx++];
+        color = palette[idx] ?? defaultColor;
+      }
+      const pos = i * 4;
+      result[pos] = color.r;
+      result[pos + 1] = color.g;
+      result[pos + 2] = color.b;
+      result[pos + 3] = 255;
+    }
   }
 
   const pngBuffer = await sharp(result, {

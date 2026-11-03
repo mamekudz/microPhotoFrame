@@ -127,12 +127,13 @@ export function parseInkHeader(uint8Data) {
   if (uint8Data.length < 4) throw new Error(".ink zu kurz");
   const version = uint8Data[0];
   // Byte 3: bei v1–v3 Orientierung (0=Quer, 1=Hochkant); bei v0 = LZW minCodeSize (nicht als Orientierung lesen)
-  const orientation = version >= 1 && version <= 3 ? uint8Data[3] & 1 : 0;
+  const orientation = version >= 1 && version <= 4 ? uint8Data[3] & 1 : 0;
   return {
     version,
     displayId: String.fromCharCode(uint8Data[1]),
     dither: uint8Data[2],
-    orientation
+    orientation,
+    bgIndex: version === 4 ? (uint8Data[3] >> 1) & 0x0f : 0
   };
 }
 
@@ -335,7 +336,25 @@ export function decodeInk(uint8Data, options = {}) {
   }
 
   let decodedPixels;
-  if (version >= 1 && version <= 3) {
+  let bgIndex = 0, cx = 0, cy = 0, cw = w, ch = h;
+  if (version === 4) {
+    if (buf.length < 12) throw new Error("INK v4: Header zu kurz");
+    bgIndex = (buf[3] >> 1) & 0x0f;
+    cx = buf[4] | (buf[5] << 8);
+    cy = buf[6] | (buf[7] << 8);
+    cw = buf[8] | (buf[9] << 8);
+    ch = buf[10] | (buf[11] << 8);
+    dataPtr = 12;
+    if (cw < 1 || ch < 1 || cx + cw > w || cy + ch > h) throw new Error("INK v4: ungültiges Rechteck");
+    let inflated;
+    try { inflated = inflate(buf.subarray(dataPtr), { raw: true }); }
+    catch { inflated = inflate(buf.subarray(dataPtr), { raw: false }); }
+    const b = new Uint8Array(inflated);
+    const contentN = cw * ch;
+    if (b.length < contentN) throw new Error(`INK v4: nach Inflate ${b.length} B, erwartet ${contentN}`);
+    inversePaethInPlace(b, contentN, cw, numColors);
+    decodedPixels = Array.from(b.subarray(0, contentN));
+  } else if (version >= 1 && version <= 3) {
     if (legacyFiveByte) {
       if (legacyCompression === 1) decodedPixels = decompressRLE(buf, dataPtr, validPixelCount);
       else if (legacyCompression === 2) decodedPixels = decompressNone(buf, dataPtr, validPixelCount);
@@ -361,23 +380,39 @@ export function decodeInk(uint8Data, options = {}) {
   }
 
   const rgba = new Uint8ClampedArray(totalPixels * 4);
-  let decodedIdx = 0;
-  for (let i = 0; i < totalPixels; i++) {
-    let color;
-    if (mask && mask[i] === 0) color = defaultColor;
-    else {
-      const idx = decodedPixels[decodedIdx++];
-      color = palette[idx] ?? defaultColor;
+  const bgColor = palette[bgIndex] ?? defaultColor;
+  if (version === 4) {
+    for (let i = 0; i < totalPixels; i++) {
+      const pos = i * 4;
+      rgba[pos] = bgColor.r; rgba[pos + 1] = bgColor.g; rgba[pos + 2] = bgColor.b; rgba[pos + 3] = 255;
     }
-    const pos = i * 4;
-    rgba[pos] = color.r;
-    rgba[pos + 1] = color.g;
-    rgba[pos + 2] = color.b;
-    rgba[pos + 3] = 255;
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const idx = decodedPixels[y * cw + x];
+        const color = palette[idx] ?? bgColor;
+        const pos = ((cy + y) * w + (cx + x)) * 4;
+        rgba[pos] = color.r; rgba[pos + 1] = color.g; rgba[pos + 2] = color.b; rgba[pos + 3] = 255;
+      }
+    }
+  } else {
+    let decodedIdx = 0;
+    for (let i = 0; i < totalPixels; i++) {
+      let color;
+      if (mask && mask[i] === 0) color = defaultColor;
+      else {
+        const idx = decodedPixels[decodedIdx++];
+        color = palette[idx] ?? defaultColor;
+      }
+      const pos = i * 4;
+      rgba[pos] = color.r;
+      rgba[pos + 1] = color.g;
+      rgba[pos + 2] = color.b;
+      rgba[pos + 3] = 255;
+    }
   }
 
   const portrait =
-    version >= 1 && version <= 3 && (buf[3] & 1) === 1;
+    version >= 1 && version <= 4 && (buf[3] & 1) === 1;
   if (portrait && !isRound) {
     const r = rotateRgba270Clockwise(rgba, w, h);
     return { width: r.width, height: r.height, rgba: r.rgba };
@@ -607,7 +642,7 @@ function ditherToByte(dither) {
 }
 
 function resolveInkFormatVersion(compression, inkFormat) {
-  if (typeof inkFormat === "number" && inkFormat >= 1 && inkFormat <= 3) return inkFormat;
+  if (typeof inkFormat === "number" && inkFormat >= 1 && inkFormat <= 4) return inkFormat;
   const c = String(compression || "").toLowerCase();
   if (c === "lzw" || c === "v1") return 1;
   if (c === "deflate" || c === "zlib" || c === "v2") return 2;
@@ -748,7 +783,46 @@ export function encodeInkFromRGBA(rgba, w, h, options = {}) {
   } else pixelsToEncode = Array.from(allPixels);
 
   let fmt = resolveInkFormatVersion(compression, inkFormatOpt);
-  if (isRound && fmt === 3) fmt = 2;
+  if (isRound && (fmt === 3 || fmt === 4)) fmt = 2;
+
+  if (!mask && (fmt === 3 || fmt === 4)) {
+    const px = Uint8Array.from(allPixels);
+    const bg = px[0];
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (px[y * w + x] === bg) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX >= 0) {
+      if (minX > 0) minX--;
+      if (minY > 0) minY--;
+      if (maxX < w - 1) maxX++;
+      if (maxY < h - 1) maxY++;
+      const rw = maxX - minX + 1, rh = maxY - minY + 1;
+      if (rw * rh < w * h * 0.92 && (rw < w || rh < h)) {
+        const block = new Uint8Array(rw * rh);
+        for (let y = 0; y < rh; y++) block.set(px.subarray((minY + y) * w + minX, (minY + y) * w + minX + rw), y * rw);
+        const deltas = forwardPaethDeltas(block, block.length, rw, colors.length);
+        const payload = deflate(deltas, { level: 9, raw: true });
+        const out = new Uint8Array(12 + payload.length);
+        out[0] = 4;
+        out[1] = String(displayId).charCodeAt(0);
+        out[2] = ditherToByte(dither);
+        out[3] = (orientation & 1) | ((bg & 0x0f) << 1);
+        out[4] = minX & 0xff; out[5] = (minX >> 8) & 0xff;
+        out[6] = minY & 0xff; out[7] = (minY >> 8) & 0xff;
+        out[8] = rw & 0xff; out[9] = (rw >> 8) & 0xff;
+        out[10] = rh & 0xff; out[11] = (rh >> 8) & 0xff;
+        out.set(payload, 12);
+        return out;
+      }
+    }
+  }
 
   const numColors = colors.length;
   const rowWidth = w;
@@ -763,7 +837,7 @@ export function encodeInkFromRGBA(rgba, w, h, options = {}) {
   }
 
   const out = new Uint8Array(4 + payload.length);
-  out[0] = fmt;
+  out[0] = fmt === 4 ? 3 : fmt;
   out[1] = String(displayId).charCodeAt(0);
   out[2] = ditherToByte(dither);
   out[3] = orientation & 1;

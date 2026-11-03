@@ -505,10 +505,10 @@ public partial class microPhotoFrame : System.Web.UI.Page {
         // Detect format version: Version 1 starts with 1, old format starts with display ID (< 32)
         int currentOrientation;
         string displayId;
-        if (rawdata.Length >= 4 && (rawdata[0] == 1 || rawdata[0] == 2 || rawdata[0] == 3)) {
-          // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
+        if (rawdata.Length >= 4 && rawdata[0] >= 1 && rawdata[0] <= 4) {
+          // v1 LZW, v2 Deflate, v3 Paeth+Deflate, v4 compact rect: [version, displayId, dither, flags, ...]
           displayId = ((char)rawdata[1]).ToString();
-          currentOrientation = rawdata[3]; // 0 = landscape, 1 = portrait
+          currentOrientation = rawdata[3] & 1; // bit0 = portrait; v4 bits1–4 = background index
         } else {
           // Old format (Version 0): [displayId, dither, orient, minCodeSize, ...]
           displayId = ((char)rawdata[0]).ToString();
@@ -793,9 +793,6 @@ public partial class microPhotoFrame : System.Web.UI.Page {
       row["channel"] = p.Name;
       row["pathId"] = ch["pathId"] != null ? ch["pathId"] : ToPathDisplay(displayId);
       row["displayId"] = ch["displayId"];
-      row["showName"] = ch["showName"] != null ? ch["showName"] : "";
-      JArray names = ch["shows"] as JArray;
-      row["shows"] = names != null ? names.Count : 0;
       groups.Add(row);
     }
     _r.output.user = user;

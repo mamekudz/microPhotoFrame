@@ -882,6 +882,7 @@ async function _copyRawmediaToWebassets(cb) {
 	Log('Sync rawmedia → webassets (Logo / LogoText)…<context="task section"/>');
 	const pairs = [
 		['rawmedia/Logo.png', 'webassets/Logo.png'],
+		['rawmedia/LogoPure.png', 'webassets/LogoPure.png'],
 		['rawmedia/LogoText.png', 'webassets/LogoText.png'],
 	];
 	for (const [relSrc, relDst] of pairs) {
@@ -1333,7 +1334,7 @@ _copyRawmediaToWebassets.µGroup = 'Assets<context="µGroup"/>'.i18xRegister();
 _copyRawmediaToWebassets.µIcon = '\uE919';
 _copyRawmediaToWebassets.µOrder = 20;
 _copyRawmediaToWebassets.µWatch = {
-	files: ['rawmedia/Logo.png', 'rawmedia/LogoText.png'],
+	files: ['rawmedia/Logo.png', 'rawmedia/LogoPure.png', 'rawmedia/LogoText.png'],
 	debounceMs: 300,
 	autoStart: false,
 };

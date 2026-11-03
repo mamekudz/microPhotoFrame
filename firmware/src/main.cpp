@@ -26,6 +26,7 @@
 #include <time.h>
 #include <vector>
 #include <cstdlib>
+#include <string.h>
 #if defined(__EXCEPTIONS) && __EXCEPTIONS
 #include <exception>
 #endif
@@ -37,10 +38,13 @@
 #include <sys/time.h>
 #include "esp_sleep.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
-#define FIRMWARE_VERSION "1.5.12"
+#define FIRMWARE_VERSION "1.5.13"
 
 #if !PHOTOFRAME_HAS_HW_SERIAL1
 #define Serial1 Serial
@@ -166,9 +170,19 @@ GxEPD2_DISPLAY_CLASS<GxEPD2_DRIVER_CLASS, MAX_HEIGHT(GxEPD2_DRIVER_CLASS)>
     display(GxEPD2_DRIVER_CLASS(/*CS=*/EPD_CS_PIN, /*DC=*/EPD_DC_PIN,
                                 /*RST=*/EPD_RES_PIN, /*BUSY=*/EPD_BUSY_PIN));
 
-/** Hibernate after the first .ink leaves BUSY stuck; the next init() never returns. */
-static void epdBeginRefresh() {
-  epdPowerOn();
+static void appendRuntimeLog(const char* tag, const String& detail = String());
+static void hangStage(const char* stage, bool noisy = true);
+static void hangAlive();
+static void hangNote(const char* tag, const String& detail = String());
+
+static bool g_epdInited = false;
+
+static bool epdIsBusy() {
+  pinMode(EPD_BUSY_PIN, INPUT);
+  return digitalRead(EPD_BUSY_PIN) == HIGH;
+}
+
+static void epdHardwareReset() {
   pinMode(EPD_RES_PIN, OUTPUT);
   digitalWrite(EPD_RES_PIN, HIGH);
   delay(10);
@@ -176,7 +190,39 @@ static void epdBeginRefresh() {
   delay(20);
   digitalWrite(EPD_RES_PIN, HIGH);
   delay(20);
-  display.init(115200, true);
+}
+
+/** GxEPD2 waits on BUSY with delay() so the Arduino WDT never fires. */
+static bool epdWaitIdle(uint32_t timeoutMs) {
+  const uint32_t t0 = millis();
+  while (epdIsBusy()) {
+    if (millis() - t0 > timeoutMs) return false;
+    delay(5);
+    yield();
+  }
+  return true;
+}
+
+/** Full init only once (or after hibernate). Extra RST without init leaves BUSY stuck. */
+static void epdBeginRefresh() {
+  hangStage("epdInit");
+  epdPowerOn();
+  if (!g_epdInited) {
+    display.init(115200, true);
+    g_epdInited = true;
+  }
+  hangStage("epdIdle");
+  hangAlive();
+}
+
+/** Hibernate after a photo left BUSY stuck on NeoFrame. powerOff is enough. */
+static void epdPrepareEspDeepSleep() {
+#if !PHOTOFRAME_HAS_BUTTONS
+  display.powerOff();
+#else
+  display.hibernate();
+#endif
+  g_epdInited = false;
 }
 
 // === Configuration Variables ===
@@ -191,6 +237,7 @@ String extractChannelSlug(const String& url);
 String makeServerRequest(String action, String jsonPayload = "{}");
 static String pathDisplayId();
 static String normalizeServerUrl(String url);
+static String sanitizeChannelSeg(String s);
 static void applyHostParts();
 static void parseLegacyHostParts();
 static void takeHostUrlAndUser(String urlIn, String userIn);
@@ -214,6 +261,7 @@ String currentShowMode = "forwardssequence"; // forwardssequence, reversesequenc
 int currentShowTimer = 5; // minutes
 int currentRestStart = 22;
 int currentRestEnd = 6;
+bool currentRestEnabled = false;
 int currentTzOffsetMin = 0;
 static uint32_t g_nextRestStart = 0;
 static uint32_t g_restSleepUntil = 0;
@@ -242,6 +290,137 @@ static uint64_t g_lightSleepMsTotal = 0;
 
 static uint64_t sessionMs() {
   return esp_timer_get_time() / 1000ULL + g_lightSleepMsTotal;
+}
+
+// Hang trail: last stage survives a reboot. GxEPD2 waits with delay() so the
+// Arduino loop WDT never fires; a separate task restarts after 120 s silence.
+static const uint8_t kHangRingN = 8;
+static const uint8_t kHangLine = 40;
+static const uint32_t kHangWatchMs = 120000;
+static char g_hangRing[kHangRingN][kHangLine];
+static uint8_t g_hangHead = 0;
+static char g_hangStage[20] = "boot";
+static char g_hangDiedIn[20] = "";
+static uint32_t g_hangBootReset = 0;
+static uint32_t g_hangRestarts = 0;
+static volatile uint32_t g_hangAliveMs = 0;
+static bool g_hangInRest = false;
+
+static const char* hangResetName(uint32_t r) {
+  switch ((esp_reset_reason_t)r) {
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_EXT: return "ext";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT: return "wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    default: return "other";
+  }
+}
+
+static bool hangResetLooksStuck(uint32_t r) {
+  esp_reset_reason_t rr = (esp_reset_reason_t)r;
+  return rr == ESP_RST_SW || rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT
+      || rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT;
+}
+
+static void hangSaveMeta() {
+  preferences.begin("mpfDiag", false);
+  preferences.putString("stage", g_hangStage);
+  preferences.putString("diedIn", g_hangDiedIn);
+  preferences.putUInt("hangN", g_hangRestarts);
+  preferences.putBytes("ring", g_hangRing, sizeof(g_hangRing));
+  preferences.putUChar("ringH", g_hangHead);
+  preferences.end();
+}
+
+static void hangLoad() {
+  preferences.begin("mpfDiag", true);
+  String st = preferences.getString("stage", "boot");
+  String died = preferences.getString("diedIn", "");
+  g_hangRestarts = preferences.getUInt("hangN", 0);
+  g_hangHead = preferences.getUChar("ringH", 0);
+  if (g_hangHead >= kHangRingN) g_hangHead = 0;
+  size_t n = preferences.getBytes("ring", g_hangRing, sizeof(g_hangRing));
+  preferences.end();
+  if (n != sizeof(g_hangRing)) memset(g_hangRing, 0, sizeof(g_hangRing));
+  strncpy(g_hangStage, st.c_str(), sizeof(g_hangStage) - 1);
+  strncpy(g_hangDiedIn, died.c_str(), sizeof(g_hangDiedIn) - 1);
+}
+
+static void hangAlive() {
+  g_hangAliveMs = millis();
+}
+
+static void hangStage(const char* stage, bool noisy) {
+  if (!stage || !stage[0]) return;
+  if (strcmp(g_hangStage, stage) == 0) return;
+  strncpy(g_hangStage, stage, sizeof(g_hangStage) - 1);
+  g_hangStage[sizeof(g_hangStage) - 1] = 0;
+  preferences.begin("mpfDiag", false);
+  preferences.putString("stage", g_hangStage);
+  preferences.end();
+  if (noisy) {
+    Serial1.print("stage ");
+    Serial1.println(g_hangStage);
+  }
+}
+
+static void hangNote(const char* tag, const String& detail) {
+  String line = String(tag);
+  if (detail.length()) {
+    line += ' ';
+    line += detail;
+  }
+  if (line.length() >= kHangLine) line = line.substring(0, kHangLine - 1);
+  memset(g_hangRing[g_hangHead], 0, kHangLine);
+  strncpy(g_hangRing[g_hangHead], line.c_str(), kHangLine - 1);
+  g_hangHead = (uint8_t)((g_hangHead + 1) % kHangRingN);
+  hangSaveMeta();
+  appendRuntimeLog(tag, detail);
+}
+
+static void hangWatchTask(void*) {
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    uint32_t last = g_hangAliveMs;
+    uint32_t now = millis();
+    uint32_t limit = kHangWatchMs;
+    if (strcmp(g_hangStage, "epdInit") == 0 || strcmp(g_hangStage, "epdPage") == 0)
+      limit = 80000;
+    if (last != 0 && (now - last) > limit) {
+      strncpy(g_hangDiedIn, g_hangStage, sizeof(g_hangDiedIn) - 1);
+      g_hangRestarts++;
+      hangSaveMeta();
+      Serial1.printf("HANG watchdog: stage=%s silent %lu ms — restart\n",
+                     g_hangStage, (unsigned long)(now - last));
+      Serial1.flush();
+      ESP.restart();
+    }
+  }
+}
+
+static String hangRingJson() {
+  String o = "[";
+  for (uint8_t i = 0; i < kHangRingN; i++) {
+    uint8_t idx = (uint8_t)((g_hangHead + i) % kHangRingN);
+    if (i) o += ',';
+    o += '"';
+    const char* s = g_hangRing[idx];
+    for (uint8_t k = 0; s[k] && k < kHangLine; k++) {
+      char c = s[k];
+      if (c == '\\' || c == '"') o += '\\';
+      if (c == '\r' || c == '\n') o += ' ';
+      else o += c;
+    }
+    o += '"';
+  }
+  o += ']';
+  return o;
 }
 
 // Geschätzte Stromaufnahme (mA) — Modell, keine Shunt-Messung; Werte für typisches ESP32+WiFi+E-Ink-Idle.
@@ -379,7 +558,7 @@ static void markServerPollWallClock() {
 }
 
 static bool restPeriodDisabled() {
-  return currentRestStart == currentRestEnd;
+  return !currentRestEnabled || currentRestStart == currentRestEnd;
 }
 
 static uint32_t restUtcAtHour(time_t localMid, int tzMin, int dayOff, int hour) {
@@ -465,9 +644,12 @@ static bool trySlideshowDeepSleep() {
       preferences.putInt("sImgIx", currentImageIndex);
       preferences.putUChar("dsAct", 3u);
       preferences.end();
+      hangStage("deepSleep");
+      hangNote("sleep", String("rest ") + String((unsigned long)sec) + "s");
       Serial1.printf("Deep sleep %lu s (Ruhezeit bis %lu)\n",
                      (unsigned long)sec, (unsigned long)g_restSleepUntil);
       Serial1.flush();
+      epdPrepareEspDeepSleep();
       WiFi.disconnect(true);
       delay(200);
       WiFi.mode(WIFI_OFF);
@@ -502,10 +684,13 @@ static bool trySlideshowDeepSleep() {
   preferences.putUChar("dsAct", dsAct);
   preferences.end();
 
+  hangStage("deepSleep");
+  hangNote("sleep", String("dsAct=") + String((unsigned)dsAct) + " " + String((unsigned long)sec) + "s");
   Serial1.printf("Deep sleep %lu s (dsAct=%u, bis Bild=%lu, bis Poll=%lu)\n",
                  (unsigned long)sec, (unsigned)dsAct, (unsigned long)secImg, (unsigned long)secPol);
   Serial1.flush();
 
+  epdPrepareEspDeepSleep();
   WiFi.disconnect(true);
   delay(200);
   WiFi.mode(WIFI_OFF);
@@ -594,7 +779,7 @@ bool sdCardMounted = false;
 /** Nach fehlgeschlagenem SD.begin (Karte meldet sich, Mount klappt nicht): kein SD.begin spam. */
 bool sdLazyMountFailed = false;
 
-static void appendRuntimeLog(const char* tag, const String& detail = String()) {
+static void appendRuntimeLog(const char* tag, const String& detail) {
   String line = String("[ses=") + String((unsigned long)(sessionMs() / 1000UL)) + "s] ";
   line += tag;
   line += " ";
@@ -711,15 +896,9 @@ void loadConfig() {
   if (rm > 1440) rm = 1440;
   quickMenuRevertMinutes = (uint16_t)rm;
   showTempOverrideUntilSessionMs = 0;
-#if !PHOTOFRAME_HAS_BUTTONS && (PHOTOFRAME_DEEP_SLEEP_DEFAULT == 0)
-  // 1.1/1.2 wrote dSleep=1 for every board. NeoFrame + powerbank: one-shot off.
-  if (!preferences.isKey("dsNfOk")) {
-    preferences.putUChar("dSleep", 0);
-    preferences.putUChar("dsNfOk", 1);
-  }
-#elif !PHOTOFRAME_HAS_BUTTONS && (PHOTOFRAME_DEEP_SLEEP_DEFAULT == 1)
-  // Waveshare: eigene Ladelogik, nicht NeoFrame. Einmalig an, falls dsNfOk es ausgeschaltet hat.
-  if (!preferences.isKey("dsWsOk")) {
+#if !PHOTOFRAME_HAS_BUTTONS && (PHOTOFRAME_DEEP_SLEEP_DEFAULT == 1)
+  // Waveshare: eigene Ladelogik. Einmalig an, falls ein älterer NeoFrame-Fix dSleep ausgeschaltet hat.
+  if (!preferences.isKey("dsWsOk") && !preferences.isKey("dSleep")) {
     preferences.putUChar("dSleep", 1);
     preferences.putUChar("dsWsOk", 1);
   }
@@ -760,11 +939,16 @@ void saveConfig() {
   preferences.putString("hostChannelUrl", hostChannelUrl);
   preferences.putString("uiLid", uiLid);
   preferences.putUChar("defOrient", configDefaultOrientation);
+  preferences.putUChar("dSleep", configSlideshowDeepSleep ? 1 : 0);
   preferences.end();
   Serial1.print("Config saved url=");
   Serial1.print(hostServerUrl);
   Serial1.print(" user=");
-  Serial1.println(hostUser);
+  Serial1.print(hostUser);
+  Serial1.print(" group=");
+  Serial1.print(hostTarget);
+  Serial1.print(" deepSleep=");
+  Serial1.println(configSlideshowDeepSleep ? "on" : "off");
 }
 
 /** Persist server URL + user immediately (Laden must not wait for Speichern). */
@@ -1123,8 +1307,9 @@ void handleRoot() {
   html += "<small style='color:#666;' data-i18n='serverUrlHint'>Host and port only, e.g. http://192.168.1.10:888</small><br>";
   html += "<label data-i18n='userId'>User ID</label><input type='text' name='user' id='hostUser' value='" + htmlEscapeSsid(hostUser) + "' placeholder='userid' autocomplete='off'><br>";
   html += "<label data-i18n='groupId'>Group ID</label>";
+  html += "<input type='text' name='group' id='hostGroup' value='" + htmlEscapeSsid(hostTarget) + "' data-i18n-placeholder='groupTyped' placeholder='family' autocomplete='off'><br>";
   html += "<div style='display:flex;gap:8px;align-items:center;'>";
-  html += "<select name='group' id='hostGroup' style='flex:1'>";
+  html += "<select id='hostGroupPick' style='flex:1'>";
   if (hostTarget.length() > 0) {
     html += "<option value='" + htmlEscapeSsid(hostTarget) + "' selected>" + htmlEscapeSsid(hostTarget) + "</option>";
   } else {
@@ -1147,17 +1332,17 @@ void handleRoot() {
 #else
   html += "<small style='color:#666;' data-i18n='orientNoMpu'>This device has no pose sensor. The chosen orientation is fixed.</small><br>";
 #endif
-#if !PHOTOFRAME_HAS_BUTTONS
   html += "<input type='hidden' name='deep_sleep_present' value='1'>";
   html += "<label style='display:flex;align-items:flex-start;gap:10px;margin-top:12px;text-align:left;'>";
   html += "<input type='checkbox' name='deep_sleep' value='1' style='width:auto;margin-top:4px;'";
   if (configSlideshowDeepSleep) html += " checked";
   html += ">";
-#if PHOTOFRAME_DEEP_SLEEP_DEFAULT
+#if PHOTOFRAME_HAS_BUTTONS
+  html += "<span data-i18n='deepSleepRt'>Deep Sleep between images (default, saves power). Needs a valid clock after WiFi.</span></label>";
+#elif PHOTOFRAME_DEEP_SLEEP_DEFAULT
   html += "<span data-i18n='deepSleepWs'>Deep Sleep between images. On by default on this board (own power/charge circuit).</span></label>";
 #else
   html += "<span data-i18n='deepSleep'>Deep Sleep between images. Off by default on NeoFrame: power banks cut power when current is low. Enable only with a wall supply.</span></label>";
-#endif
 #endif
   html += "<button type='submit' data-i18n='save'>Save</button>";
   html += "</form>";
@@ -1209,6 +1394,7 @@ void handleRoot() {
   html += "if(st)st.textContent=(list.length||0)+' '+t('scanFound');";
   html += "}).catch(function(){if(st){st.className='status warn';st.textContent=t('scanFail');}});";
   html += "}";
+  html += "function setGroup(id){var inp=document.getElementById('hostGroup');if(inp&&id)inp.value=id;}";
   html += "function loadTargets(){";
   html += "var st=document.getElementById('targetStatus');";
   html += "var url=document.getElementById('hostUrl').value.trim();";
@@ -1218,16 +1404,21 @@ void handleRoot() {
   html += "if(st){st.style.display='block';st.className='status ok';st.textContent=t('loadingGroups');}";
   html += "var body=new URLSearchParams();if(url)body.set('url',url);if(user)body.set('user',user);body.set('ssid',ssid);body.set('password',password);";
   html += "fetch('/targets',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body.toString()}).then(function(r){return r.json();}).then(function(data){";
-  html += "var sel=document.getElementById('hostGroup'); if(!sel)return;";
-  html += "var keep=sel.value; sel.innerHTML='';";
+  html += "var sel=document.getElementById('hostGroupPick'); if(!sel)return;";
+  html += "var inp=document.getElementById('hostGroup');";
+  html += "var keep=((inp&&inp.value)||sel.value||'').trim();";
+  html += "var k=keep.indexOf(' · ');if(k<0)k=keep.indexOf(' ');if(k>0)keep=keep.substring(0,k);";
   html += "var list=(data&&data.output&&(data.output.groups||data.output.targets))||[];";
   html += "if(!data||!data.ok){if(st){st.className='status warn';st.textContent=(data&&data.error&&data.error.msg)||t('groupsFail');}return;}";
-  html += "if(!list.length){sel.appendChild(new Option(t('noGroups'),''));if(st){st.className='status warn';st.textContent=t('noGroupsHint');}return;}";
-  html += "list.forEach(function(g){var id=g.groupId||g.group||g.target;var o=new Option(id+(g.showName?' · '+g.showName:''),id);sel.appendChild(o);});";
-  html += "if(keep)sel.value=keep; if(!sel.value&&list[0])sel.value=list[0].groupId||list[0].group||list[0].target;";
+  html += "sel.innerHTML='';";
+  html += "if(!list.length){if(keep){sel.appendChild(new Option(keep,keep));sel.value=keep;setGroup(keep);}else sel.appendChild(new Option(t('noGroups'),''));if(st){st.className='status warn';st.textContent=t('noGroupsHint');}return;}";
+  html += "if(keep)sel.appendChild(new Option(keep,keep));";
+  html += "list.forEach(function(g){var id=String((g&&(g.groupId||g.group||g.target))||'').trim();if(!id)return;var sp=id.indexOf(' · ');if(sp<0)sp=id.indexOf(' ');if(sp>0)id=id.substring(0,sp);if(id===keep)return;sel.appendChild(new Option(id,id));});";
+  html += "if(keep){sel.value=keep;setGroup(keep);}else if(list[0]){var f=String(list[0].groupId||list[0].group||list[0].target||'').trim();sel.value=f;setGroup(f);}";
   html += "if(st){st.className='status ok';st.textContent=list.length+' '+t('groupsOk');}";
   html += "}).catch(function(){if(st){st.style.display='block';st.className='status warn';st.textContent=t('groupsNetFail');}});";
   html += "}";
+  html += "var gp=document.getElementById('hostGroupPick');if(gp)gp.addEventListener('change',function(){setGroup(gp.value);});";
   html += "var lt=document.getElementById('loadTargetsBtn');if(lt)lt.addEventListener('click',function(e){e.preventDefault();loadTargets();});";
   html += "if(document.getElementById('hostUrl').value.trim()&&document.getElementById('hostUser').value.trim())loadTargets();";
   html += "loadScan();";
@@ -1267,7 +1458,7 @@ void handleSave() {
       uiLid = server.arg("lid");
       uiLid.trim();
     }
-    hostTarget = targetIn;
+    hostTarget = sanitizeChannelSeg(targetIn);
     takeHostUrlAndUser(urlIn, userIn);
     if (hostUser.length() == 0 || hostTarget.length() == 0) {
       hostChannelUrl = urlIn;
@@ -1280,12 +1471,6 @@ void handleSave() {
     }
     if (server.hasArg("deep_sleep_present")) {
       configSlideshowDeepSleep = server.hasArg("deep_sleep");
-      preferences.begin("microPhotoFrame", false);
-      preferences.putUChar("dSleep", configSlideshowDeepSleep ? 1 : 0);
-#if !PHOTOFRAME_HAS_BUTTONS
-      preferences.putUChar("dsNfOk", 1);
-#endif
-      preferences.end();
     }
     saveConfig();
     
@@ -1676,8 +1861,6 @@ static void useNativePanelRotation() {
   display.setRotation(0);
 }
 
-static bool g_epdInited = false;
-
 static void ensureEpdInited() {
   if (g_epdInited) return;
   epdBeginRefresh();
@@ -1801,6 +1984,8 @@ static void showStatusScreen(const char* line1, const char* line2, const char* l
   }
   display.setTextSize(1);
   display.display(false);
+  hangStage("epdDone");
+  hangAlive();
 }
 
 static void showStatusOrKeepLast(const char* line1, const char* line2, const char* line3) {
@@ -1815,6 +2000,7 @@ static void showStatusOrKeepLast(const char* line1, const char* line2, const cha
 
 // === Forward Declarations ===
 bool downloadImage(String imageName);
+void displayNextImage();
 static String buildImageUrlForShow(const String& imageName, bool nested = true);
 bool decodeAndDisplayInk(const String& filename, bool offlineHint = false);
 bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint = false);
@@ -1923,7 +2109,27 @@ static String normalizeServerUrl(String url) {
   return url;
 }
 
+static String sanitizeChannelSeg(String s) {
+  s.trim();
+  int cut = s.indexOf(" · ");
+  if (cut < 0) cut = s.indexOf("·");
+  if (cut >= 0) s = s.substring(0, cut);
+  s.trim();
+  int sp = s.indexOf(' ');
+  if (sp > 0) s = s.substring(0, sp);
+  String out;
+  for (unsigned i = 0; i < s.length() && out.length() < 32; i++) {
+    char c = s.charAt(i);
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '_' || c == '-')
+      out += c;
+  }
+  return out;
+}
+
 static void applyHostParts() {
+  hostUser = sanitizeChannelSeg(hostUser);
+  hostTarget = sanitizeChannelSeg(hostTarget);
   if (hostServerUrl.length() == 0 || hostUser.length() == 0 || hostTarget.length() == 0) return;
   hostChannelUrl = hostServerUrl + "shows/" + hostUser + "/" + hostTarget + "/" + pathDisplayId();
 }
@@ -1991,6 +2197,21 @@ static String withDeviceInfo(String jsonPayload) {
   device["showName"] = currentShowName;
   device["imgName"] = (currentImageIndex >= 0 && currentImageIndex < (int)currentShowImages.size())
       ? currentShowImages[currentImageIndex] : "";
+  device["stage"] = g_hangStage;
+  device["resetReason"] = hangResetName(g_hangBootReset);
+  device["hangRestarts"] = g_hangRestarts;
+  device["diedIn"] = g_hangDiedIn;
+  device["timerMin"] = currentShowTimer;
+  device["imgIndex"] = currentImageIndex;
+  device["imgCount"] = (int)currentShowImages.size();
+  device["restEnabled"] = currentRestEnabled;
+  device["deepSleep"] = configSlideshowDeepSleep;
+  {
+    time_t nowt = time(nullptr);
+    uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+    device["restActive"] = nowu && isInRestPeriod(nowu);
+  }
+  device["sinceImgS"] = (unsigned long)((sessionMs() - lastImageChangeSessionMs) / 1000ULL);
   String out;
   serializeJson(req, out);
   return out;
@@ -2207,12 +2428,29 @@ static bool fetchServerShowImagesFingerprint(const String& showName, uint32_t* o
   JsonDocument doc;
   if (deserializeJson(doc, response) != DeserializationError::Ok) return false;
   if (!doc["ok"].as<bool>()) return false;
-  JsonArray imgs = doc["output"]["show"]["imgs"];
+  JsonObject show = doc["output"]["show"];
+  if (!show.isNull()) {
+    int t = show["timer"] | currentShowTimer;
+    if (t < 1) t = 5;
+    if (t > 1440) t = 1440;
+    currentShowTimer = t;
+  }
+  JsonArray imgs = show["imgs"];
   *outFp = computeShowImagesFingerprint(imgs);
   return true;
 }
 
+/** After a silent show reload, keep the current photo unless the index is invalid. */
+static void showImageIfIndexInvalid() {
+  if (currentShowImages.size() == 0) return;
+  if (currentImageIndex >= 0 && currentImageIndex < (int)currentShowImages.size()) return;
+  currentImageIndex = -1;
+  displayNextImage();
+}
+
 bool getActiveShow() {
+  hangStage("getShows");
+  hangAlive();
   Serial1.println("Fetching active show...");
   lastChannelUnintended = false;
   
@@ -2294,6 +2532,9 @@ bool getActiveShow() {
     if (!chDisplay[0] || displayIdsEqual(chDisplay, DEVICE_DISPLAY_ID)) {
       newShowName = channelVar["showName"] | "";
     }
+    if (currentChannelPath.length() == 0 && hostUser.length() > 0 && hostTarget.length() > 0) {
+      currentChannelPath = hostUser + "/" + hostTarget + "/" + pathDisplayId();
+    }
   }
   if (newShowName.length() == 0) {
     JsonObject activeShows = doc["output"]["shows"]["activeShows"];
@@ -2360,9 +2601,9 @@ bool getActiveShow() {
 
   if (newShowName != currentShowName) {
     currentShowName = newShowName;
-    currentImageIndex = 0;
-    currentShowImages.clear();
-    // Show-Name persistent speichern (Wiederherstellung nach Reboot)
+    currentImageIndex = -1;
+    // Keep the last image list until loadShowData succeeds — a failed
+    // reload must not leave the frame with zero pictures.
     preferences.begin("microPhotoFrame", false);
     preferences.putString("lastShow", currentShowName);
     preferences.end();
@@ -2400,6 +2641,8 @@ bool loadShowData() {
   if (currentShowName.length() == 0) {
     return false;
   }
+  hangStage("getShow");
+  hangAlive();
   
   Serial1.print("Loading show data for: ");
   Serial1.println(currentShowName);
@@ -2432,6 +2675,9 @@ bool loadShowData() {
   currentRestEnd = show["restEnd"] | 6;
   if (currentRestStart < 0 || currentRestStart > 23) currentRestStart = 22;
   if (currentRestEnd < 0 || currentRestEnd > 23) currentRestEnd = 6;
+  if (show["restEnabled"].is<bool>()) currentRestEnabled = show["restEnabled"].as<bool>();
+  else if (show["restEnabled"].is<int>()) currentRestEnabled = show["restEnabled"].as<int>() != 0;
+  else currentRestEnabled = false;
   currentTzOffsetMin = show["tzOffsetMin"] | 0;
   g_nextRestStart = show["nextRestStart"] | 0;
   g_restSleepUntil = show["restSleepUntil"] | 0;
@@ -2442,16 +2688,22 @@ bool loadShowData() {
     }
   }
   
-  // Store all images first
-  allShowImages.clear();
-  currentShowImages.clear();
+  std::vector<String> newAll;
   JsonArray imgs = show["imgs"];
   for (JsonVariant img : imgs) {
-    allShowImages.push_back(img.as<String>());
+    String n = img.as<String>();
+    if (n.length()) newAll.push_back(n);
   }
-  
-  // Filter images based on current orientation
+  if (newAll.size() == 0) {
+    hangNote("loadShow", String("empty imgs ") + currentShowName);
+    return false;
+  }
+  allShowImages.swap(newAll);
   filterImagesByOrientation();
+  if (currentShowImages.size() == 0) {
+    hangNote("loadShow", String("no images ") + currentShowName);
+    return false;
+  }
   
   Serial1.print("Loaded ");
   Serial1.print(allShowImages.size());
@@ -2471,36 +2723,11 @@ bool loadShowData() {
   Serial1.print("Timer: ");
   Serial1.print(currentShowTimer);
   Serial1.println(" minutes");
-  Serial1.printf("Rest: %02d:00-%02d:00%s\n", currentRestStart, currentRestEnd,
-                 restPeriodDisabled() ? " (off)" : "");
+  Serial1.printf("Rest: %s %02d:00-%02d:00%s\n",
+                 currentRestEnabled ? "on" : "off",
+                 currentRestStart, currentRestEnd,
+                 restPeriodDisabled() ? " (disabled)" : "");
   
-  // Download images to SD card if available (for offline mode)
-  if (isSDCardAvailable()) {
-    Serial1.println("SD card available - downloading images for offline use...");
-    for (size_t i = 0; i < currentShowImages.size(); i++) {
-      String imageName = currentShowImages[i];
-      if (!SD.exists("/" + imageName)) {
-        Serial1.print("Downloading image ");
-        Serial1.print(i + 1);
-        Serial1.print("/");
-        Serial1.print(currentShowImages.size());
-        Serial1.print(": ");
-        Serial1.println(imageName);
-        if (!downloadImage(imageName)) {
-          Serial1.print("Failed to download: ");
-          Serial1.println(imageName);
-        }
-        delay(100); // Small delay between downloads
-      } else {
-        Serial1.print("Image already exists: ");
-        Serial1.println(imageName);
-      }
-    }
-    Serial1.println("All images ready on SD card");
-  } else {
-    Serial1.println("No SD card - images will be loaded directly from server");
-  }
-
   loadedShowImagesFingerprint = computeShowImagesFingerprint(imgs);
   randomCyclePrepare();
 
@@ -2694,6 +2921,54 @@ static void inversePaethPrediction(uint8_t* data, int count, int width, int numC
   }
 }
 
+static int decodeLZW(const uint8_t* fileData, int fileSize, int dataPtr,
+                     uint8_t minCodeSize, uint8_t* result, int totalPixels);
+
+/** v1–v3: full panel. v4: bg palette index + content rect, Paeth+Deflate of that rect. */
+static int decodeInkRaster(const uint8_t* fileData, size_t fileSize,
+                           uint8_t* result, int panelW, int panelH) {
+  if (!fileData || fileSize < 4 || !result) return 0;
+  const uint8_t version = fileData[0];
+  const int totalPixels = panelW * panelH;
+  if (version == 4) {
+    if (fileSize < 12) return 0;
+    uint8_t bg = (fileData[3] >> 1) & 0x0F;
+    if (bg >= PANEL_PALETTE_SIZE) bg = 0;
+    const uint16_t cx = (uint16_t)(fileData[4] | (fileData[5] << 8));
+    const uint16_t cy = (uint16_t)(fileData[6] | (fileData[7] << 8));
+    const uint16_t cw = (uint16_t)(fileData[8] | (fileData[9] << 8));
+    const uint16_t ch = (uint16_t)(fileData[10] | (fileData[11] << 8));
+    if (cw < 1 || ch < 1 || (int)cx + cw > panelW || (int)cy + ch > panelH) return 0;
+    const int contentN = (int)cw * (int)ch;
+    uint8_t* block = (uint8_t*)pfAlloc((size_t)contentN);
+    if (!block) return 0;
+    int n = decodeDeflate(fileData + 12, fileSize - 12, block, (size_t)contentN);
+    if (n > 0) inversePaethPrediction(block, n, cw, PANEL_PALETTE_SIZE);
+    memset(result, bg, (size_t)totalPixels);
+    if (n != contentN) {
+      free(block);
+      return 0;
+    }
+    for (int row = 0; row < ch; row++) {
+      memcpy(result + ((int)cy + row) * panelW + cx, block + row * cw, cw);
+    }
+    free(block);
+    Serial1.printf("INK v4 bg=%u rect=%u,%u %ux%u\n",
+                   (unsigned)bg, (unsigned)cx, (unsigned)cy, (unsigned)cw, (unsigned)ch);
+    return totalPixels;
+  }
+  if (version == 3) {
+    int n = decodeDeflate(fileData + 4, fileSize - 4, result, (size_t)totalPixels);
+    if (n > 0) inversePaethPrediction(result, n, panelW, PANEL_PALETTE_SIZE);
+    return n;
+  }
+  if (version == 2) {
+    return decodeDeflate(fileData + 4, fileSize - 4, result, (size_t)totalPixels);
+  }
+  if (version > 4) return 0;
+  return decodeLZW(fileData, (int)fileSize, 4, 3, result, totalPixels);
+}
+
 // Decode LZW data (Version 0/1 .ink files)
 static int decodeLZW(const uint8_t* fileData, int fileSize, int dataPtr,
                      uint8_t minCodeSize, uint8_t* result, int totalPixels) {
@@ -2808,10 +3083,11 @@ static bool offlineBadgePixel(int x, int y, int dw, int dh, uint16_t& outColor) 
 }
 
 // Display decoded pixel data on the E-Ink display
-static void displayPixels(uint8_t* result, int resIdx,
+static bool displayPixels(uint8_t* result, int resIdx,
                           int displayWidth, int displayHeight, int fileOrientation,
                           bool offlineHint) {
   epdBeginRefresh();
+  hangStage("epdPage");
   // Pixel liegen im nativen Panelraster; Hochkant steckt schon im .ink-Inhalt.
   // setRotation(1) würde das Raster drehen und drawPixel außerhalb verwerfen.
   display.setRotation(0);
@@ -2824,6 +3100,7 @@ static void displayPixels(uint8_t* result, int resIdx,
       if ((y & 7) == 0) {
         yield();
         esp_task_wdt_reset();
+        hangAlive();
       }
       for (int x = 0; x < displayWidth; x++) {
         uint16_t epdColor;
@@ -2843,10 +3120,38 @@ static void displayPixels(uint8_t* result, int resIdx,
       }
     }
   } while (display.nextPage());
-  // Hibernate after the first photo left BUSY stuck on NeoFrame (2nd image never came).
-  // Deep sleep still needs the panel asleep; otherwise just powerOff.
-  if (configSlideshowDeepSleep) display.hibernate();
-  else display.powerOff();
+  // Hibernate after a photo left BUSY stuck on the next init. Sleep the
+  // panel only immediately before ESP deep sleep; otherwise just powerOff.
+  display.powerOff();
+  hangStage("epdDone");
+  hangAlive();
+  return true;
+}
+
+/** Same rules as GetSafeShowName / safeShowDirName on the server. */
+static String safeShowDirName(const String& name) {
+  String safe;
+  safe.reserve(name.length());
+  for (unsigned i = 0; i < name.length(); i++) {
+    const char c = name.charAt(i);
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+      safe += c;
+    } else {
+      safe += '_';
+    }
+  }
+  while (safe.indexOf("..") >= 0) safe.replace("..", ".");
+  while (safe.length() > 0 && (safe.charAt(0) == '.' || safe.charAt(0) == '_')) {
+    safe.remove(0, 1);
+  }
+  while (safe.length() > 0) {
+    const char last = safe.charAt(safe.length() - 1);
+    if (last != '.' && last != '_') break;
+    safe.remove(safe.length() - 1);
+  }
+  if (safe.length() == 0 || safe.indexOf("..") >= 0) return String("show_unknown");
+  return String("show_") + safe;
 }
 
 static String buildImageUrlForShow(const String& imageName, bool nested) {
@@ -2866,8 +3171,12 @@ static String buildImageUrlForShow(const String& imageName, bool nested) {
     baseUrl += "/";
   }
   String imageUrl = baseUrl + "shows/";
-  if (nested && currentChannelPath.length() > 0) imageUrl += currentChannelPath + "/";
-  imageUrl += "show_" + currentShowName + "/" + imageName;
+  String ch = currentChannelPath;
+  if (ch.length() == 0 && hostUser.length() > 0 && hostTarget.length() > 0) {
+    ch = hostUser + "/" + hostTarget + "/" + pathDisplayId();
+  }
+  if (nested && ch.length() > 0) imageUrl += ch + "/";
+  imageUrl += safeShowDirName(currentShowName) + "/" + imageName;
   return imageUrl;
 }
 
@@ -2983,7 +3292,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
 
   uint8_t version = fileData[0];
   uint8_t displayId = fileData[1];
-  uint8_t orient = fileData[3];
+  uint8_t orient = fileData[3] & 1;
 
   Serial1.print("INK v"); Serial1.print(version);
   Serial1.print(" display="); Serial1.print((char)displayId);
@@ -3003,18 +3312,7 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
   uint8_t* result = (uint8_t*)pfAlloc(totalPixels);
   if (!result) { Serial1.println("Failed to allocate result buffer"); free(fileData); return false; }
 
-  int resIdx = 0;
-  if (version == 3) {
-    resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
-    if (resIdx > 0) {
-      inversePaethPrediction(result, resIdx, displayWidth, PANEL_PALETTE_SIZE);
-    }
-  } else if (version == 2) {
-    resIdx = decodeDeflate(fileData + 4, fileSize - 4, result, totalPixels);
-  } else {
-    uint8_t minCodeSize = 3;
-    resIdx = decodeLZW(fileData, fileSize, 4, minCodeSize, result, totalPixels);
-  }
+  int resIdx = decodeInkRaster(fileData, fileSize, result, displayWidth, displayHeight);
 
   free(fileData);
 
@@ -3027,8 +3325,9 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
     return false;
   }
 
-  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
+  const bool shown = displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
   free(result);
+  if (!shown) return false;
 
   Serial1.println("Image displayed successfully");
   return true;
@@ -3037,6 +3336,8 @@ bool decodeAndDisplayInk(const String& filename, bool offlineHint) {
 // Decode and display .ink file directly from HTTP stream (without SD card)
 bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   PowerHighScope _pwrHttpInk;
+  hangStage("httpInk");
+  hangAlive();
   Serial1.print("Loading .ink file from HTTP: ");
   Serial1.println(imageUrl);
   logHeap("httpInk start");
@@ -3096,6 +3397,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
       delay(1000); // Wait 1 second before retry
     }
     
+    hangAlive();
     httpCode = http.GET();
     Serial1.print("HTTP response code: ");
     Serial1.println(httpCode);
@@ -3219,6 +3521,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
         delay(2);
         yield();
         esp_task_wdt_reset();
+        hangAlive();
       }
       if (millis() - readStartTime > kHttpBodyTimeoutMs) {
         Serial1.println("Read timeout!");
@@ -3275,6 +3578,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
         delay(2);
         yield();
         esp_task_wdt_reset();
+        hangAlive();
       }
     }
     http.end();
@@ -3290,7 +3594,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
   
   uint8_t version = fileData[0];
   uint8_t displayId = fileData[1];
-  uint8_t orient = fileData[3];
+  uint8_t orient = fileData[3] & 1;
 
   Serial1.print("INK v"); Serial1.print(version);
   Serial1.print(" display="); Serial1.print((char)displayId);
@@ -3315,18 +3619,7 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
     return false;
   }
 
-  int resIdx = 0;
-  if (version == 3) {
-    resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
-    if (resIdx > 0) {
-      inversePaethPrediction(result, resIdx, displayWidth, PANEL_PALETTE_SIZE);
-    }
-  } else if (version == 2) {
-    resIdx = decodeDeflate(fileData + 4, bodyLen - 4, result, totalPixels);
-  } else {
-    uint8_t minCodeSize = 3;
-    resIdx = decodeLZW(fileData, bodyLen, 4, minCodeSize, result, totalPixels);
-  }
+  int resIdx = decodeInkRaster(fileData, bodyLen, result, displayWidth, displayHeight);
 
   Serial1.print("Decoded "); Serial1.print(resIdx);
   Serial1.print("/"); Serial1.print(totalPixels); Serial1.println(" pixels");
@@ -3338,10 +3631,11 @@ bool decodeAndDisplayInkFromHTTP(const String& imageUrl, bool offlineHint) {
     return false;
   }
 
-  displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
+  const bool shown = displayPixels(result, resIdx, displayWidth, displayHeight, fileOrientation, offlineHint);
 
   free(result);
   free(fileData);
+  if (!shown) return false;
 
   Serial1.println("Image displayed successfully from HTTP");
   return true;
@@ -3628,8 +3922,11 @@ void filterImagesByOrientation() {
 
 // === Image Display Logic ===
 void displayNextImage() {
+  hangStage("nextImg");
+  hangAlive();
   if (currentShowImages.size() == 0) {
     Serial1.println("No images in current show");
+    hangNote("next", "empty show");
     showStatusOrKeepLast("No images in show", currentShowName.c_str());
     return;
   }
@@ -3653,6 +3950,7 @@ void displayNextImage() {
 
   currentImageIndex = nextIndex;
   String imageName = currentShowImages[currentImageIndex];
+  hangNote("next", String(currentImageIndex + 1) + "/" + String((int)currentShowImages.size()) + " " + imageName);
   Serial1.print("Displaying image ");
   Serial1.print(currentImageIndex + 1);
   Serial1.print("/");
@@ -3689,6 +3987,7 @@ void displayNextImage() {
         Serial1.println("Image displayed from server (SD file unusable)");
       } else {
         Serial1.println("Failed to decode from SD and from server");
+        hangNote("nextFail", imageName);
         currentImageIndex = prevIndex;
         tryRedisplayLastWithOfflineBadge();
         slideTimerMarkNow();
@@ -3707,6 +4006,7 @@ void displayNextImage() {
       Serial1.println("Image displayed successfully from server");
     } else {
       Serial1.println("Failed to load image from server — behalte letztes Bild (ohne leeren Fehlerbildschirm)");
+      hangNote("httpFail", imageName);
       currentImageIndex = prevIndex;
       if (!tryRedisplayLastWithOfflineBadge()) {
         Serial1.println("Kein lokales letztes Bild: E-Ink bleibt unverändert.");
@@ -3800,6 +4100,20 @@ void handleDeviceInfo() {
   json += ",\"freeSketchSpace\":" + String(ESP.getFreeSketchSpace());
   json += ",\"display\":\"" + String(DEVICE_DISPLAY_ID) + "\"";
   json += ",\"deepSleep\":" + String(configSlideshowDeepSleep ? "true" : "false");
+  json += ",\"stage\":\"" + String(g_hangStage) + "\"";
+  json += ",\"resetReason\":\"" + String(hangResetName(g_hangBootReset)) + "\"";
+  json += ",\"hangRestarts\":" + String(g_hangRestarts);
+  json += ",\"diedIn\":\"" + String(g_hangDiedIn) + "\"";
+  json += ",\"restEnabled\":" + String(currentRestEnabled ? "true" : "false");
+  {
+    time_t nowt = time(nullptr);
+    uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+    json += ",\"restActive\":" + String((nowu && isInRestPeriod(nowu)) ? "true" : "false");
+  }
+  json += ",\"sinceImgS\":" + String((unsigned long)((sessionMs() - lastImageChangeSessionMs) / 1000ULL));
+  json += ",\"imgIndex\":" + String(currentImageIndex);
+  json += ",\"imgCount\":" + String((int)currentShowImages.size());
+  json += ",\"timerMin\":" + String(currentShowTimer);
   json += ",\"power\":{";
   json += "\"avgEstMa\":" + String(pwrEstimatedAvgMa(), 1);
   json += ",\"sessionMs\":" + String((unsigned long long)sessionMs());
@@ -3829,6 +4143,22 @@ void handleDiag() {
   String last = preferences.getString("lastErr", "");
   preferences.end();
   String json = "{\"lastErr\":\"" + jsonEscapeInner(last) + "\"";
+  json += ",\"stage\":\"" + jsonEscapeInner(String(g_hangStage)) + "\"";
+  json += ",\"diedIn\":\"" + jsonEscapeInner(String(g_hangDiedIn)) + "\"";
+  json += ",\"resetReason\":\"" + String(hangResetName(g_hangBootReset)) + "\"";
+  json += ",\"hangRestarts\":" + String(g_hangRestarts);
+  json += ",\"events\":" + hangRingJson();
+  json += ",\"restEnabled\":" + String(currentRestEnabled ? "true" : "false");
+  {
+    time_t nowt = time(nullptr);
+    uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
+    json += ",\"restActive\":" + String((nowu && isInRestPeriod(nowu)) ? "true" : "false");
+  }
+  json += ",\"sinceImgS\":" + String((unsigned long)((sessionMs() - lastImageChangeSessionMs) / 1000ULL));
+  json += ",\"show\":\"" + jsonEscapeInner(currentShowName) + "\"";
+  json += ",\"img\":\"" + jsonEscapeInner(
+      (currentImageIndex >= 0 && currentImageIndex < (int)currentShowImages.size())
+          ? currentShowImages[currentImageIndex] : String()) + "\"";
   json += ",\"power\":{";
   json += "\"avgEstMa\":" + String(pwrEstimatedAvgMa(), 1);
   json += ",\"sessionMs\":" + String((unsigned long long)sessionMs());
@@ -4273,6 +4603,19 @@ void setup() {
   delay(2000);
   Serial1.println("--- microPhotoFrame Firmware ---");
   Serial1.println(firmwareVersionLabel());
+  hangLoad();
+  g_hangBootReset = (uint32_t)esp_reset_reason();
+  Serial1.printf("reset=%s stageWas=%s diedIn=%s hangs=%u\n",
+                 hangResetName(g_hangBootReset), g_hangStage, g_hangDiedIn,
+                 (unsigned)g_hangRestarts);
+  if (hangResetLooksStuck(g_hangBootReset) && g_hangDiedIn[0]) {
+    hangNote("died", String(g_hangDiedIn) + " rst=" + hangResetName(g_hangBootReset));
+  } else if (hangResetLooksStuck(g_hangBootReset) && g_hangStage[0]) {
+    hangNote("died", String(g_hangStage) + " rst=" + hangResetName(g_hangBootReset));
+  }
+  hangStage("boot");
+  hangAlive();
+  xTaskCreate(hangWatchTask, "hangW", 3072, nullptr, 1, nullptr);
   logHeap("boot");
 
   esp_register_shutdown_handler(mpfShutdownHandler);
@@ -4322,6 +4665,7 @@ void setup() {
   // Initialize Display
   display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
   ensureEpdInited();
+  hangAlive();
   display.setRotation(DEFAULT_DISPLAY_ROTATION);
 
   sdPowerOn();
@@ -4609,6 +4953,7 @@ void setup() {
 
 // === Loop Function ===
 void loop() {
+  hangAlive();
   processUsbConfig();
   if (dnsServerActive) {
     dnsServer.processNextRequest();
@@ -4751,10 +5096,7 @@ void loop() {
       bool showUpdate = getActiveShow();
       if (showUpdate || currentShowImages.size() == 0) {
         if (loadShowData()) {
-          if (currentShowImages.size() > 0) {
-            currentImageIndex = -1;
-            displayNextImage();
-          }
+          showImageIfIndexInvalid();
         } else {
           tryRedisplayLastWithOfflineBadge();
         }
@@ -4765,7 +5107,9 @@ void loop() {
   }
 
   // --- Periodic server check for active show ---
-  if (wifiConnected && WiFi.status() == WL_CONNECTED && sessionMs() - lastServerCheckSessionMs > SERVER_CHECK_INTERVAL) {
+  const uint64_t pollEvery = (currentShowName.length() > 0 && currentShowImages.size() == 0)
+      ? 15000ULL : (uint64_t)SERVER_CHECK_INTERVAL;
+  if (wifiConnected && WiFi.status() == WL_CONNECTED && sessionMs() - lastServerCheckSessionMs > pollEvery) {
     lastServerCheckSessionMs = sessionMs();
     markServerPollWallClock();
     Serial1.println("Checking for active show update...");
@@ -4773,13 +5117,10 @@ void loop() {
     if (lastGetShowsSucceeded) {
       if (lastChannelUnintended) {
         showStatusScreen(noShowStatusTitle(), lastGetShowError.c_str(), hostChannelUrl.c_str());
-      } else if (showUpdate) {
-        Serial1.println("Active show changed, reloading...");
+      } else if (showUpdate || currentShowImages.size() == 0) {
+        Serial1.println(showUpdate ? "Active show changed, reloading..." : "Image list empty — reload show");
         if (loadShowData()) {
-          if (currentShowImages.size() > 0) {
-            currentImageIndex = -1;
-            displayNextImage();
-          }
+          showImageIfIndexInvalid();
         } else {
           Serial1.println("loadShowData failed — Hinweis-Badge, letztes Bild");
           tryRedisplayLastWithOfflineBadge();
@@ -4797,7 +5138,15 @@ void loop() {
   if (currentShowImages.size() > 0 && sessionMs() - lastImageChangeSessionMs > (uint64_t)currentShowTimer * 60000ULL) {
     time_t nowt = time(nullptr);
     uint32_t nowu = (nowt > 1700000000) ? (uint32_t)nowt : 0;
-    if (!(nowu && isInRestPeriod(nowu))) {
+    if (nowu && isInRestPeriod(nowu)) {
+      if (!g_hangInRest) {
+        g_hangInRest = true;
+        hangStage("rest");
+        hangNote("rest", String(currentRestStart) + "-" + String(currentRestEnd)
+            + " until=" + String((unsigned long)g_restSleepUntil));
+      }
+    } else {
+      g_hangInRest = false;
       displayNextImage();
     }
   }

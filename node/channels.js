@@ -575,9 +575,7 @@ function listTargetsForUserDisplay(shows, user, displayId) {
 			userId: u,
 			channel: id,
 			pathId: ch.pathId || toPathDisplay(eink),
-			displayId: ch.displayId,
-			showName: ch.showName || '',
-			shows: Array.isArray(ch.shows) ? ch.shows.length : 0
+			displayId: ch.displayId
 		});
 	}
 	return out;

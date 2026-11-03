@@ -9,6 +9,7 @@
  */
 import EInkDef from "./EInkDef.mjs?v=21";
 import { applyEinkToneRgb, nearestPaletteColor, suppressBrightEdgeHalos, floydErrorScaleToNeighbor } from "./einkContrast.mjs?v=8";
+import { SubjectFitRect, ContentBBoxFromRgba, InferBackgroundColor } from "./EInkAutoOptimize.mjs?v=exp10";
 
 /** Class with image helper functions.
  * @class EInk
@@ -170,9 +171,30 @@ export default class EInk {
     if (sw <= this.#imgOrg.width) sx = Math.max(0, Math.min(sx, this.#imgOrg.width - sw));
     if (sh <= this.#imgOrg.height) sy = Math.max(0, Math.min(sy, this.#imgOrg.height - sh));
 
+    let subjectFit = null;
+    if (_opts.cropToSubject) {
+      let bbox = _opts.subjectBbox;
+      if ((!bbox || bbox.length < 4) && this.#imgOrgData) {
+        bbox = ContentBBoxFromRgba(this.#imgOrgData.data, this.#imgOrg.width, this.#imgOrg.height);
+      }
+      const fitW = rotate ? dh : dw;
+      const fitH = rotate ? dw : dh;
+      subjectFit = SubjectFitRect(bbox, this.#imgOrg.width, this.#imgOrg.height, fitW, fitH);
+    }
+
+    let fill = _opts.cutBgrdColor || "#ffffff";
+    if (subjectFit && this.#imgOrgData && _opts.autoBackground !== false) {
+      const inferred = InferBackgroundColor(
+        this.#imgOrgData.data,
+        this.#imgOrg.width,
+        this.#imgOrg.height
+      );
+      if (inferred) fill = inferred;
+    }
+
     let ctx = this.#imgCnvCtx;
     ctx.save();
-    ctx.fillStyle = _opts.cutBgrdColor || "#ffffff";
+    ctx.fillStyle = fill;
     ctx.fillRect(0, 0, dw, dh);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
@@ -181,7 +203,15 @@ export default class EInk {
       ctx.translate(dw / 2, dh / 2);
       // −90° (CCW), keine Spiegelung — PC-Inverse: GDI+ Rotate90 / ink-encoder, siehe docs/INK_ORIENTATION_PC.md
       ctx.rotate(-90 * Math.PI / 180);
-      ctx.drawImage(this.#imgOrg, sx, sy, sw, sh, -dh / 2, -dw / 2, dh, dw);
+      if (subjectFit) {
+        ctx.drawImage(this.#imgOrg, subjectFit.sx, subjectFit.sy, subjectFit.sw, subjectFit.sh,
+          -dh / 2 + subjectFit.dx, -dw / 2 + subjectFit.dy, subjectFit.dw, subjectFit.dh);
+      } else {
+        ctx.drawImage(this.#imgOrg, sx, sy, sw, sh, -dh / 2, -dw / 2, dh, dw);
+      }
+    } else if (subjectFit) {
+      ctx.drawImage(this.#imgOrg, subjectFit.sx, subjectFit.sy, subjectFit.sw, subjectFit.sh,
+        subjectFit.dx, subjectFit.dy, subjectFit.dw, subjectFit.dh);
     } else {
       ctx.drawImage(this.#imgOrg, sx, sy, sw, sh, 0, 0, dw, dh);
     }
@@ -288,16 +318,37 @@ export default class EInk {
     }
 
     const numColors = display.colors.length;
+    const ditherByte = (this.#ditherType === 'bayer' ? 1 : (this.#ditherType === 'floyd' ? 2 : 0));
+    const orientBit = (this.#aspect === EInkDef.PORTRAIT ? 1 : 0);
+
+    if (!mask) {
+      const bg = EInk.#inferBgIndex(allPixels, w, h);
+      const rect = EInk.#contentRect(allPixels, w, h, bg);
+      if (rect.w * rect.h < w * h * 0.92 && (rect.w < w || rect.h < h)) {
+        const block = EInk.#extractRect(allPixels, w, rect);
+        const predicted = EInk.#applyPaethPrediction(block, rect.w, numColors);
+        const compressed = await EInk.#deflateRaw(predicted);
+        const out = new Uint8Array(12 + compressed.length);
+        out[0] = 4;
+        out[1] = display.id.charCodeAt(0);
+        out[2] = ditherByte;
+        out[3] = orientBit | ((bg & 0x0f) << 1);
+        out[4] = rect.x & 0xff; out[5] = (rect.x >> 8) & 0xff;
+        out[6] = rect.y & 0xff; out[7] = (rect.y >> 8) & 0xff;
+        out[8] = rect.w & 0xff; out[9] = (rect.w >> 8) & 0xff;
+        out[10] = rect.h & 0xff; out[11] = (rect.h >> 8) & 0xff;
+        out.set(compressed, 12);
+        return out;
+      }
+    }
+
     const predicted = EInk.#applyPaethPrediction(pixelsToEncode, encodeWidth, numColors);
     const compressed = await EInk.#deflateRaw(predicted);
-
-    // Version 3: Paeth prediction + Deflate
-    const VERSION = 3;
     let out = new Uint8Array(4 + compressed.length);
-    out[0] = VERSION;
+    out[0] = 3;
     out[1] = display.id.charCodeAt(0);
-    out[2] = (this.#ditherType === 'bayer' ? 1 : (this.#ditherType === 'floyd' ? 2 : 0));
-    out[3] = (this.#aspect === EInkDef.PORTRAIT ? 1 : 0);
+    out[2] = ditherByte;
+    out[3] = orientBit;
     out.set(compressed, 4);
     return out;
   }
@@ -418,7 +469,19 @@ export default class EInk {
 
     // Detect format version
     let version, displayIdChar, storedDither, storedOrient, dataPtr;
-    if (data.length >= 4 && data[0] === 3) {
+    let bgIndex = 0, cx = 0, cy = 0, cw = 0, ch = 0;
+    if (data.length >= 12 && data[0] === 4) {
+      version = 4;
+      displayIdChar = String.fromCharCode(data[1]);
+      storedDither = data[2];
+      storedOrient = data[3] & 1;
+      bgIndex = (data[3] >> 1) & 0x0f;
+      cx = data[4] | (data[5] << 8);
+      cy = data[6] | (data[7] << 8);
+      cw = data[8] | (data[9] << 8);
+      ch = data[10] | (data[11] << 8);
+      dataPtr = 12;
+    } else if (data.length >= 4 && data[0] === 3) {
       // Version 3: Paeth prediction + Deflate
       version = 3;
       displayIdChar = String.fromCharCode(data[1]);
@@ -458,7 +521,12 @@ export default class EInk {
     const validPixelCount = mask ? mask.reduce((sum, val) => sum + val, 0) : totalPixels;
 
     let decodedPixels;
-    if (version === 3) {
+    if (version === 4) {
+      if (cw < 1 || ch < 1 || cx + cw > w || cy + ch > h) return;
+      const deltas = await EInk.#inflateRaw(data.slice(dataPtr));
+      const numColors = this.#display.colors.length;
+      decodedPixels = EInk.#inversePaethPrediction(deltas, cw, numColors);
+    } else if (version === 3) {
       const compressed = data.slice(dataPtr);
       const deltas = await EInk.#inflateRaw(compressed);
       const numColors = this.#display.colors.length;
@@ -476,21 +544,43 @@ export default class EInk {
     const imgData = this.#imgCnvCtx.createImageData(w, h);
     const palette = this.#display.colors.map(c => this.#Hex2RGB(c));
     const defaultColor = palette[0];
+    const bgColor = (version === 4 && palette[bgIndex]) ? palette[bgIndex] : defaultColor;
 
-    let decodedIdx = 0;
-    for (let i = 0; i < totalPixels; i++) {
-      let color;
-      if (mask && mask[i] === 0) {
-        color = defaultColor;
-      } else {
-        const idx = decodedPixels[decodedIdx++];
-        color = (idx !== undefined && palette[idx]) ? palette[idx] : defaultColor;
+    if (version === 4) {
+      for (let i = 0; i < totalPixels; i++) {
+        const pos = i * 4;
+        imgData.data[pos] = bgColor.r;
+        imgData.data[pos + 1] = bgColor.g;
+        imgData.data[pos + 2] = bgColor.b;
+        imgData.data[pos + 3] = 255;
       }
-      const pos = i * 4;
-      imgData.data[pos] = color.r;
-      imgData.data[pos + 1] = color.g;
-      imgData.data[pos + 2] = color.b;
-      imgData.data[pos + 3] = 255;
+      for (let y = 0; y < ch; y++) {
+        for (let x = 0; x < cw; x++) {
+          const idx = decodedPixels[y * cw + x];
+          const color = (idx !== undefined && palette[idx]) ? palette[idx] : bgColor;
+          const pos = ((cy + y) * w + (cx + x)) * 4;
+          imgData.data[pos] = color.r;
+          imgData.data[pos + 1] = color.g;
+          imgData.data[pos + 2] = color.b;
+          imgData.data[pos + 3] = 255;
+        }
+      }
+    } else {
+      let decodedIdx = 0;
+      for (let i = 0; i < totalPixels; i++) {
+        let color;
+        if (mask && mask[i] === 0) {
+          color = defaultColor;
+        } else {
+          const idx = decodedPixels[decodedIdx++];
+          color = (idx !== undefined && palette[idx]) ? palette[idx] : defaultColor;
+        }
+        const pos = i * 4;
+        imgData.data[pos] = color.r;
+        imgData.data[pos + 1] = color.g;
+        imgData.data[pos + 2] = color.b;
+        imgData.data[pos + 3] = 255;
+      }
     }
     this.#imgCnvCtx.putImageData(imgData, 0, 0);
   }
@@ -552,6 +642,44 @@ export default class EInk {
     }
     // Square geometry: all pixels are valid
     return null;
+  }
+
+  static #inferBgIndex(pixels, w, h) {
+    if (!pixels || !(w > 0) || !(h > 0)) return 0;
+    const votes = [pixels[0], pixels[w - 1], pixels[(h - 1) * w], pixels[h * w - 1]];
+    const counts = new Map();
+    for (const v of votes) counts.set(v, (counts.get(v) || 0) + 1);
+    let best = votes[0] || 0, n = 0;
+    for (const [k, c] of counts) if (c > n) { n = c; best = k; }
+    return best;
+  }
+
+  static #contentRect(pixels, w, h, bg) {
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (pixels[y * w + x] === bg) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX < 0) return { x: 0, y: 0, w: 1, h: 1 };
+    if (minX > 0) minX--;
+    if (minY > 0) minY--;
+    if (maxX < w - 1) maxX++;
+    if (maxY < h - 1) maxY++;
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+  }
+
+  static #extractRect(pixels, srcW, rect) {
+    const out = new Uint8Array(rect.w * rect.h);
+    for (let y = 0; y < rect.h; y++) {
+      const src = (rect.y + y) * srcW + rect.x;
+      out.set(pixels.subarray(src, src + rect.w), y * rect.w);
+    }
+    return out;
   }
 
   #GetPixelIndices(rgbaData, w, h, mask = null) {

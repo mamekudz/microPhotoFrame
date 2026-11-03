@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.0
+
+Ink format **v4**: background palette index in header flags, then a content rectangle (x,y,w,h) and Paeth+Deflate of that rect only. The decoder fills the panel with the background color and blits the subject.
+
+- `EncodeInk` option `compact` defaults to `"auto"`: writes v4 when the non-background rect is smaller than 92% of the panel.
+- `compact: false` keeps full-panel v3.
+- `DecodeInk` reads v1–v4 (inflate tries zlib, then raw deflate).
+- Photoshop codec and Windows preview handler decode v4.
+- Existing v0–v3 files still decode. Frames need firmware 1.5.13+ to display new v4 files.
+
 ## 2.1.0
 
 One short-id table, same as `docs/technical_overview.md`. No aliases and no path remapping.

@@ -1,7 +1,7 @@
 import "./microLib/Config.mjs";
 import EInkDef from "./microLib/EInkDef.mjs?v=21";
 import EInk from "./microLib/EInk.mjs";
-import { OptimizeImageForEink, FocusSpotFromPredictions, ResolveOptimizeBias } from "./microLib/EInkAutoOptimize.mjs?v=exp8";
+import { OptimizeImageForEink, FocusSpotFromPredictions, ResolveOptimizeBias, ZoomToSubject } from "./microLib/EInkAutoOptimize.mjs?v=exp10";
 import RESTX from "./microLib/RESTX.mjs?v=hang2";
 import "./microLib/StorageUtils.mjs";
 import WebUtils from "./microLib/WebUtils.mjs";
@@ -175,6 +175,7 @@ function saveSettingsToStorage() {
         orientation: document.getElementById('orientation').value,
         saveAspect: getSaveAspect(),
         autoOptimize: isAutoOptimizeEnabled(),
+        cropToSubject: isCropToSubjectEnabled(),
         optimizeStyle: getOptimizeStyle(),
         bgrdColor: document.getElementById('bgrdColor').value,
         displayID: document.getElementById('displayID').value
@@ -207,6 +208,42 @@ window.SyncAutoOptimize = function (fromId) {
     const other = document.getElementById(fromId === 'autoOptimize' ? 'autoOptimizeAdd' : 'autoOptimize');
     if (other && other.checked !== src.checked) other.checked = src.checked;
     saveSettingsToStorage();
+};
+
+const CROP_TO_SUBJECT_IDS = ['cropToSubject', 'cropToSubjectAdd'];
+
+function isCropToSubjectEnabled() {
+    for (const id of CROP_TO_SUBJECT_IDS) {
+        const el = document.getElementById(id);
+        if (el) return !!el.checked;
+    }
+    return true;
+}
+
+function setCropToSubject(on) {
+    const checked = !!on;
+    CROP_TO_SUBJECT_IDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = checked;
+    });
+    return checked;
+}
+
+function resolveCropToSubject(override) {
+    if (override && override.cropToSubject !== undefined) return !!override.cropToSubject;
+    return isCropToSubjectEnabled();
+}
+
+window.SyncCropToSubject = function (fromId) {
+    const src = document.getElementById(fromId);
+    if (!src) return;
+    setCropToSubject(src.checked);
+    saveSettingsToStorage();
+    if (currentFile && (isAutoOptimizeEnabled() || isCropToSubjectEnabled())) {
+        window.AutoOptimizeCurrentImage({ silent: true });
+    } else if (currentInk) {
+        window.UpdatePreview();
+    }
 };
 
 const OPTIMIZE_STYLE_IDS = ['optimizeStyle', 'optimizeStyleAdd', 'optimizeStyleAutoShow'];
@@ -246,7 +283,7 @@ function loadSettingsFromStorage() {
     if (!saved) return;
     const settings = JSON.parse(saved);
     Object.keys(settings).forEach(id => {
-        if (id === 'autoOptimize' || id === 'displayID') return;
+        if (id === 'autoOptimize' || id === 'cropToSubject' || id === 'displayID') return;
         const el = document.getElementById(id);
         if (el) el.value = settings[id];
     });
@@ -258,6 +295,7 @@ function loadSettingsFromStorage() {
     const autoAddEl = document.getElementById('autoOptimizeAdd');
     if (autoEl) autoEl.checked = autoOn;
     if (autoAddEl) autoAddEl.checked = autoOn;
+    setCropToSubject(settings.cropToSubject !== false);
     if (settings.optimizeStyle) setOptimizeStyle(settings.optimizeStyle);
 }
 
@@ -1312,6 +1350,7 @@ window.UpdatePreview = async function () {
     stdEInkConvert.ditherType = document.getElementById('dither').value;
     stdEInkConvert.cutAspect = parseInt(document.getElementById('orientation').value);
     stdEInkConvert.cutBgrdColor = document.getElementById('bgrdColor').value;
+    stdEInkConvert.cropToSubject = isCropToSubjectEnabled();
     stdEInkConvert.displayID = dID;
 
     // Update labels
@@ -1514,6 +1553,7 @@ window.ResetToDefault = async function () {
     const autoAddEl = document.getElementById('autoOptimizeAdd');
     if (autoEl) autoEl.checked = true;
     if (autoAddEl) autoAddEl.checked = true;
+    setCropToSubject(true);
     setOptimizeStyle('balanced');
     document.getElementById('bgrdColor').value = "#ffffff";
     syncPhotoSettingsDisplayFromContext();
@@ -1651,6 +1691,7 @@ function applyOptimizedSettingsToForm(opt) {
     setVal('dither', opt.ditherType);
     setVal('cutSpotX', opt.cutSpotX);
     setVal('cutSpotY', opt.cutSpotY);
+    setVal('bgrdColor', opt.cutBgrdColor);
 }
 
 async function loadImageFromFile(file) {
@@ -1706,7 +1747,8 @@ window.AutoOptimizeCurrentImage = async function (opts) {
             result = await OptimizeImageForEink(originalImg, {
                 display: EInkDef.DISPLAYS[displayID],
                 detectorModel,
-                style: getOptimizeStyle()
+                style: getOptimizeStyle(),
+                cropToSubject: resolveCropToSubject()
             });
         } finally {
             releaseLoadedImage(originalImg);
@@ -1714,6 +1756,7 @@ window.AutoOptimizeCurrentImage = async function (opts) {
 
         if (gen !== autoOptimizeGen) return;
         applyOptimizedSettingsToForm(result.settings);
+        stdEInkConvert.subjectBbox = (result.focus && result.focus.bbox) || null;
         if (result.focus && result.focus.label) {
             aiDetectedSpot = {
                 x: result.settings.cutSpotX,
@@ -2647,11 +2690,13 @@ window.ProcessAndAddPhotos = async function (override) {
             let spotX = 0.5;
             let spotY = 0.5;
 
+            let subjectBbox = null;
             if (isAutoOptimizeEnabled()) {
                 const opt = await OptimizeImageForEink(originalImg, {
                     display: EInkDef.DISPLAYS[displayIDKey],
                     predictions,
-                    style: (override && override.optimize) || getOptimizeStyle()
+                    style: (override && override.optimize) || getOptimizeStyle(),
+                    cropToSubject: resolveCropToSubject(override)
                 });
                 imageSettings = {
                     ...settings,
@@ -2660,10 +2705,12 @@ window.ProcessAndAddPhotos = async function (override) {
                 };
                 spotX = opt.settings.cutSpotX;
                 spotY = opt.settings.cutSpotY;
+                subjectBbox = opt.focus && opt.focus.bbox;
             } else if (predictions.length > 0) {
                 const focus = FocusSpotFromPredictions(predictions, originalImg.naturalWidth, originalImg.naturalHeight);
                 spotX = focus.cutSpotX;
                 spotY = focus.cutSpotY;
+                subjectBbox = focus.bbox;
             }
             
             const saveAspect = getSaveAspect();
@@ -2673,11 +2720,29 @@ window.ProcessAndAddPhotos = async function (override) {
             const encodeAndSave = async (cutAspect, extraSave) => {
                 const ink = new EInk(file, displayIDKey);
                 await ink.Load();
+                const disp = EInkDef.DISPLAYS[displayIDKey];
+                const dw = (disp && disp.width) || 0;
+                const dh = (disp && disp.height) || 0;
+                const cropAspect = (dw > 0 && dh > 0)
+                    ? (cutAspect === EInkDef.PORTRAIT ? dh / dw : dw / dh)
+                    : 0;
+                let zoom = imageSettings.zoom;
+                if (resolveCropToSubject(override) && subjectBbox) {
+                    zoom = ZoomToSubject(
+                        subjectBbox,
+                        originalImg.naturalWidth,
+                        originalImg.naturalHeight,
+                        cropAspect
+                    );
+                }
                 ink.Convert(new EInkDef({
                     ...imageSettings,
+                    zoom,
                     cutAspect,
                     cutSpotX: spotX,
-                    cutSpotY: spotY
+                    cutSpotY: spotY,
+                    cropToSubject: resolveCropToSubject(override),
+                    subjectBbox: subjectBbox
                 }));
                 const encoded = await ink.Encode();
                 const dataUri = EInk.GetDataURIByBase64(encoded.toBase64());
@@ -4184,6 +4249,8 @@ window.CreateAutoShow = async function () {
         const uiStyle = getOptimizeStyle();
         const optimize = (uiStyle && uiStyle !== 'balanced') ? uiStyle : (catalogStyle || uiStyle || 'balanced');
         setOptimizeStyle(optimize);
+        const cropToSubject = catalog.cropToSubject !== false;
+        setCropToSubject(cropToSubject);
 
         await window.ProcessAndAddPhotos({
             files,
@@ -4192,7 +4259,8 @@ window.CreateAutoShow = async function () {
             progressDiv,
             progressBar,
             progressText,
-            optimize
+            optimize,
+            cropToSubject
         });
     } catch (err) {
         say('#e74c3c', t('AutoShow failed: <err/><context="ui"/>', { err: restErr(err) }));
@@ -4453,22 +4521,31 @@ window.RefreshDevices = async function () {
             return;
         }
 
+        const esc = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         let html = '<table style="width:100%; border-collapse:collapse; font-size:0.9rem;">';
-        html += '<tr style="background:#f5f5f5; text-align:left;"><th style="padding:8px;">Name</th><th style="padding:8px;">IP</th><th style="padding:8px;">Display</th><th style="padding:8px;">Last Seen</th><th style="padding:8px;">Actions</th></tr>';
+        html += '<tr style="background:#f5f5f5; text-align:left;"><th style="padding:8px;">Name</th><th style="padding:8px;">IP</th><th style="padding:8px;">Display</th><th style="padding:8px;">Stage</th><th style="padding:8px;">Rest</th><th style="padding:8px;">Image</th><th style="padding:8px;">Last Seen</th><th style="padding:8px;">Actions</th></tr>';
         for (const key of keys) {
             const d = devices[key];
             const ip = d.ip || key.split('_').pop();
             const name = d.name || key;
             const display = displayNameForId(d.displayId || d.display) || d.displayId || d.display || '–';
             const lastSeen = d.lastEcho ? new Date(d.lastEcho).toLocaleString() : '–';
+            const stage = d.stage || '–';
+            const rest = d.restActive ? 'active' : (d.restEnabled ? 'on' : 'off');
+            const img = d.imgName || '–';
+            const hangs = d.hangRestarts ? ' · hangs ' + d.hangRestarts : '';
             html += `<tr style="border-bottom:1px solid #eee;">`;
-            html += `<td style="padding:8px;">${name}</td>`;
-            html += `<td style="padding:8px;"><code>${ip}</code></td>`;
-            html += `<td style="padding:8px;">${display}</td>`;
-            html += `<td style="padding:8px;">${lastSeen}</td>`;
+            html += `<td style="padding:8px;">${esc(name)}</td>`;
+            html += `<td style="padding:8px;"><code>${esc(ip)}</code></td>`;
+            html += `<td style="padding:8px;">${esc(display)}</td>`;
+            html += `<td style="padding:8px;"><code>${esc(stage)}</code>${esc(hangs)}</td>`;
+            html += `<td style="padding:8px;">${esc(rest)}</td>`;
+            html += `<td style="padding:8px;">${esc(img)}</td>`;
+            html += `<td style="padding:8px;">${esc(lastSeen)}</td>`;
             html += `<td style="padding:8px;">`;
-            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="window.QueryDeviceInfo('${ip}')">ℹ Info</button> `;
-            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="document.getElementById('otaDeviceIp').value='${ip}'">🎯 Select for OTA</button>`;
+            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="window.QueryDeviceInfo('${esc(ip)}')">ℹ Info</button> `;
+            html += `<button class="btn-action" style="font-size:0.8rem; padding:4px 10px;" onclick="document.getElementById('otaDeviceIp').value='${esc(ip)}'">🎯 Select for OTA</button>`;
             html += `</td></tr>`;
         }
         html += '</table>';
@@ -4483,7 +4560,7 @@ window.QueryDeviceInfo = async function (ip) {
         const res = await new RESTX().promiseCall('getDeviceInfo', { deviceIp: ip });
         const info = res.output?.deviceInfo;
         if (info) {
-            let msg = `Device: ${info.name || '?'}\nFirmware: ${info.version || '?'}${info.buildDate ? ' (' + info.buildDate + ')' : ''}\nMAC: ${info.mac || '?'}\nDisplay: ${info.display || '?'}\nFree Heap: ${info.freeHeap ? (info.freeHeap / 1024).toFixed(1) + ' KB' : '?'}\nSketch: ${info.sketchSize ? (info.sketchSize / 1024).toFixed(0) + ' KB' : '?'}\nFree Space: ${info.freeSketchSpace ? (info.freeSketchSpace / 1024).toFixed(0) + ' KB' : '?'}`;
+            let msg = `Device: ${info.name || '?'}\nFirmware: ${info.version || '?'}${info.buildDate ? ' (' + info.buildDate + ')' : ''}\nMAC: ${info.mac || '?'}\nDisplay: ${info.display || '?'}\nStage: ${info.stage || '?'}${info.diedIn ? ' (died in ' + info.diedIn + ')' : ''}\nReset: ${info.resetReason || '?'}\nHang restarts: ${info.hangRestarts == null ? '?' : info.hangRestarts}\nRest: ${info.restActive ? 'active' : (info.restEnabled ? 'on' : 'off')}\nSince image: ${info.sinceImgS == null ? '?' : info.sinceImgS + 's'}\nFree Heap: ${info.freeHeap ? (info.freeHeap / 1024).toFixed(1) + ' KB' : '?'}\nSketch: ${info.sketchSize ? (info.sketchSize / 1024).toFixed(0) + ' KB' : '?'}\nFree Space: ${info.freeSketchSpace ? (info.freeSketchSpace / 1024).toFixed(0) + ' KB' : '?'}`;
             alert(msg);
         }
     } catch (err) {

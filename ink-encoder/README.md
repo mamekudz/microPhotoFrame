@@ -2,7 +2,7 @@
 
 Node.js module for encoding/decoding .ink image files for E-Ink displays.
 
-This tree is the **2.1.0** workspace package inside [microPhotoFrame](https://github.com/mamekudz/microPhotoFrame). It is **not** drop-in compatible with npm `ink-encoder@1.0.0`. Unpublished drafts `1.2.0` / `1.2.1` must not be published. See [CHANGELOG.md](CHANGELOG.md).
+This tree is the **2.2.0** workspace package inside [microPhotoFrame](https://github.com/mamekudz/microPhotoFrame). It is **not** drop-in compatible with npm `ink-encoder@1.0.0`. Unpublished drafts `1.2.0` / `1.2.1` must not be published. See [CHANGELOG.md](CHANGELOG.md).
 
 **Die Kompatibilität mit früher erzeugten .ink-Dateien ist nicht garantiert. Beim Upgrade Encoder und Firmware gemeinsam auf zueinander passende Stände aktualisieren und bestehende Shows aus den Originalbildern neu erzeugen.**
 
@@ -128,8 +128,9 @@ const pngBuffer = await DecodeInk('./input.ink', options);
   - **isRound** (boolean): Ob das Display rund ist (Standard: `false`)
   - **dither** (string): Dithering-Typ: `"floyd"`, `"bayer"` oder `"none"` (Standard: `"floyd"`)
   - **orientation** (number): Orientierung: `0`=Landscape, `1`=Portrait (Standard: `0`)
-  - **compression** (string): `"lzw"` (v1), `"deflate"` (v2), `"deflatePaeth"` (v3, Standard)
-  - **inkFormat** (number, optional): `1` | `2` | `3` überschreibt `compression`
+  - **compression** (string): `"lzw"` (v1), `"deflate"` (v2), `"deflatePaeth"` (v3/v4, Standard)
+  - **inkFormat** (number, optional): `1` | `2` | `3` | `4` überschreibt `compression`
+  - **compact** (`"auto"` | `true` | `false`, Standard `"auto"`): bei rechteckigen Displays und flachem Hintergrund schreibt der Encoder **v4** (nur das Motiv-Rechteck). `false` erzwingt volles v3.
   - **colorAdjust** (Object): Farbanpassungen
     - **saturation** (number): Sättigung (Standard: `1.0`)
     - **contrast** (number): Kontrast (Standard: `1.0`)
@@ -246,18 +247,18 @@ gulp.task('convert-firmware-images', async () => {
 
 ## .ink-Dateiformat (microPhotoFrame-Firmware)
 
-Header **immer 4 Byte**, Payload ab Offset 4 (kein zusätzliches Kompressions-Byte mehr):
-
 | Byte | Inhalt |
 |------|--------|
-| 0 | Format: **1** = LZW (minCodeSize 3), **2** = zlib-Deflate Rohpixel, **3** = zlib-Deflate + Paeth (Deltas mod `numColors`) |
+| 0 | Format: **1** = LZW, **2** = Deflate Rohpixel, **3** = Paeth+Deflate Vollbild, **4** = Paeth+Deflate nur Motiv-Rechteck |
 | 1 | `displayId` (ASCII, z. B. `9` für Spectra 6 7,3" / reTerminal E1002) |
 | 2 | Dither: 0 = none, 1 = Bayer, 2 = Floyd-Steinberg |
-| 3 | Orientierung: 0 = Quer (Breite×Höhe), 1 = Hochkant (getauschte Abmessungen) |
+| 3 | Bit 0 = Orientierung (0=Quer, 1=Hoch). **v4:** Bits 1–4 = Hintergrund-Palettenindex |
+| 4–11 | **nur v4:** `x,y,w,h` als uint16 LE (Inhalt-Rechteck) |
+| danach | komprimierte Pixel (v1–3: ganzes Panel; v4: nur das Rechteck, Deflate-raw + Paeth) |
 
-**Optionen (Encode):** `compression` bzw. `inkFormat`: `lzw` / `deflate` / `deflatePaeth` (Standard). Für **runde** Displays wird v3 automatisch auf **v2** reduziert (Paeth braucht ein volles Rechteck-Raster).
+**Optionen (Encode):** `compression` bzw. `inkFormat`: `lzw` / `deflate` / `deflatePaeth` (Standard). `compact: "auto"` (Standard) schreibt **v4**, wenn das Motiv kleiner als das Panel ist. `compact: false` bleibt bei v3. Für **runde** Displays wird auf **v2** reduziert (Paeth braucht ein Rechteck-Raster).
 
-**Decode:** Liest das aktuelle 4-Byte-Format (v1–v3), das dieser Encoder schreibt. Die Kompatibilität mit früher erzeugten `.ink`-Dateien ist nicht garantiert.
+**Decode:** Liest v1–v4. v0 (Legacy) bleibt lesbar. Der Decoder füllt bei v4 zuerst die Hintergrundfarbe und setzt dann das Rechteck. Ältere Firmware ohne v4 weist solche Dateien zurück.
 
 ## Migration von npm 1.0.0
 
@@ -279,14 +280,15 @@ GetDisplayByShortId('I');
 
 2.1.0 restores the overview ids: Spectra 6 7.3" is `"9"` again, `"I"` is BWR 2.13". Use `EncodeInkFromDisplayId(..., '9', ...)`.
 
-| Thema | npm 1.0.0 | 2.0.0 | 2.1.0 |
-|--------|-----------|--------|--------|
-| Named exports | camelCase (`encodeInk`, `getDisplay`, …) | PascalCase (`EncodeInk`, `GetDisplayByShortId`, …), keine Aliase | wie 2.0.0 |
-| Spectra 6 7,3" | Short-ID **`"9"`** | Short-ID **`"I"`** (`"9"` existiert nicht) | **`"9"`** |
-| `"I"` | Spectra BWR 2,13" | Spectra 6 7,3" / reTerminal E1002 | Spectra BWR 2,13" |
-| `DISPLAYS` | Keys `"0"`…`"U"` | Lange Keys `EINK_…` | wie 2.0.0 |
-| Standard-Encode | immer `.ink` v1 LZW, Default-`displayId` `"9"` | `.ink` **v3** (Paeth+Deflate), Default-`displayId` `"0"` | wie 2.0.0 |
-| Firmware (microPhotoFrame) | Header-ID `"9"` | Header-ID `"I"` | Header-ID `"9"` |
+2.2.0 adds **ink v4** (background index + content rect). Default encode still uses Paeth+Deflate; `compact: "auto"` upgrades to v4 when it saves space.
+
+| Thema | npm 1.0.0 | 2.0.0 | 2.1.0 | 2.2.0 |
+|--------|-----------|--------|--------|--------|
+| Named exports | camelCase (`encodeInk`, `getDisplay`, …) | PascalCase (`EncodeInk`, `GetDisplayByShortId`, …), keine Aliase | wie 2.0.0 | wie 2.0.0 |
+| Spectra 6 7,3" | Short-ID **`"9"`** | Short-ID **`"I"`** (`"9"` existiert nicht) | **`"9"`** | **`"9"`** |
+| `"I"` | Spectra BWR 2,13" | Spectra 6 7,3" / reTerminal E1002 | Spectra BWR 2,13" | Spectra BWR 2,13" |
+| Standard-Encode | immer `.ink` v1 LZW | `.ink` **v3** (Paeth+Deflate) | wie 2.0.0 | **v4** wenn Motiv kleiner als das Panel, sonst v3 |
+| Firmware (microPhotoFrame) | Header-ID `"9"` | Header-ID `"I"` | Header-ID `"9"` | v4 braucht Firmware ≥ 1.5.13 |
 
 **Die Kompatibilität mit früher erzeugten .ink-Dateien ist nicht garantiert. Beim Upgrade Encoder und Firmware gemeinsam auf zueinander passende Stände aktualisieren und bestehende Shows aus den Originalbildern neu erzeugen.** Es gibt keine Zusage, dass der neue Decoder sämtliche alten Dateien korrekt liest oder dass alte Software neue Dateien liest. Details: [CHANGELOG.md](CHANGELOG.md).
 

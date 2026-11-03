@@ -2,6 +2,20 @@
 	{
 		"main": 1,
 		"minor": 5,
+		"revision": 13,
+		"date": "2026-11-03 16:35",
+		"beta": false,
+		"info": [
+			"Ink v4 stores a background palette index and the subject rectangle only, so letterbox bars are not baked into the file.",
+			"The website, firmware, IIS, Node and PHP read v4; existing v1–v3 files still display.",
+			"ink-encoder 2.2.0 writes v4 when the subject is smaller than the panel (compact: \"auto\").",
+			"The frame config page keeps Group ID and Deep Sleep; the group list shows group IDs only.",
+			"Crop-to-subject stays on conversion (Photo Settings, Add Photos, AutoShow), not on show playback settings."
+		]
+	},
+	{
+		"main": 1,
+		"minor": 5,
 		"revision": 12,
 		"date": "2026-11-01 14:30",
 		"beta": false,

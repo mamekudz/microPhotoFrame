@@ -137,6 +137,11 @@
       "name": "26_mosaik_widder",
       "url": "imgs/26_mosaik_widder.png",
       "description": "Mosaic ram"
+    },
+    {
+      "name": "27_geko",
+      "url": "imgs/27_geko.png",
+      "description": "Gemini"
     }
   ],
   "credits": {

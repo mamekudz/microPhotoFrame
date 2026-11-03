@@ -91,15 +91,15 @@ The images are stored in a special format (image/ink, or extension .ink) and are
 
 ### .ink File Format Versions
 
-The .ink format uses a 4-byte header followed by compressed pixel index data:
+Versions 0–3 use a 4-byte header followed by compressed full-panel pixel indices. Version 4 stores a background palette index and only the subject rectangle:
 
 | Byte | Content |
 |------|---------|
-| 0 | Version (0, 1, 2, or 3) |
+| 0 | Version (0, 1, 2, 3, or 4) |
 | 1 | Display ID (ASCII character, see table above) |
 | 2 | Dither type (0=none, 1=bayer, 2=floyd-steinberg) |
-| 3 | Orientation (0=landscape, 1=portrait) |
-| 4+ | Compressed pixel data |
+| 3 | Bit 0 = orientation (0=landscape, 1=portrait). v4 bits 1–4 = background palette index |
+| 4+ | v0–3: compressed full-panel pixels. v4: 8-byte rect (x,y,w,h as uint16 LE) then Paeth+Deflate of that rect |
 
 **Version history:**
 
@@ -109,8 +109,9 @@ The .ink format uses a 4-byte header followed by compressed pixel index data:
 | 1 | LZW | Standardized header with version byte |
 | 2 | Deflate (raw) | ~25-35% smaller than LZW |
 | 3 | Paeth prediction + Deflate | ~45-60% smaller than LZW, inspired by PNG/WebP VP8L |
+| 4 | Paeth + Deflate of subject rect | Background fill + content box — skips letterbox pixels |
 
-Version 3 applies a Paeth spatial predictor (predicting each pixel from its left, above, and above-left neighbors) before Deflate compression. This produces many zero-deltas in smooth image regions, which Deflate compresses very efficiently. All versions are backward-compatible: the firmware and web UI detect the version byte and select the appropriate decoder automatically.
+Version 3 applies a Paeth spatial predictor (predicting each pixel from its left, above, and above-left neighbors) before Deflate compression. This produces many zero-deltas in smooth image regions, which Deflate compresses very efficiently. Version 4 keeps that codec but encodes only the non-background rectangle; the decoder fills the panel with the stored palette color. Older firmware ignores v4 (size mismatch). New firmware and the web UI detect the version byte and select the appropriate decoder automatically.
 
 [Back to main page](../README.md).
 
@@ -208,15 +209,15 @@ Die Bilder werden in einem speziellen Format gespeichert (image/ink, bzw. Endung
 
 ### .ink Dateiformat-Versionen
 
-Das .ink-Format verwendet einen 4-Byte-Header gefolgt von komprimierten Pixel-Indexdaten:
+Versionen 0–3 nutzen einen 4-Byte-Header plus komprimierte Vollbild-Pixel. Version 4 speichert eine Hintergrund-Palettenfarbe und nur das Motiv-Rechteck:
 
 | Byte | Inhalt |
 |------|--------|
-| 0 | Version (0, 1, 2 oder 3) |
+| 0 | Version (0, 1, 2, 3 oder 4) |
 | 1 | Display-ID (ASCII-Zeichen, siehe Tabelle oben) |
 | 2 | Dither-Typ (0=keiner, 1=Bayer, 2=Floyd-Steinberg) |
-| 3 | Orientierung (0=Querformat, 1=Hochformat) |
-| 4+ | Komprimierte Pixeldaten |
+| 3 | Bit 0 = Orientierung (0=Quer, 1=Hoch). v4 Bits 1–4 = Hintergrund-Palettenindex |
+| 4+ | v0–3: komprimiertes Vollbild. v4: 8-Byte-Rechteck (x,y,w,h als uint16 LE), dann Paeth+Deflate dieses Rechtecks |
 
 **Versionshistorie:**
 
@@ -226,7 +227,8 @@ Das .ink-Format verwendet einen 4-Byte-Header gefolgt von komprimierten Pixel-In
 | 1 | LZW | Standardisierter Header mit Versionsbyte |
 | 2 | Deflate (raw) | ~25-35% kleiner als LZW |
 | 3 | Paeth-Prädiktion + Deflate | ~45-60% kleiner als LZW, inspiriert von PNG/WebP VP8L |
+| 4 | Paeth + Deflate nur Motiv | Hintergrundfüllung + Inhaltsbox — ohne Letterbox-Pixel |
 
-Version 3 wendet einen Paeth-Spatial-Predictor an (Vorhersage jedes Pixels aus den Nachbarn links, oben und oben-links) bevor Deflate komprimiert. Dies erzeugt viele Null-Deltas in gleichmäßigen Bildbereichen, die Deflate sehr effizient komprimiert. Alle Versionen sind abwärtskompatibel: Firmware und Web-UI erkennen das Versionsbyte und wählen automatisch den passenden Decoder.
+Version 3 wendet einen Paeth-Spatial-Predictor an (Vorhersage jedes Pixels aus den Nachbarn links, oben und oben-links) bevor Deflate komprimiert. Version 4 behält diesen Codec, speichert aber nur das Rechteck ohne Hintergrund; der Decoder füllt das Panel mit der hinterlegten Palettenfarbe. Ältere Firmware weist v4 zurück. Neue Firmware und die Web-UI erkennen das Versionsbyte und wählen den passenden Decoder.
 
 [Zurück zur Hauptseite](../README.md).

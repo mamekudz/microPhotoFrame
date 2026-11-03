@@ -77,6 +77,110 @@ export function ApplyOptimizeBias(settings, raw) {
     return next;
 }
 
+/** Tight box of non-dark, non-transparent pixels. Returns [x, y, w, h] or null. */
+export function ContentBBoxFromRgba(data, w, h, options = {}) {
+    if (!data || !(w > 0) || !(h > 0)) return null;
+    const ch = options.channels || 4;
+    const lumMin = Number.isFinite(options.lumMin) ? options.lumMin : 10;
+    const aMin = Number.isFinite(options.aMin) ? options.aMin : 16;
+    let minX = w;
+    let minY = h;
+    let maxX = 0;
+    let maxY = 0;
+    let n = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * ch;
+            const a = ch === 4 ? data[i + 3] : 255;
+            const lum = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+            if (a >= aMin && lum >= lumMin) {
+                n++;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    if (n < 16 || maxX < minX) return null;
+    return [minX, minY, maxX - minX + 1, maxY - minY + 1];
+}
+
+/**
+ * Contain the padded subject in destW×destH, centered (letterbox).
+ * Used so a square animal stays centered in landscape instead of a wide cover crop.
+ */
+export function SubjectFitRect(bbox, imgW, imgH, destW, destH, pad = 0.16) {
+    if (!bbox || bbox.length < 4 || !(imgW > 0) || !(imgH > 0) || !(destW > 0) || !(destH > 0)) {
+        return null;
+    }
+    const bx = Number(bbox[0]);
+    const by = Number(bbox[1]);
+    const bw = Number(bbox[2]);
+    const bh = Number(bbox[3]);
+    if (!(bw > 1) || !(bh > 1)) return null;
+    let sx = bx - bw * pad;
+    let sy = by - bh * pad;
+    let sw = bw * (1 + 2 * pad);
+    let sh = bh * (1 + 2 * pad);
+    if (sx < 0) {
+        sw += sx;
+        sx = 0;
+    }
+    if (sy < 0) {
+        sh += sy;
+        sy = 0;
+    }
+    if (sx + sw > imgW) sw = imgW - sx;
+    if (sy + sh > imgH) sh = imgH - sy;
+    if (!(sw > 1) || !(sh > 1)) return null;
+    const scale = Math.min(destW / sw, destH / sh);
+    const dw = sw * scale;
+    const dh = sh * scale;
+    return {
+        sx, sy, sw, sh,
+        dx: (destW - dw) / 2,
+        dy: (destH - dh) / 2,
+        dw, dh
+    };
+}
+
+/**
+ * Zoom so the subject bbox (+ padding) fills the panel crop.
+ * zoom=1 is the usual cover crop of the full image.
+ */
+export function ZoomToSubject(bbox, imgW, imgH, targetAspect = 0, options = {}) {
+    if (!bbox || bbox.length < 4 || !(imgW > 0) || !(imgH > 0)) return 1;
+    const bw = Number(bbox[2]);
+    const bh = Number(bbox[3]);
+    if (!(bw > 1) || !(bh > 1)) return 1;
+    const pad = Number.isFinite(options.pad) ? options.pad : 0.16;
+    const maxZoom = Number.isFinite(options.maxZoom) ? options.maxZoom : 4;
+    let coverW = imgW;
+    let coverH = imgH;
+    const aspect = targetAspect > 0 ? targetAspect : (imgW / imgH);
+    if (aspect > 0) {
+        const imgAspect = imgW / imgH;
+        if (imgAspect > aspect) coverW = imgH * aspect;
+        else coverH = imgW / aspect;
+    }
+    const pw = bw * (1 + 2 * pad);
+    const ph = bh * (1 + 2 * pad);
+    let cropW;
+    let cropH;
+    if (pw / ph > aspect) {
+        cropW = pw;
+        cropH = pw / aspect;
+    } else {
+        cropH = ph;
+        cropW = ph * aspect;
+    }
+    cropW = Math.min(cropW, coverW);
+    cropH = Math.min(cropH, coverH);
+    if (!(cropW > 0) || !(cropH > 0)) return 1;
+    return round1(clamp(Math.min(coverW / cropW, coverH / cropH), 1, maxZoom));
+}
+
 function round1(v) {
     return Math.round(v * 10) / 10;
 }
@@ -87,6 +191,57 @@ function hexRgb(hex) {
     if (c.length === 3) c = c.split('').map((x) => x + x).join('');
     const v = parseInt(c, 16);
     return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+}
+
+function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map((v) => {
+        const n = Math.max(0, Math.min(255, Math.round(v)));
+        return n.toString(16).padStart(2, '0');
+    }).join('');
+}
+
+function medianOf(values) {
+    const a = values.slice().sort((x, y) => x - y);
+    return a[Math.floor(a.length / 2)];
+}
+
+/**
+ * Dominant color of the image border (letterbox fill).
+ * Near-black / near-white snap so e-ink padding stays clean.
+ */
+export function InferBackgroundColor(data, w, h, options = {}) {
+    if (!data || !(w > 0) || !(h > 0)) return null;
+    const ch = options.channels || 4;
+    const step = Math.max(1, Math.floor(Math.min(w, h) / 64));
+    const border = Math.max(1, Math.min(12, Math.round(Math.min(w, h) * 0.06)));
+    const rs = [];
+    const gs = [];
+    const bs = [];
+    for (let y = 0; y < h; y += step) {
+        for (let x = 0; x < w; x += step) {
+            if (x >= border && y >= border && x < w - border && y < h - border) continue;
+            const i = (y * w + x) * ch;
+            const a = ch === 4 ? data[i + 3] : 255;
+            if (a < 16) {
+                rs.push(0);
+                gs.push(0);
+                bs.push(0);
+                continue;
+            }
+            rs.push(data[i]);
+            gs.push(data[i + 1]);
+            bs.push(data[i + 2]);
+        }
+    }
+    if (rs.length < 4) return null;
+    const r = medianOf(rs);
+    const g = medianOf(gs);
+    const b = medianOf(bs);
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    if (lum <= 36) return '#000000';
+    if (lum >= 220 && spread < 40) return '#ffffff';
+    return rgbToHex(r, g, b);
 }
 
 /** @returns {'bw'|'gray'|'tri'|'quad'|'e6'} */
@@ -394,14 +549,22 @@ export function SuggestEinkSettings(stats, display, extras = {}) {
         sat = clamp(sat, 1.15, 2.5);
     }
 
-    let zoom = 1.0;
     const bbox = extras.bbox;
     const w = stats.width || 0;
     const h = stats.height || 0;
+    const dw = extras.displayWidth || (display && display.width) || 0;
+    const dh = extras.displayHeight || (display && display.height) || 0;
+    const targetAspect = (dw > 0 && dh > 0) ? (dw / dh) : 0;
+    const cropToSubject = extras.cropToSubject !== false;
+    let zoom = 1.0;
     if (bbox && w && h) {
-        const frac = Math.max(bbox[2] / w, bbox[3] / h);
-        if (frac > 0 && frac < 0.55) {
-            zoom = clamp(0.42 / frac, 1.0, 1.45);
+        if (cropToSubject) {
+            zoom = ZoomToSubject(bbox, w, h, targetAspect);
+        } else {
+            const frac = Math.max(bbox[2] / w, bbox[3] / h);
+            if (frac > 0 && frac < 0.55) {
+                zoom = clamp(0.42 / frac, 1.0, 1.45);
+            }
         }
     }
 
@@ -460,6 +623,41 @@ export async function OptimizeImageForEink(img, options = {}) {
         }
     }
 
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    let cutBgrdColor = null;
+    if (options.cropToSubject !== false && srcW && srcH && typeof document !== 'undefined') {
+        try {
+            const maxEdge = 240;
+            const sc = Math.min(1, maxEdge / Math.max(srcW, srcH));
+            const cw = Math.max(1, Math.round(srcW * sc));
+            const ch = Math.max(1, Math.round(srcH * sc));
+            const cnv = document.createElement('canvas');
+            cnv.width = cw;
+            cnv.height = ch;
+            const ctx = cnv.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, cw, ch);
+            const pixels = ctx.getImageData(0, 0, cw, ch).data;
+            cutBgrdColor = InferBackgroundColor(pixels, cw, ch);
+            const content = ContentBBoxFromRgba(pixels, cw, ch);
+            if (content) {
+                const box = [content[0] / sc, content[1] / sc, content[2] / sc, content[3] / sc];
+                const contentFrac = (box[2] * box[3]) / (srcW * srcH);
+                const aiFrac = focus.bbox
+                    ? (focus.bbox[2] * focus.bbox[3]) / (srcW * srcH)
+                    : 1;
+                if (contentFrac > 0.01 && contentFrac < 0.6 && contentFrac <= aiFrac * 1.05) {
+                    focus.bbox = box;
+                    focus.cutSpotX = clamp((box[0] + box[2] / 2) / srcW, 0, 1);
+                    focus.cutSpotY = clamp((box[1] + box[3] / 2) / srcH, 0, 1);
+                    if (!focus.label) focus.label = 'content';
+                }
+            }
+        } catch (err) {
+            console.warn('EInkAutoOptimize: content bbox skipped', err);
+        }
+    }
+
     const stats = SampleImageStats(img, 160, { bbox: focus.bbox });
     const settings = ApplyOptimizeBias(SuggestEinkSettings(stats, display, {
         bbox: focus.bbox,
@@ -469,13 +667,17 @@ export async function OptimizeImageForEink(img, options = {}) {
         subjectP75: stats.subjectP75,
         subjectDarkFrac: stats.subjectDarkFrac,
         subjectBrightFrac: stats.subjectBrightFrac,
-        subjectFrac: stats.subjectFrac
+        subjectFrac: stats.subjectFrac,
+        cropToSubject: options.cropToSubject !== false,
+        displayWidth: display && display.width,
+        displayHeight: display && display.height
     }), options.style ?? options.optimize);
     return {
         settings: {
             ...settings,
             cutSpotX: focus.cutSpotX,
-            cutSpotY: focus.cutSpotY
+            cutSpotY: focus.cutSpotY,
+            ...(cutBgrdColor ? { cutBgrdColor } : {})
         },
         stats,
         focus

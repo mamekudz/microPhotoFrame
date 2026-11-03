@@ -158,7 +158,7 @@ const registerDeviceEcho = (input) => {
     }
 };
 
-// Image-Orientierung erkennen (Legacy und Versionen 1–3: gleicher 4-Byte-Header)
+// Image-Orientierung erkennen (Legacy und Versionen 1–4)
 const detectImageOrientation = (rawBuffer) => {
     if (rawBuffer.length < 4) return 0;
     
@@ -166,9 +166,9 @@ const detectImageOrientation = (rawBuffer) => {
     const thirdByte = rawBuffer[2];
     const fourthByte = rawBuffer[3];
     
-    // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
-    if (firstByte === 1 || firstByte === 2 || firstByte === 3) {
-        return fourthByte;
+    // v1 LZW, v2 Deflate, v3 Paeth+Deflate, v4 compact: [version, displayId, dither, flags, ...]
+    if (firstByte >= 1 && firstByte <= 4) {
+        return fourthByte & 1; // bit0 = portrait; v4 bits1–4 = background index
     }
     // Legacy: displayId, dither, orient, minCodeSize...
     return thirdByte;
@@ -180,7 +180,7 @@ const detectDisplayIdFromImage = (rawBuffer) => {
     
     const firstByte = rawBuffer[0];
     
-    if (rawBuffer.length >= 2 && (firstByte === 1 || firstByte === 2 || firstByte === 3)) {
+    if (rawBuffer.length >= 2 && firstByte >= 1 && firstByte <= 4) {
         return String.fromCharCode(rawBuffer[1]);
     }
     // Legacy: erstes Byte ist displayId

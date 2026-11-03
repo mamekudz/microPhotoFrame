@@ -27,7 +27,7 @@
     <header class="global-header">
         <div class="header-top">
             <div class="header-logo">
-                <img src="./webassets/Logo.png" alt="Logo" />
+                <img src="./webassets/LogoPure.png?v=logopure1" alt="" />
                 <img src="./webassets/LogoText.png?v=logotext1" alt="µPhotoFrame" />
             </div>
             <div class="header-lang">
@@ -90,6 +90,7 @@
             </div>
             <input type="hidden" id="displayID" value="EINK_SPECTRA6_730_sq_800x480" />
             <div class="control-row"><label data-i18n='Background:<context="ui"/>'>Background:</label><input type="color" id="bgrdColor" value="#ffffff" oninput="window.UpdatePreview()" /></div>
+            <p style="font-size:0.8rem;color:#666;margin:0 0 8px 0;" data-i18n='Empty areas are filled from the image border (black for studio shots, white for paper).<context="ui"/>'>Empty areas are filled from the image border (black for studio shots, white for paper).</p>
             <hr>
             <div class="control-row"><label data-i18n='Saturation:<context="ui"/>'>Saturation:</label><input type="range" id="saturation" min="0" max="3" step="0.1" value="1.8" oninput="window.UpdatePreview()" /><span id="val-saturation">1.8</span></div>
             <div class="control-row"><label data-i18n='Contrast:<context="ui"/>'>Contrast:</label><input type="range" id="contrast" min="0.4" max="2.5" step="0.1" value="1.4" oninput="window.UpdatePreview()" /><span id="val-contrast">1.4</span></div>
@@ -97,6 +98,11 @@
             <div class="control-row"><label data-i18n='White Pt:<context="ui"/>'>White Pt:</label><input type="range" id="whitepoint" min="0.4" max="2.5" step="0.1" value="1.1" oninput="window.UpdatePreview()" /><span id="val-whitepoint">1.1</span></div>
             <hr>
             <div class="control-row"><label data-i18n='Zoom:<context="ui"/>'>Zoom:</label><input type="range" id="zoom" min="0.1" max="5" step="0.1" value="1.0" oninput="window.UpdatePreview()" /><span id="val-zoom">1.0</span></div>
+            <div class="control-row" style="align-items:center;">
+                <label for="cropToSubject" data-i18n='Crop to subject:<context="ui"/>'>Crop to subject:</label>
+                <input type="checkbox" id="cropToSubject" checked onchange="window.SyncCropToSubject('cropToSubject')" />
+            </div>
+            <p style="font-size:0.8rem;color:#666;margin:0 0 8px 0;" data-i18n='Zooms so the detected subject fills the frame. Helps when animals or objects sit small on a large background.<context="ui"/>'>Zooms so the detected subject fills the frame. Helps when animals or objects sit small on a large background.</p>
             <div class="control-row"><label data-i18n='Spot X:<context="ui"/>'>Spot X:</label><input type="range" id="cutSpotX" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotX">0.5</span></div>
             <div class="control-row"><label data-i18n='Spot Y:<context="ui"/>'>Spot Y:</label><input type="range" id="cutSpotY" min="0" max="1" step="0.01" value="0.5" oninput="window.UpdatePreview()" /><span id="val-cutSpotY">0.5</span></div>
 
@@ -275,6 +281,10 @@
                 <input type="checkbox" id="autoOptimizeAdd" checked onchange="window.SyncAutoOptimize('autoOptimizeAdd')" />
             </div>
             <div class="control-row" style="align-items:center;">
+                <label for="cropToSubjectAdd" data-i18n='Crop to subject:<context="ui"/>'>Crop to subject:</label>
+                <input type="checkbox" id="cropToSubjectAdd" checked onchange="window.SyncCropToSubject('cropToSubjectAdd')" />
+            </div>
+            <div class="control-row" style="align-items:center;">
                 <label for="optimizeStyleAdd" data-i18n='Look:<context="ui"/>'>Look:</label>
                 <select id="optimizeStyleAdd" onchange="window.SyncOptimizeStyle('optimizeStyleAdd')" style="flex:1">
                     <option value="balanced" data-i18n='Balanced<context="ui"/>'>Balanced</option>
@@ -284,7 +294,7 @@
                     <option value="soft" data-i18n='Softer<context="ui"/>'>Softer</option>
                 </select>
             </div>
-            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;" data-i18n='Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.<context="ui"/>'>Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.</p>
+            <p style="font-size:0.9rem; color:#666; margin-bottom:15px;" data-i18n='Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Crop to subject zooms small objects to fill the frame. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.<context="ui"/>'>Select multiple images. Each image is processed with AI spot detection. With Auto-optimize on, saturation, contrast, black/white point and zoom are chosen per image for the show display. Crop to subject zooms small objects to fill the frame. Store both aspects, or only one to save space — the frame then uses that single file in every orientation.</p>
             <button id="btnProcessAndAddPhotos" class="btn-action save-btn" onclick="window.ProcessAndAddPhotos()">📸 <span data-i18n='Process and Add Photos<context="ui"/>'>Process and Add Photos</span></button>
             <div id="addPhotosMessage" style="margin-top:15px; padding:10px; border-radius:4px; display:none;"></div>
             <div id="addPhotosProgress" style="margin-top:15px; display:none;">
@@ -369,7 +379,7 @@
                     <option value="soft" data-i18n='Softer<context="ui"/>'>Softer</option>
                 </select>
             </div>
-            <p style="font-size:0.8rem;color:#666;margin:0 0 12px 0;" data-i18n='Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 }. A choice here overrides that.<context="ui"/>'>Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 }. A choice here overrides that.</p>
+            <p style="font-size:0.8rem;color:#666;margin:0 0 12px 0;" data-i18n='Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 } and "cropToSubject": true. A look choice here overrides the catalog optimize.<context="ui"/>'>Catalog JSON may set "optimize": "vivid" or { "contrast": 10, "saturation": 30 } and "cropToSubject": true. A look choice here overrides the catalog optimize.</p>
             <button class="btn-action save-btn" onclick="window.CreateAutoShow()">⚙ <span data-i18n='Create AutoShow<context="ui"/>'>Create AutoShow</span></button>
             <div id="autoShowProgress" style="display:none;margin-top:12px;">
                 <div id="autoShowProgressBar" style="height:8px;background:#2ecc71;width:0;"></div>
@@ -509,6 +519,6 @@
 
 
     <!-- Application module -->
-    <script type="module" src="./src/app.mjs?v=tone14"></script>
+    <script type="module" src="./src/app.mjs?v=nocropshow"></script>
 
 </html>

@@ -924,10 +924,10 @@ function saveShowImage(&$rest) {
             $currentOrientation = null;
             $displayId = null;
             
-            if (($firstByte === 1 || $firstByte === 2 || $firstByte === 3) && strlen($rawdata) >= 4) {
-                // Version 1 (LZW), 2 (Deflate), 3 (Paeth+Deflate): [version, displayId, dither, orient, ...]
+            if ($firstByte >= 1 && $firstByte <= 4 && strlen($rawdata) >= 4) {
+                // v1 LZW, v2 Deflate, v3 Paeth+Deflate, v4 compact: [version, displayId, dither, flags, ...]
                 $displayId = chr(ord($rawdata[1]));
-                $currentOrientation = ord($rawdata[3]);
+                $currentOrientation = ord($rawdata[3]) & 1;
             } else {
                 // Old format: [displayId, dither, orient, minCodeSize, ...]
                 $displayId = chr($firstByte);
